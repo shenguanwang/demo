@@ -988,6 +988,121 @@ textarea {
   margin-top: 16px;
 }
 
+.discovery-task-center .panel-head {
+  align-items: center;
+}
+
+.ghost.compact {
+  min-height: 36px;
+  padding: 0 14px;
+  font-size: 12px;
+}
+
+.discovery-job-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.discovery-job {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: center;
+  padding: 15px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-soft);
+}
+
+.discovery-job-main {
+  min-width: 0;
+}
+
+.discovery-job-title,
+.discovery-job-meta,
+.discovery-job-status {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.discovery-job-title strong {
+  font-size: 14px;
+}
+
+.discovery-job-title span,
+.discovery-job-meta span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.discovery-job-status {
+  margin-top: 8px;
+}
+
+.discovery-job-status p {
+  margin: 0;
+  color: #59636f;
+  font-size: 12px;
+}
+
+.job-state {
+  display: inline-flex;
+  align-items: center;
+  min-height: 23px;
+  padding: 0 9px;
+  border-radius: 999px;
+  background: #eceff2;
+  color: #66717c;
+  font-size: 10px;
+  font-weight: 800;
+}
+
+.job-state.running,
+.job-state.queued {
+  background: #f7f0e3;
+  color: #8d681e;
+}
+
+.job-state.completed {
+  background: #e9f7f1;
+  color: #087452;
+}
+
+.job-state.failed {
+  background: #fcebea;
+  color: #a03830;
+}
+
+.discovery-job-action {
+  min-width: 96px;
+  min-height: 38px;
+  padding: 0 13px;
+  border-radius: 9px;
+  background: #111820;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.discovery-job-action[disabled] {
+  cursor: default;
+  background: #e7eaed;
+  color: #8c959e;
+}
+
+@media (max-width: 700px) {
+  .discovery-job {
+    grid-template-columns: 1fr;
+  }
+
+  .discovery-job-action {
+    width: 100%;
+  }
+}
+
 .social-prospecting .panel-head {
   justify-content: space-between;
 }

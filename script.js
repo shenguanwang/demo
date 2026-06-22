@@ -133,6 +133,8 @@ let lastQuote = null;
 let cloudStateReady = false;
 let cloudSaveTimer = null;
 let cloudSaveChain = Promise.resolve();
+let discoveryJobs = [];
+let discoveryJobsTimer = null;
 
 const productProfiles = {
   "问界 M9": {
@@ -1482,6 +1484,160 @@ function showSection(id) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+function discoverySourceLabel(value) {
+  return {
+    combined: "综合搜索",
+    social: "社媒综合",
+    google: "Google Maps",
+    osm: "OpenStreetMap",
+    dealer: "车商官网 / 行业目录",
+    instagram: "Instagram",
+    facebook: "Facebook",
+    tiktok: "TikTok",
+    youtube: "YouTube",
+    linkedin: "LinkedIn"
+  }[value] || value || "综合搜索";
+}
+
+function formatJobTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function renderDiscoveryJobs() {
+  const box = $("#discoveryJobList");
+  if (!box) return;
+  const stateLabels = {
+    queued: "排队中",
+    running: "运行中",
+    completed: "已完成",
+    failed: "失败"
+  };
+  box.innerHTML = discoveryJobs.length ? discoveryJobs.map((job) => {
+    const count = Number(job.result?.count || job.result?.leads?.length || 0);
+    const canImport = job.status === "completed" && !job.imported && count > 0;
+    const actionLabel = job.imported
+      ? "已导入"
+      : canImport
+        ? `导入 ${count} 条`
+        : job.status === "failed"
+          ? "执行失败"
+          : job.status === "completed"
+            ? "无新线索"
+            : `${Number(job.progress || 0)}%`;
+    return `
+      <article class="discovery-job">
+        <div class="discovery-job-main">
+          <div class="discovery-job-title">
+            <strong>${escapeHtml(job.country || "未指定市场")} · ${escapeHtml(job.model || "未指定车型")}</strong>
+            <span>${escapeHtml(discoverySourceLabel(job.sourceMode))}</span>
+          </div>
+          <div class="discovery-job-meta">
+            <span>${escapeHtml(formatJobTime(job.createdAt))}</span>
+            ${job.status === "completed" ? `<span>发现 ${count} 条</span>` : ""}
+          </div>
+          <div class="discovery-job-status">
+            <span class="job-state ${escapeHtml(job.status)}">${escapeHtml(stateLabels[job.status] || job.status)}</span>
+            <p>${escapeHtml(job.error || job.message || "等待云端处理")}</p>
+          </div>
+        </div>
+        <button class="discovery-job-action" type="button"
+          data-import-job="${escapeHtml(job.id)}" ${canImport ? "" : "disabled"}>
+          ${escapeHtml(actionLabel)}
+        </button>
+      </article>
+    `;
+  }).join("") : `<p class="empty">暂无云端获客任务。</p>`;
+}
+
+async function loadDiscoveryJobs() {
+  const response = await fetch("/api/discover/jobs", { cache: "no-store" });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  discoveryJobs = Array.isArray(result.jobs) ? result.jobs : [];
+  renderDiscoveryJobs();
+  const active = discoveryJobs.find((job) => ["queued", "running"].includes(job.status));
+  if (active) {
+    setFinderProgress({
+      percent: Math.max(5, Number(active.progress || 5)),
+      stage: active.stage || "search",
+      state: "running",
+      title: "已恢复云端获客任务",
+      elapsed: "后台持续运行",
+      message: active.message || "任务仍在云端执行，可以关闭当前页面。"
+    });
+  }
+  return discoveryJobs;
+}
+
+async function markDiscoveryImported(jobId) {
+  if (!jobId) return;
+  await fetch("/api/discover/mark-imported", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ id: jobId })
+  }).catch(() => undefined);
+  await loadDiscoveryJobs().catch(() => undefined);
+}
+
+function mergeDiscoveryResult(result) {
+  const found = Array.isArray(result?.leads) ? result.leads : [];
+  const existing = new Set(
+    [...reviewLeads, ...customers].map((lead) => `${lead.company}|${lead.source}`.toLowerCase())
+  );
+  const fresh = found
+    .map(normalizeLead)
+    .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()));
+  if (fresh.length) {
+    reviewLeads = [...fresh, ...reviewLeads];
+    refreshAllLeadViews();
+  }
+  return { found, fresh };
+}
+
+async function importDiscoveryJob(jobId) {
+  const button = document.querySelector(`[data-import-job="${CSS.escape(jobId)}"]`);
+  if (button) {
+    button.disabled = true;
+    button.textContent = "正在导入";
+  }
+  try {
+    const response = await fetch(`/api/discover/status?${new URLSearchParams({ id: jobId })}`, {
+      cache: "no-store"
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    const merged = mergeDiscoveryResult(result.job?.result || {});
+    await markDiscoveryImported(jobId);
+    setFinderProgress({
+      percent: 100,
+      stage: "done",
+      state: "complete",
+      title: `已导入 ${merged.fresh.length} 条新线索`,
+      message: merged.fresh.length
+        ? "任务结果已进入线索审核，并已同步到云端客户数据。"
+        : "任务结果中的线索已存在，没有重复导入。"
+    });
+  } catch (error) {
+    setFinderProgress({
+      percent: 100,
+      stage: "done",
+      state: "error",
+      title: "任务结果导入失败",
+      message: error.message
+    });
+    await loadDiscoveryJobs().catch(() => undefined);
+  }
+}
+
 async function runCloudDiscovery(data, words, onProgress) {
   const startResponse = await fetch("/api/discover/start", {
     method: "POST",
@@ -1513,13 +1669,26 @@ async function runCloudDiscovery(data, words, onProgress) {
     }
     const job = statusResult.job || {};
     if (typeof onProgress === "function") onProgress(job);
-    if (job.status === "completed") return job.result || { ok: true, leads: [], count: 0 };
+    if (job.status === "completed") {
+      return { ...(job.result || { ok: true, leads: [], count: 0 }), __jobId: job.id };
+    }
     if (job.status === "failed") throw new Error(job.error || job.message || "云端搜索失败");
   }
   throw new Error("云端搜索超过 12 分钟，请缩小搜索范围后重试");
 }
 
 function bindForms() {
+  $("#refreshDiscoveryJobs")?.addEventListener("click", () => {
+    loadDiscoveryJobs().catch((error) => {
+      $("#discoveryJobList").innerHTML = `<p class="empty">任务读取失败：${escapeHtml(error.message)}</p>`;
+    });
+  });
+
+  $("#discoveryJobList")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-import-job]");
+    if (button && !button.disabled) importDiscoveryJob(button.dataset.importJob);
+  });
+
   $("#countryGrid").addEventListener("click", (event) => {
     const card = event.target.closest("[data-country]");
     if (card) chooseMarket(card.dataset.country);
@@ -1544,11 +1713,13 @@ function bindForms() {
     const searchProgress = startFinderSearchProgress();
     runCloudDiscovery(data, words, (job) => {
       setFinderStatus(job.message || "云端正在检索公开商业来源，无需启动本地工作台。");
+      loadDiscoveryJobs().catch(() => undefined);
     })
       .then(async (result) => {
         const elapsedSeconds = searchProgress.stop();
-        const found = Array.isArray(result.leads) ? result.leads : [];
+        const { found, fresh } = mergeDiscoveryResult(result);
         if (!found.length) {
+          await markDiscoveryImported(result.__jobId);
           setFinderProgress({
             percent: 100,
             stage: "done",
@@ -1559,22 +1730,7 @@ function bindForms() {
           });
           return;
         }
-        const existing = new Set([...reviewLeads, ...customers].map((lead) => `${lead.company}|${lead.source}`.toLowerCase()));
-        const fresh = found.map(normalizeLead).filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()));
-        reviewLeads = [...fresh, ...reviewLeads];
-        refreshAllLeadViews();
-        const sourceLabel = {
-          combined: "综合搜索",
-          social: "社媒综合",
-          google: "Google Maps 企业数据",
-          osm: "OpenStreetMap 地图",
-          dealer: "车商官网 / 汽车行业目录",
-          instagram: "Instagram",
-          facebook: "Facebook",
-          tiktok: "TikTok",
-          youtube: "YouTube",
-          linkedin: "LinkedIn"
-        }[data.sourceMode] || "综合搜索";
+        const sourceLabel = discoverySourceLabel(data.sourceMode);
         const freshnessLabel = data.freshness === "all" ? "不限时间" : `最近 ${data.freshness} 天`;
         setFinderProgress({
           percent: 62,
@@ -1584,6 +1740,7 @@ function bindForms() {
           message: `${sourceLabel} · ${freshnessLabel}：其中 ${fresh.length} 条为新线索，开始自动全网核验。`
         });
         if (!fresh.length) {
+          await markDiscoveryImported(result.__jobId);
           setFinderProgress({
             percent: 100,
             stage: "done",
@@ -1594,6 +1751,7 @@ function bindForms() {
           });
           return;
         }
+        await markDiscoveryImported(result.__jobId);
         setFinderProgress({
           percent: 100,
           stage: "done",
@@ -1926,6 +2084,14 @@ async function init() {
   renderKpis();
   bindNavigation();
   bindForms();
+  loadDiscoveryJobs().catch((error) => {
+    if ($("#discoveryJobList")) {
+      $("#discoveryJobList").innerHTML = `<p class="empty">任务读取失败：${escapeHtml(error.message)}</p>`;
+    }
+  });
+  discoveryJobsTimer = window.setInterval(() => {
+    loadDiscoveryJobs().catch(() => undefined);
+  }, 5_000);
   updateSocialProspectingQueries();
   importSocialCaptures();
   setInterval(importSocialCaptures, 4_000);

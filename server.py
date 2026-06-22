@@ -33,7 +33,7 @@ SOCIAL_CAPTURE_FILE = SOCIAL_CAPTURE_DIR / "captures.json"
 SOCIAL_CAPTURE_LOCK = threading.Lock()
 DISCOVERY_JOBS: dict[str, dict] = {}
 DISCOVERY_JOBS_LOCK = threading.Lock()
-DISCOVERY_JOB_TTL = 60 * 60
+DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 SQLITE_STATE_FILE = Path(os.environ.get("STATE_DATABASE_PATH") or (ROOT / "workbench-state.db"))
 STATE_LOCK = threading.Lock()
@@ -69,6 +69,23 @@ def initialize_state_store() -> None:
                     )
                     """
                 )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS discovery_jobs (
+                        job_id TEXT PRIMARY KEY,
+                        payload JSONB NOT NULL,
+                        status TEXT NOT NULL,
+                        stage TEXT NOT NULL,
+                        progress INTEGER NOT NULL,
+                        message TEXT NOT NULL,
+                        result JSONB,
+                        error TEXT NOT NULL DEFAULT '',
+                        imported BOOLEAN NOT NULL DEFAULT FALSE,
+                        created_at TIMESTAMPTZ NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL
+                    )
+                    """
+                )
         return
     SQLITE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(SQLITE_STATE_FILE) as connection:
@@ -78,6 +95,23 @@ def initialize_state_store() -> None:
                 workspace_key TEXT PRIMARY KEY,
                 state TEXT NOT NULL,
                 version INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS discovery_jobs (
+                job_id TEXT PRIMARY KEY,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                progress INTEGER NOT NULL,
+                message TEXT NOT NULL,
+                result TEXT,
+                error TEXT NOT NULL DEFAULT '',
+                imported INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
@@ -225,26 +259,184 @@ def verify_session_token(token: str) -> bool:
 
 
 def cleanup_discovery_jobs() -> None:
-    cutoff = datetime.now(timezone.utc).timestamp() - DISCOVERY_JOB_TTL
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=DISCOVERY_JOB_TTL)
+    initialize_state_store()
     with DISCOVERY_JOBS_LOCK:
-        expired = [
-            job_id
-            for job_id, job in DISCOVERY_JOBS.items()
-            if float(job.get("updatedAtTimestamp", 0)) < cutoff
-        ]
-        for job_id in expired:
-            DISCOVERY_JOBS.pop(job_id, None)
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM discovery_jobs WHERE updated_at < %s", (cutoff,))
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                connection.execute(
+                    "DELETE FROM discovery_jobs WHERE updated_at < ?",
+                    (cutoff.isoformat(timespec="seconds"),),
+                )
+
+
+def discovery_job_public(job: dict) -> dict:
+    payload = job.get("payload") or {}
+    return {
+        "id": job.get("id", ""),
+        "status": job.get("status", "queued"),
+        "stage": job.get("stage", "search"),
+        "progress": int(job.get("progress", 0)),
+        "message": job.get("message", ""),
+        "result": job.get("result"),
+        "error": job.get("error", ""),
+        "imported": bool(job.get("imported", False)),
+        "createdAt": job.get("createdAt", ""),
+        "updatedAt": job.get("updatedAt", ""),
+        "country": str(payload.get("country", "")),
+        "model": str(payload.get("model", "")),
+        "sourceMode": str(payload.get("sourceMode", "")),
+        "goal": str(payload.get("goal", "")),
+    }
+
+
+def save_discovery_job(job: dict) -> None:
+    initialize_state_store()
+    payload_json = json.dumps(job.get("payload") or {}, ensure_ascii=False)
+    result_json = (
+        json.dumps(job.get("result"), ensure_ascii=False)
+        if job.get("result") is not None
+        else None
+    )
+    with DISCOVERY_JOBS_LOCK:
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO discovery_jobs (
+                            job_id, payload, status, stage, progress, message,
+                            result, error, imported, created_at, updated_at
+                        )
+                        VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)
+                        ON CONFLICT (job_id) DO UPDATE SET
+                            payload = EXCLUDED.payload,
+                            status = EXCLUDED.status,
+                            stage = EXCLUDED.stage,
+                            progress = EXCLUDED.progress,
+                            message = EXCLUDED.message,
+                            result = EXCLUDED.result,
+                            error = EXCLUDED.error,
+                            imported = EXCLUDED.imported,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            job["id"],
+                            payload_json,
+                            job["status"],
+                            job["stage"],
+                            int(job["progress"]),
+                            job["message"],
+                            result_json,
+                            job.get("error", ""),
+                            bool(job.get("imported", False)),
+                            job["createdAt"],
+                            job["updatedAt"],
+                        ),
+                    )
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO discovery_jobs (
+                        job_id, payload, status, stage, progress, message,
+                        result, error, imported, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(job_id) DO UPDATE SET
+                        payload = excluded.payload,
+                        status = excluded.status,
+                        stage = excluded.stage,
+                        progress = excluded.progress,
+                        message = excluded.message,
+                        result = excluded.result,
+                        error = excluded.error,
+                        imported = excluded.imported,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        job["id"],
+                        payload_json,
+                        job["status"],
+                        job["stage"],
+                        int(job["progress"]),
+                        job["message"],
+                        result_json,
+                        job.get("error", ""),
+                        1 if job.get("imported") else 0,
+                        job["createdAt"],
+                        job["updatedAt"],
+                    ),
+                )
+
+
+def row_to_discovery_job(row) -> dict:
+    payload = row[1] if isinstance(row[1], dict) else json.loads(row[1] or "{}")
+    result = row[6] if isinstance(row[6], dict) else json.loads(row[6]) if row[6] else None
+    created_at = row[9].isoformat() if hasattr(row[9], "isoformat") else str(row[9])
+    updated_at = row[10].isoformat() if hasattr(row[10], "isoformat") else str(row[10])
+    return {
+        "id": row[0],
+        "payload": payload,
+        "status": row[2],
+        "stage": row[3],
+        "progress": int(row[4]),
+        "message": row[5],
+        "result": result,
+        "error": row[7] or "",
+        "imported": bool(row[8]),
+        "createdAt": created_at,
+        "updatedAt": updated_at,
+    }
+
+
+def load_discovery_job(job_id: str) -> dict | None:
+    initialize_state_store()
+    query = (
+        "SELECT job_id, payload, status, stage, progress, message, result, error, "
+        "imported, created_at, updated_at FROM discovery_jobs WHERE job_id = "
+    )
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query + "%s", (job_id,))
+                row = cursor.fetchone()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            row = connection.execute(query + "?", (job_id,)).fetchone()
+    return row_to_discovery_job(row) if row else None
+
+
+def list_discovery_jobs(limit: int = 20) -> list[dict]:
+    cleanup_discovery_jobs()
+    query = (
+        "SELECT job_id, payload, status, stage, progress, message, result, error, "
+        "imported, created_at, updated_at FROM discovery_jobs "
+        "ORDER BY created_at DESC LIMIT "
+    )
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query + "%s", (limit,))
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute(query + "?", (limit,)).fetchall()
+    return [discovery_job_public(row_to_discovery_job(row)) for row in rows]
 
 
 def update_discovery_job(job_id: str, **changes) -> None:
     now = datetime.now(timezone.utc)
-    with DISCOVERY_JOBS_LOCK:
-        job = DISCOVERY_JOBS.get(job_id)
-        if not job:
-            return
-        job.update(changes)
-        job["updatedAt"] = now.isoformat(timespec="seconds")
-        job["updatedAtTimestamp"] = now.timestamp()
+    job = load_discovery_job(job_id)
+    if not job:
+        return
+    job.update(changes)
+    job["updatedAt"] = now.isoformat(timespec="seconds")
+    save_discovery_job(job)
 
 
 def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
@@ -302,16 +494,18 @@ def create_discovery_job(payload: dict) -> dict:
     now = datetime.now(timezone.utc)
     job = {
         "id": job_id,
+        "payload": {key: value[0] for key, value in params.items()},
         "status": "queued",
         "stage": "search",
         "progress": 5,
         "message": "云端任务已创建，正在分配搜索资源。",
         "createdAt": now.isoformat(timespec="seconds"),
         "updatedAt": now.isoformat(timespec="seconds"),
-        "updatedAtTimestamp": now.timestamp(),
+        "result": None,
+        "error": "",
+        "imported": False,
     }
-    with DISCOVERY_JOBS_LOCK:
-        DISCOVERY_JOBS[job_id] = job
+    save_discovery_job(job)
     worker = threading.Thread(
         target=run_discovery_job,
         args=(job_id, params),
@@ -319,20 +513,52 @@ def create_discovery_job(payload: dict) -> dict:
         daemon=True,
     )
     worker.start()
-    return job.copy()
+    return discovery_job_public(job)
 
 
 def get_discovery_job(job_id: str) -> dict | None:
     cleanup_discovery_jobs()
-    with DISCOVERY_JOBS_LOCK:
-        job = DISCOVERY_JOBS.get(job_id)
-        if not job:
-            return None
-        return {
-            key: value
-            for key, value in job.items()
-            if key != "updatedAtTimestamp"
-        }
+    job = load_discovery_job(job_id)
+    return discovery_job_public(job) if job else None
+
+
+def mark_discovery_job_imported(job_id: str) -> dict | None:
+    job = load_discovery_job(job_id)
+    if not job:
+        return None
+    job["imported"] = True
+    job["updatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    save_discovery_job(job)
+    return discovery_job_public(job)
+
+
+def mark_interrupted_discovery_jobs() -> None:
+    initialize_state_store()
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    message = "服务更新期间任务被中断，请重新发起搜索。"
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE discovery_jobs
+                    SET status = 'failed', stage = 'done', progress = 100,
+                        message = %s, error = %s, updated_at = NOW()
+                    WHERE status IN ('queued', 'running')
+                    """,
+                    (message, message),
+                )
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            connection.execute(
+                """
+                UPDATE discovery_jobs
+                SET status = 'failed', stage = 'done', progress = 100,
+                    message = ?, error = ?, updated_at = ?
+                WHERE status IN ('queued', 'running')
+                """,
+                (message, message, now),
+            )
 
 
 COUNTRY_HINTS = {
@@ -2590,6 +2816,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             self.send_json(200, {"ok": True, "job": job})
             return
+        if parsed.path == "/api/discover/jobs":
+            if not self.require_auth(api=True):
+                return
+            try:
+                self.send_json(200, {"ok": True, "jobs": list_discovery_jobs()})
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if parsed.path in ("/", "/index.html") and not self.require_auth():
             return
         if parsed.path.startswith("/api/") and not self.require_auth(api=True):
@@ -2696,6 +2930,18 @@ class Handler(SimpleHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
+        if parsed.path == "/api/discover/mark-imported":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                job = mark_discovery_job_imported(str(payload.get("id", "")))
+                if not job:
+                    self.send_json(404, {"ok": False, "error": "获客任务不存在"})
+                    return
+                self.send_json(200, {"ok": True, "job": job})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
         if parsed.path != "/api/social-capture":
             self.send_error(404)
             return
@@ -2720,6 +2966,8 @@ class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
 
 
 if __name__ == "__main__":
+    initialize_state_store()
+    mark_interrupted_discovery_jobs()
     with ReusableThreadingTCPServer((HOST, PORT), Handler) as httpd:
         display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
         print(f"获客工作台已启动：http://{display_host}:{PORT}/index.html")
