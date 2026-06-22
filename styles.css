@@ -63,23 +63,17 @@ button {
 }
 
 .brand-mark {
-  display: grid;
   width: 44px;
   height: 44px;
-  place-items: center;
+  padding: 9px;
   border: 1px solid rgba(215, 181, 109, 0.35);
   background: linear-gradient(145deg, #d9b870 0%, #9b6f28 100%);
   border-radius: 13px;
-  color: #111820;
-  font-weight: 800;
+  fill: #111820;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.22);
 }
 
-.brand-mark span {
-  margin-left: 1px;
-  font-size: 9px;
-  vertical-align: top;
-}
+.brand-mark-accent { fill: rgba(255, 255, 255, 0.9); }
 
 .brand strong,
 .brand span {
@@ -192,6 +186,32 @@ button {
   color: #a4adb7;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.logout-button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  margin-top: 10px;
+  padding: 12px 15px;
+  color: #7f8994;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  font-size: 12px;
+  transition: 160ms ease;
+}
+
+.logout-button:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.07);
+  background: rgba(255, 255, 255, 0.045);
+}
+
+.logout-button b {
+  color: #c9a45d;
+  font-size: 14px;
 }
 
 .main {

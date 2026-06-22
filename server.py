@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import html
+import binascii
+import hashlib
+import hmac
 import json
 import os
 import re
+import secrets
 import socketserver
 import base64
 import threading
@@ -14,6 +18,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler
+from http.cookies import SimpleCookie
 from pathlib import Path
 
 
@@ -25,6 +30,41 @@ GOOGLE_MAPS_KEY_FILE = ROOT / "google_maps_api_key.txt"
 SOCIAL_CAPTURE_DIR = ROOT / "social-captures"
 SOCIAL_CAPTURE_FILE = SOCIAL_CAPTURE_DIR / "captures.json"
 SOCIAL_CAPTURE_LOCK = threading.Lock()
+AUTH_USERNAME = os.environ.get("APP_USERNAME", "admin")
+AUTH_PASSWORD = os.environ.get("APP_PASSWORD", "admin123")
+AUTH_SECRET = os.environ.get("APP_AUTH_SECRET") or secrets.token_hex(32)
+AUTH_COOKIE = "hima_session"
+AUTH_MAX_AGE = 60 * 60 * 24 * 7
+
+
+def create_session_token(username: str) -> str:
+    expires_at = int(datetime.now(timezone.utc).timestamp()) + AUTH_MAX_AGE
+    payload = f"{username}|{expires_at}"
+    signature = hmac.new(
+        AUTH_SECRET.encode("utf-8"),
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return base64.urlsafe_b64encode(f"{payload}|{signature}".encode("utf-8")).decode("ascii")
+
+
+def verify_session_token(token: str) -> bool:
+    try:
+        decoded = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
+        username, expires_at, signature = decoded.rsplit("|", 2)
+        payload = f"{username}|{expires_at}"
+        expected = hmac.new(
+            AUTH_SECRET.encode("utf-8"),
+            payload.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        return (
+            hmac.compare_digest(signature, expected)
+            and username == AUTH_USERNAME
+            and int(expires_at) > int(datetime.now(timezone.utc).timestamp())
+        )
+    except (ValueError, TypeError, UnicodeDecodeError, binascii.Error):
+        return False
 
 
 COUNTRY_HINTS = {
@@ -2215,6 +2255,31 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_response(204)
         self.end_headers()
 
+    def is_authenticated(self):
+        cookie = SimpleCookie()
+        cookie.load(self.headers.get("Cookie", ""))
+        morsel = cookie.get(AUTH_COOKIE)
+        return bool(morsel and verify_session_token(morsel.value))
+
+    def send_json(self, status, payload):
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def require_auth(self, api=False):
+        if self.is_authenticated():
+            return True
+        if api:
+            self.send_json(401, {"ok": False, "error": "请先登录"})
+        else:
+            self.send_response(302)
+            self.send_header("Location", "/login.html")
+            self.end_headers()
+        return False
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/health":
@@ -2227,6 +2292,20 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if parsed.path == "/api/session":
+            self.send_json(
+                200,
+                {
+                    "ok": True,
+                    "authenticated": self.is_authenticated(),
+                    "username": AUTH_USERNAME if self.is_authenticated() else "",
+                },
+            )
+            return
+        if parsed.path in ("/", "/index.html") and not self.require_auth():
+            return
+        if parsed.path.startswith("/api/") and not self.require_auth(api=True):
             return
         if parsed.path == "/api/social-captures":
             body = json.dumps(
@@ -2269,6 +2348,47 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/login":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                username = str(payload.get("username", ""))
+                password = str(payload.get("password", ""))
+                valid = hmac.compare_digest(username, AUTH_USERNAME) and hmac.compare_digest(
+                    password, AUTH_PASSWORD
+                )
+                if not valid:
+                    self.send_json(401, {"ok": False, "error": "账户名或密码错误"})
+                    return
+                token = create_session_token(username)
+                body = json.dumps({"ok": True, "username": username}, ensure_ascii=False).encode("utf-8")
+                self.send_response(200)
+                secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""
+                self.send_header(
+                    "Set-Cookie",
+                    f"{AUTH_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={AUTH_MAX_AGE}{secure}",
+                )
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (ValueError, json.JSONDecodeError):
+                self.send_json(400, {"ok": False, "error": "登录请求无效"})
+            return
+        if parsed.path == "/api/logout":
+            body = json.dumps({"ok": True}, ensure_ascii=False).encode("utf-8")
+            self.send_response(200)
+            self.send_header(
+                "Set-Cookie",
+                f"{AUTH_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0",
+            )
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if not self.require_auth(api=True):
+            return
         if parsed.path != "/api/social-capture":
             self.send_error(404)
             return

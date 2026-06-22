@@ -1819,6 +1819,17 @@ function init() {
   if (requestedSection && document.getElementById(requestedSection)?.classList.contains("section")) {
     showSection(requestedSection);
   }
+  const logoutButton = document.getElementById("logoutButton");
+  if (logoutButton) {
+    logoutButton.addEventListener("click", async () => {
+      logoutButton.disabled = true;
+      try {
+        await fetch("/api/logout", { method: "POST" });
+      } finally {
+        window.location.replace("/login.html");
+      }
+    });
+  }
 }
 
 init();

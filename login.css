@@ -1,0 +1,305 @@
+:root {
+  color-scheme: light;
+  --ink: #111820;
+  --muted: #6e7885;
+  --line: #e5e8eb;
+  --gold: #c9a45d;
+  --gold-light: #e3c98f;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  color: var(--ink);
+  background: #f5f6f7;
+  font-family: Inter, "Segoe UI", "Microsoft YaHei", Arial, sans-serif;
+}
+
+button, input { font: inherit; }
+
+.login-shell {
+  display: grid;
+  grid-template-columns: minmax(460px, 1.05fr) minmax(520px, .95fr);
+  min-height: 100vh;
+}
+
+.brand-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 54px 7vw 48px;
+  color: #fff;
+  background:
+    radial-gradient(circle at 75% 15%, rgba(201, 164, 93, .17), transparent 30%),
+    linear-gradient(145deg, #111820 0%, #17222d 62%, #0d141b 100%);
+}
+
+.brand-panel::before {
+  position: absolute;
+  right: -15%;
+  bottom: 5%;
+  width: 60%;
+  aspect-ratio: 1;
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 50%;
+  box-shadow: 0 0 0 70px rgba(255,255,255,.018), 0 0 0 140px rgba(255,255,255,.012);
+  content: "";
+}
+
+.brand-lockup {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+}
+
+.brand-logo {
+  width: 48px;
+  height: 48px;
+  padding: 9px;
+  color: #111820;
+  fill: currentColor;
+  border-radius: 14px;
+  background: linear-gradient(145deg, #e0c17d, #a8792f);
+  box-shadow: 0 12px 30px rgba(0,0,0,.25);
+}
+
+.logo-accent { fill: #fff; opacity: .92; }
+
+.brand-lockup strong, .brand-lockup span { display: block; }
+.brand-lockup strong { font-size: 17px; letter-spacing: .2px; }
+.brand-lockup span { margin-top: 4px; color: #9fa9b5; font-size: 12px; }
+
+.brand-message {
+  position: relative;
+  z-index: 1;
+  max-width: 650px;
+  margin: auto 0;
+  padding: 80px 0;
+}
+
+.eyebrow {
+  margin: 0 0 18px;
+  color: #b88c42;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+}
+
+.brand-message .eyebrow { color: var(--gold-light); }
+
+.brand-message h1 {
+  margin: 0;
+  font-size: clamp(40px, 4.2vw, 68px);
+  line-height: 1.14;
+  letter-spacing: -2.5px;
+}
+
+.description {
+  max-width: 570px;
+  margin: 28px 0 0;
+  color: #aab3bc;
+  font-size: 16px;
+  line-height: 1.85;
+}
+
+.brand-proof {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 26px;
+  color: #8f9aa5;
+  font-size: 12px;
+}
+
+.brand-proof span { display: flex; align-items: center; gap: 8px; }
+.brand-proof i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gold);
+  box-shadow: 0 0 0 4px rgba(201,164,93,.12);
+}
+
+.form-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  padding: 56px;
+  background:
+    linear-gradient(rgba(255,255,255,.8), rgba(255,255,255,.8)),
+    radial-gradient(circle at 20% 20%, #eadfc8, transparent 28%);
+}
+
+.login-card { width: min(100%, 430px); }
+.mobile-brand { display: none; }
+.login-card h2 {
+  margin: 0;
+  font-size: 34px;
+  letter-spacing: -1px;
+}
+
+.intro {
+  margin: 13px 0 34px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+form { display: grid; gap: 20px; }
+label > span {
+  display: block;
+  margin-bottom: 9px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  height: 54px;
+  padding: 0 15px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 4px 18px rgba(20,29,38,.03);
+  transition: 160ms ease;
+}
+
+.field:focus-within {
+  border-color: #c6a15a;
+  box-shadow: 0 0 0 4px rgba(201,164,93,.12);
+}
+
+.field > svg {
+  flex: 0 0 20px;
+  width: 20px;
+  margin-right: 11px;
+  fill: none;
+  stroke: #89939e;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.field input {
+  width: 100%;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  color: var(--ink);
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-size: 14px;
+}
+
+.field input::placeholder { color: #adb4bc; }
+
+.password-toggle {
+  padding: 7px 3px 7px 10px;
+  color: #7b6947;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.error-message {
+  min-height: 18px;
+  margin: -5px 0 -5px;
+  color: #b42318;
+  font-size: 12px;
+}
+
+.login-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 54px;
+  color: #fff;
+  border: 0;
+  border-radius: 12px;
+  background: #111820;
+  box-shadow: 0 14px 28px rgba(17,24,32,.18);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 700;
+  transition: 160ms ease;
+}
+
+.login-button:hover { transform: translateY(-1px); background: #1c2834; }
+.login-button:disabled { cursor: wait; opacity: .72; transform: none; }
+.login-button svg {
+  width: 18px;
+  fill: none;
+  stroke: var(--gold-light);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.login-button.loading svg { animation: pulse 900ms infinite alternate; }
+@keyframes pulse { to { transform: translateX(4px); opacity: .5; } }
+
+.security-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin: 24px 0 0;
+  color: #9199a2;
+  font-size: 11px;
+}
+
+.security-note svg {
+  width: 15px;
+  fill: none;
+  stroke: #99906f;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.6;
+}
+
+.copyright {
+  position: absolute;
+  bottom: 26px;
+  margin: 0;
+  color: #a2a8ae;
+  font-size: 10px;
+  letter-spacing: .2px;
+}
+
+@media (max-width: 960px) {
+  .login-shell { grid-template-columns: 1fr; }
+  .brand-panel { display: none; }
+  .form-panel { min-height: 100vh; padding: 42px 24px 70px; }
+  .mobile-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 54px;
+  }
+  .mobile-brand svg {
+    width: 38px;
+    padding: 7px;
+    fill: #111820;
+    border-radius: 10px;
+    background: linear-gradient(145deg, #e0c17d, #a8792f);
+  }
+}
+
+@media (max-width: 480px) {
+  .form-panel { align-items: flex-start; }
+  .login-card h2 { font-size: 30px; }
+  .mobile-brand { margin-bottom: 44px; }
+}

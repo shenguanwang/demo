@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>登录 · 海外获客工作台</title>
+  <link rel="stylesheet" href="./login.css?v=20260622-1">
+</head>
+<body>
+  <main class="login-shell">
+    <section class="brand-panel">
+      <div class="ambient ambient-one"></div>
+      <div class="ambient ambient-two"></div>
+      <div class="brand-lockup">
+        <svg class="brand-logo" viewBox="0 0 64 64" aria-label="HIMA Global">
+          <path d="M11 13h12v15h18V13h12v38H41V39H23v12H11z"/>
+          <path class="logo-accent" d="M49 8h9v9h-9z"/>
+        </svg>
+        <div>
+          <strong>HIMA Global</strong>
+          <span>海外获客工作台</span>
+        </div>
+      </div>
+      <div class="brand-message">
+        <p class="eyebrow">Sales intelligence workspace</p>
+        <h1>把全球汽车买家，<br>变成可跟进的真实商机。</h1>
+        <p class="description">从市场筛选、线索核验到开发信和 CIF 报价，一个工作台完成海外销售全流程。</p>
+      </div>
+      <div class="brand-proof">
+        <span><i></i> 公开来源核验</span>
+        <span><i></i> 线索评分排序</span>
+        <span><i></i> 本地客户数据</span>
+      </div>
+    </section>
+
+    <section class="form-panel">
+      <div class="login-card">
+        <div class="mobile-brand">
+          <svg viewBox="0 0 64 64" aria-hidden="true">
+            <path d="M11 13h12v15h18V13h12v38H41V39H23v12H11z"/>
+            <path class="logo-accent" d="M49 8h9v9h-9z"/>
+          </svg>
+          <strong>HIMA Global</strong>
+        </div>
+        <p class="eyebrow">Secure access</p>
+        <h2>登录工作台</h2>
+        <p class="intro">请输入管理员账户，继续访问销售数据与客户线索。</p>
+
+        <form id="loginForm">
+          <label>
+            <span>账户名</span>
+            <div class="field">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm7 8a7 7 0 0 0-14 0"/></svg>
+              <input id="username" name="username" autocomplete="username" value="admin" required>
+            </div>
+          </label>
+          <label>
+            <span>密码</span>
+            <div class="field">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="10" width="14" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+              <input id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+              <button class="password-toggle" id="passwordToggle" type="button" aria-label="显示密码">显示</button>
+            </div>
+          </label>
+          <p class="error-message" id="loginError" role="alert"></p>
+          <button class="login-button" id="loginButton" type="submit">
+            <span>进入工作台</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </form>
+        <p class="security-note">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.4 2.8 8.4 7 10 4.2-1.6 7-5.6 7-10V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></svg>
+          登录状态仅保存在当前浏览器，有效期 7 天
+        </p>
+      </div>
+      <p class="copyright">© 2026 HIMA Global · Overseas Sales Workspace</p>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById("loginForm");
+    const error = document.getElementById("loginError");
+    const button = document.getElementById("loginButton");
+    const password = document.getElementById("password");
+    const toggle = document.getElementById("passwordToggle");
+
+    fetch("/api/session").then(response => response.json()).then(session => {
+      if (session.authenticated) location.replace("/index.html");
+    }).catch(() => {});
+
+    toggle.addEventListener("click", () => {
+      const visible = password.type === "text";
+      password.type = visible ? "password" : "text";
+      toggle.textContent = visible ? "显示" : "隐藏";
+      toggle.setAttribute("aria-label", visible ? "显示密码" : "隐藏密码");
+    });
+
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      error.textContent = "";
+      button.disabled = true;
+      button.classList.add("loading");
+      button.querySelector("span").textContent = "正在验证";
+      try {
+        const response = await fetch("/api/login", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({
+            username: document.getElementById("username").value.trim(),
+            password: password.value
+          })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "登录失败");
+        location.replace("/index.html");
+      } catch (loginError) {
+        error.textContent = loginError.message || "登录失败，请稍后重试";
+        button.disabled = false;
+        button.classList.remove("loading");
+        button.querySelector("span").textContent = "进入工作台";
+      }
+    });
+  </script>
+</body>
+</html>
