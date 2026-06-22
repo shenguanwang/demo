@@ -8,5 +8,8 @@ social-captures/
 *.png
 *.zip
 *.log
+*.db
+*.db-shm
+*.db-wal
 .DS_Store
 Thumbs.db

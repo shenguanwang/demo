@@ -10,6 +10,7 @@ import re
 import secrets
 import socketserver
 import base64
+import sqlite3
 import threading
 import urllib.error
 import urllib.parse
@@ -33,11 +34,164 @@ SOCIAL_CAPTURE_LOCK = threading.Lock()
 DISCOVERY_JOBS: dict[str, dict] = {}
 DISCOVERY_JOBS_LOCK = threading.Lock()
 DISCOVERY_JOB_TTL = 60 * 60
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+SQLITE_STATE_FILE = Path(os.environ.get("STATE_DATABASE_PATH") or (ROOT / "workbench-state.db"))
+STATE_LOCK = threading.Lock()
+STATE_KEY = "admin-default"
 AUTH_USERNAME = os.environ.get("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.environ.get("APP_PASSWORD", "admin123")
 AUTH_SECRET = os.environ.get("APP_AUTH_SECRET") or secrets.token_hex(32)
 AUTH_COOKIE = "hima_session"
 AUTH_MAX_AGE = 60 * 60 * 24 * 7
+
+
+def postgres_connection():
+    if not DATABASE_URL:
+        return None
+    try:
+        import psycopg
+    except ImportError as exc:
+        raise RuntimeError("已配置 DATABASE_URL，但未安装 psycopg") from exc
+    return psycopg.connect(DATABASE_URL)
+
+
+def initialize_state_store() -> None:
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS workspace_state (
+                        workspace_key TEXT PRIMARY KEY,
+                        state JSONB NOT NULL,
+                        version BIGINT NOT NULL DEFAULT 1,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+        return
+    SQLITE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS workspace_state (
+                workspace_key TEXT PRIMARY KEY,
+                state TEXT NOT NULL,
+                version INTEGER NOT NULL DEFAULT 1,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+
+
+def empty_workspace_state() -> dict:
+    return {
+        "reviewLeads": [],
+        "customers": [],
+        "rejectedLeads": [],
+        "quotes": [],
+    }
+
+
+def normalize_workspace_state(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("工作台数据格式无效")
+    normalized = {}
+    for key in ("reviewLeads", "customers", "rejectedLeads", "quotes"):
+        value = payload.get(key, [])
+        if not isinstance(value, list):
+            raise ValueError(f"{key} 必须是数组")
+        normalized[key] = value[:5000]
+    encoded = json.dumps(normalized, ensure_ascii=False)
+    if len(encoded.encode("utf-8")) > 20_000_000:
+        raise ValueError("工作台数据超过 20MB 限制")
+    return normalized
+
+
+def load_workspace_state() -> dict:
+    with STATE_LOCK:
+        initialize_state_store()
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT state, version, updated_at FROM workspace_state WHERE workspace_key = %s",
+                        (STATE_KEY,),
+                    )
+                    row = cursor.fetchone()
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                row = connection.execute(
+                    "SELECT state, version, updated_at FROM workspace_state WHERE workspace_key = ?",
+                    (STATE_KEY,),
+                ).fetchone()
+        if not row:
+            return {
+                "exists": False,
+                "state": empty_workspace_state(),
+                "version": 0,
+                "updatedAt": "",
+                "storage": "postgres" if DATABASE_URL else "sqlite",
+            }
+        raw_state = row[0]
+        state = raw_state if isinstance(raw_state, dict) else json.loads(raw_state)
+        updated_at = row[2].isoformat() if hasattr(row[2], "isoformat") else str(row[2])
+        return {
+            "exists": True,
+            "state": normalize_workspace_state(state),
+            "version": int(row[1]),
+            "updatedAt": updated_at,
+            "storage": "postgres" if DATABASE_URL else "sqlite",
+        }
+
+
+def save_workspace_state(payload: dict) -> dict:
+    state = normalize_workspace_state(payload)
+    encoded = json.dumps(state, ensure_ascii=False)
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with STATE_LOCK:
+        initialize_state_store()
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO workspace_state (workspace_key, state, version, updated_at)
+                        VALUES (%s, %s::jsonb, 1, NOW())
+                        ON CONFLICT (workspace_key) DO UPDATE SET
+                            state = EXCLUDED.state,
+                            version = workspace_state.version + 1,
+                            updated_at = NOW()
+                        RETURNING version, updated_at
+                        """,
+                        (STATE_KEY, encoded),
+                    )
+                    version, updated_at = cursor.fetchone()
+                    updated = updated_at.isoformat()
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO workspace_state (workspace_key, state, version, updated_at)
+                    VALUES (?, ?, 1, ?)
+                    ON CONFLICT(workspace_key) DO UPDATE SET
+                        state = excluded.state,
+                        version = workspace_state.version + 1,
+                        updated_at = excluded.updated_at
+                    """,
+                    (STATE_KEY, encoded, now),
+                )
+                version = connection.execute(
+                    "SELECT version FROM workspace_state WHERE workspace_key = ?",
+                    (STATE_KEY,),
+                ).fetchone()[0]
+                updated = now
+    return {
+        "state": state,
+        "version": int(version),
+        "updatedAt": updated,
+        "storage": "postgres" if DATABASE_URL else "sqlite",
+    }
 
 
 def create_session_token(username: str) -> str:
@@ -2417,6 +2571,15 @@ class Handler(SimpleHTTPRequestHandler):
                 },
             )
             return
+        if parsed.path == "/api/workspace-state":
+            if not self.require_auth(api=True):
+                return
+            try:
+                state = load_workspace_state()
+                self.send_json(200, {"ok": True, **state})
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if parsed.path == "/api/discover/status":
             if not self.require_auth(api=True):
                 return
@@ -2512,6 +2675,15 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         if not self.require_auth(api=True):
+            return
+        if parsed.path == "/api/workspace-state":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 20_500_000)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                result = save_workspace_state(payload.get("state", payload))
+                self.send_json(200, {"ok": True, **result})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/discover/start":
             try:

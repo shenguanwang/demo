@@ -242,6 +242,30 @@ button {
   font-size: 12px;
 }
 
+.topbar-status[data-sync-state="synced"] i {
+  background: #0f9f6e;
+  box-shadow: 0 0 0 4px rgba(15, 159, 110, 0.12);
+}
+
+.topbar-status[data-sync-state="syncing"] i {
+  background: #c99a42;
+  box-shadow: 0 0 0 4px rgba(201, 154, 66, 0.12);
+  animation: syncPulse 900ms ease-in-out infinite alternate;
+}
+
+.topbar-status[data-sync-state="error"] {
+  color: #a04b42;
+}
+
+.topbar-status[data-sync-state="error"] i {
+  background: #c95f52;
+  box-shadow: 0 0 0 4px rgba(201, 95, 82, 0.12);
+}
+
+@keyframes syncPulse {
+  to { opacity: 0.45; }
+}
+
 .topbar-status i,
 .status-pill i {
   width: 7px;

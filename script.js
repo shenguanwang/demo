@@ -130,6 +130,9 @@ let customers = savedState.customers;
 let rejectedLeads = savedState.rejectedLeads;
 let quoteHistory = savedState.quotes;
 let lastQuote = null;
+let cloudStateReady = false;
+let cloudSaveTimer = null;
+let cloudSaveChain = Promise.resolve();
 
 const productProfiles = {
   "问界 M9": {
@@ -378,8 +381,81 @@ function loadSavedState() {
   }
 }
 
+function workspaceStateSnapshot() {
+  return {
+    reviewLeads,
+    customers,
+    rejectedLeads,
+    quotes: quoteHistory
+  };
+}
+
+function setCloudSyncStatus(text, state = "syncing") {
+  const status = $("#cloudSyncStatus");
+  if (!status) return;
+  status.dataset.syncState = state;
+  const label = status.querySelector("span");
+  if (label) label.textContent = text;
+}
+
+async function pushCloudState(state = workspaceStateSnapshot()) {
+  setCloudSyncStatus("正在同步云端数据", "syncing");
+  const response = await fetch("/api/workspace-state", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ state })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  setCloudSyncStatus("云端数据已同步", "synced");
+  return result;
+}
+
+function scheduleCloudStateSave() {
+  if (!cloudStateReady) return;
+  window.clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = window.setTimeout(() => {
+    const state = workspaceStateSnapshot();
+    cloudSaveChain = cloudSaveChain
+      .catch(() => undefined)
+      .then(() => pushCloudState(state))
+      .catch((error) => {
+        setCloudSyncStatus("云端同步失败，已保留本地副本", "error");
+        console.error("Cloud workspace sync failed:", error);
+      });
+  }, 650);
+}
+
+async function hydrateCloudState() {
+  setCloudSyncStatus("正在读取云端数据", "syncing");
+  try {
+    const response = await fetch("/api/workspace-state", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (result.exists) {
+      const state = result.state || {};
+      reviewLeads = Array.isArray(state.reviewLeads) ? state.reviewLeads.map(normalizeLead) : [];
+      customers = Array.isArray(state.customers) ? state.customers.map(normalizeLead) : [];
+      rejectedLeads = Array.isArray(state.rejectedLeads) ? state.rejectedLeads.map(normalizeLead) : [];
+      quoteHistory = Array.isArray(state.quotes) ? state.quotes : [];
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaceStateSnapshot()));
+      setCloudSyncStatus("云端数据已同步", "synced");
+    } else {
+      await pushCloudState(workspaceStateSnapshot());
+    }
+    cloudStateReady = true;
+  } catch (error) {
+    cloudStateReady = false;
+    setCloudSyncStatus("云端不可用，当前使用本地副本", "error");
+    console.error("Cloud workspace load failed:", error);
+  }
+}
+
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify({ reviewLeads, customers, rejectedLeads, quotes: quoteHistory }));
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaceStateSnapshot()));
+  scheduleCloudStateSave();
 }
 
 function scoreLeadFromText(text) {
@@ -1832,7 +1908,8 @@ function renderBeijingGreeting() {
     `${parts.hour}:${parts.minute}:${parts.second} · 北京时间`;
 }
 
-function init() {
+async function init() {
+  await hydrateCloudState();
   renderBeijingGreeting();
   setInterval(renderBeijingGreeting, 1_000);
   renderCountries();
