@@ -915,6 +915,14 @@ function renderReview() {
               </div>
               <h4>${escapeHtml(profile.title || profile.handle || lead.company)}</h4>
               <p>${escapeHtml(profile.description || "平台未返回公开简介，请打开主页核验。")}</p>
+              ${(profile.businessSignals || []).length || (profile.intentSignals || []).length || profile.decisionRole ? `
+                <div class="social-business-signals">
+                  ${(profile.businessSignals || []).map((signal) => `<b>${escapeHtml(signal)}</b>`).join("")}
+                  ${(profile.intentSignals || []).map((signal) => `<b class="intent">${escapeHtml(signal)}</b>`).join("")}
+                  ${profile.decisionRole ? `<b class="person">${escapeHtml(profile.decisionRole)}</b>` : ""}
+                </div>
+              ` : ""}
+              ${profile.businessConfidence ? `<small>商业账号识别置信度：${escapeHtml(profile.businessConfidence)}%</small>` : ""}
               <small>关联依据：${escapeHtml(profile.relationship || "公开搜索")}</small>
               ${safeHttpUrl(profile.url) ? `<a href="${escapeHtml(safeHttpUrl(profile.url))}" target="_blank" rel="noopener noreferrer">打开公开主页 ↗</a>` : ""}
             </article>
@@ -1158,6 +1166,10 @@ function normalizeLead(raw) {
     contactRoleSources: Array.isArray(raw.contactRoleSources) ? raw.contactRoleSources : [],
     socialAccounts: Array.isArray(raw.socialAccounts) ? raw.socialAccounts : [],
     socialProfiles: Array.isArray(raw.socialProfiles) ? raw.socialProfiles : [],
+    socialBusinessSignals: Array.isArray(raw.socialBusinessSignals) ? raw.socialBusinessSignals : [],
+    socialIntentSignals: Array.isArray(raw.socialIntentSignals) ? raw.socialIntentSignals : [],
+    socialDecisionRole: raw.socialDecisionRole || "",
+    socialBusinessConfidence: Number(raw.socialBusinessConfidence || 0),
     accountType: raw.accountType || "公司客户",
     isDuplicate: Boolean(raw.isDuplicate),
     isCompetitor: Boolean(raw.isCompetitor),
@@ -1281,6 +1293,10 @@ async function researchLead(index) {
       intentSignals: result.intentSignals || lead.intentSignals || [],
       socialAccounts: [...new Set([...(lead.socialAccounts || []), ...(result.socialAccounts || [])])],
       socialProfiles: result.socialProfiles || lead.socialProfiles || [],
+      socialBusinessSignals: result.socialBusinessSignals || lead.socialBusinessSignals || [],
+      socialIntentSignals: result.socialIntentSignals || lead.socialIntentSignals || [],
+      socialDecisionRole: result.socialDecisionRole || lead.socialDecisionRole || "",
+      socialBusinessConfidence: result.socialBusinessConfidence || lead.socialBusinessConfidence || 0,
       researching: false
     });
     refreshAllLeadViews();
@@ -1381,18 +1397,26 @@ function updateSocialProspectingQueries() {
     `${countryName}cars`,
     `${place}cardealer`
   ];
+  let businessTerms = ["car importer", "car dealer", "vehicle distributor"];
+  let roleTerms = ["dealership owner", "import manager", "procurement manager"];
   if (/租赁|车队|fleet|rental/i.test(goal)) {
     facebookQueries = [`${place} car rental`, `${place} fleet company`, `${countryName} fleet`, `${place} chauffeur cars`];
     instagramTags = [`${place}carrental`, `${place}fleet`, `${countryName}carrental`, `${place}chauffeur`];
+    businessTerms = ["fleet company", "car rental", "vehicle procurement"];
+    roleTerms = ["fleet manager", "procurement manager", "rental owner"];
   } else if (/平行进口|parallel/i.test(goal)) {
     facebookQueries = [`${place} imported cars`, `${place} car importer`, `${countryName} auto trading`, `${place} used luxury cars`];
     instagramTags = [`${place}importedcars`, `${place}carimport`, `${countryName}autotrading`, `${place}luxurycars`];
+    businessTerms = ["parallel import cars", "car importer", "auto trading"];
+    roleTerms = ["import manager", "dealership owner", "general manager"];
   } else if (/豪华|高端|luxury|premium/i.test(goal)) {
     facebookQueries = [`${place} luxury cars`, `${place} luxury car dealer`, `${place} car showroom`, `${countryName} car importer`];
     instagramTags = [`${place}luxurycars`, `${place}supercars`, `${place}carshowroom`, `${countryName}cars`];
+    businessTerms = ["luxury car dealer", "premium showroom", "car importer"];
+    roleTerms = ["showroom owner", "sales director", "import manager"];
   }
   const cleanTag = (value) => value.toLowerCase().replace(/[^a-z0-9]/g, "");
-  $("#socialSearchQuery").textContent = `${place}：4 组 Facebook 短词 + 4 组 Instagram 行业标签`;
+  $("#socialSearchQuery").textContent = `${place}：五个平台公开商业账号搜索包`;
   $("#facebookSearchLinks").innerHTML = facebookQueries.map((query) =>
     `<a href="https://www.facebook.com/search/pages/?q=${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="Facebook">${escapeHtml(query)} ↗</a>`
   ).join("");
@@ -1400,6 +1424,20 @@ function updateSocialProspectingQueries() {
     const clean = cleanTag(tag);
     return `<a href="https://www.instagram.com/explore/tags/${encodeURIComponent(clean)}/" target="_blank" rel="noopener noreferrer" data-social-platform="Instagram">#${escapeHtml(clean)} ↗</a>`;
   }).join("");
+  $("#tiktokSearchLinks").innerHTML = businessTerms.map((term) => {
+    const query = `${place} ${term}`;
+    return `<a href="https://www.tiktok.com/search/user?q=${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="TikTok">${escapeHtml(query)} ↗</a>`;
+  }).join("");
+  $("#youtubeSearchLinks").innerHTML = businessTerms.map((term) => {
+    const query = `${place} ${term}`;
+    return `<a href="https://www.youtube.com/results?search_query=${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="YouTube">${escapeHtml(query)} ↗</a>`;
+  }).join("");
+  $("#linkedinSearchLinks").innerHTML = [
+    ...businessTerms.map((term) => `${place} ${term}`),
+    ...roleTerms.map((term) => `${place} ${term}`)
+  ].map((query) =>
+    `<a href="https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="LinkedIn">${escapeHtml(query)} ↗</a>`
+  ).join("");
 }
 
 function socialPlatformFromUrl(url) {
@@ -1414,6 +1452,51 @@ function socialPlatformFromUrl(url) {
   if (domain.includes("threads")) return "Threads";
   if (domain.includes("pinterest")) return "Pinterest";
   return "官网";
+}
+
+function analyzeSocialBusinessText(text, accountType = "") {
+  const value = String(text || "").toLowerCase();
+  const signalRules = {
+    "汽车进口": /vehicle importer|car importer|automotive importer|parallel import|汽车进口|平行进口/,
+    "汽车经销": /car dealer|dealership|showroom|auto trading|motors|汽车经销|展厅|汽车贸易/,
+    "品牌分销": /distributor|authorized dealer|brand partner|品牌分销|授权经销/,
+    "新能源业务": /electric vehicle|electric cars|hybrid|new energy|chinese cars|新能源|电动车|混动/,
+    "车队采购": /fleet|procurement|corporate sales|rental|chauffeur|车队|采购|租赁/,
+    "批发贸易": /wholesale|bulk sales|import export|trading company|批发|进出口贸易/
+  };
+  const intentRules = {
+    "公开询价": /rfq|request for quotation|公开询价/,
+    "正在采购": /looking to buy|want to buy|vehicle procurement|sourcing vehicles|正在采购|求购/,
+    "寻找供应商": /supplier wanted|looking for supplier|seeking supplier|寻找供应商/,
+    "招募经销商": /dealer wanted|distributor wanted|seeking distributor|招募经销商|招募分销商/,
+    "寻求品牌合作": /brand partnership|new brand|distribution opportunity|品牌合作|引入新品牌/,
+    "批量采购": /bulk order|fleet purchase|wholesale order|批量采购/
+  };
+  const roleRules = {
+    "老板/创始人": /owner|founder|co-founder|proprietor|ceo|老板|创始人/,
+    "总经理": /general manager|managing director|总经理/,
+    "采购负责人": /procurement manager|purchasing manager|buyer|sourcing manager|采购经理/,
+    "进口负责人": /import manager|import director|进口经理/,
+    "销售负责人": /sales director|sales manager|business development manager|销售总监|销售经理/,
+    "车队负责人": /fleet manager|fleet director|车队经理/
+  };
+  const businessSignals = Object.entries(signalRules).filter(([, rule]) => rule.test(value)).map(([label]) => label);
+  const intentSignals = Object.entries(intentRules).filter(([, rule]) => rule.test(value)).map(([label]) => label);
+  const decisionRole = Object.entries(roleRules).find(([, rule]) => rule.test(value))?.[0] || "";
+  const detectedType = decisionRole || String(accountType).includes("个人")
+    ? "个人决策人"
+    : businessSignals.length || intentSignals.length ? "公司商业账号" : "账号类型待核验";
+  return {
+    businessSignals,
+    intentSignals,
+    decisionRole,
+    accountType: detectedType,
+    isCommercial: Boolean(businessSignals.length || intentSignals.length),
+    businessConfidence: Math.min(
+      96,
+      15 + businessSignals.length * 12 + intentSignals.length * 12 + (decisionRole ? 12 : 0)
+    )
+  };
 }
 
 function captureToLead(capture) {
@@ -1436,6 +1519,10 @@ function captureToLead(capture) {
   const title = String(capture.title || "社媒登录态采集线索")
     .replace(/\s*[-|·]\s*(YouTube|Facebook|Instagram|TikTok|LinkedIn).*$/i, "")
     .trim();
+  const socialAnalysis = analyzeSocialBusinessText(
+    `${title} ${capture.text || ""}`,
+    capture.accountType || ""
+  );
   const sourceRecords = [
     sourceUrl ? {
       title: `${title} · ${capture.platform || "社媒页面"}`,
@@ -1496,16 +1583,27 @@ function captureToLead(capture) {
     socialAccounts: socialLinks.map((item) => item.url),
     socialProfiles: socialLinks.map((item) => ({
       platform: socialPlatformFromUrl(item.url),
-      accountType: "公司账号（待核验）",
+      accountType: socialAnalysis.accountType,
       relationship: "当前登录态页面公开链接",
       title: item.text || title,
       description: "由当前页面公开链接识别",
       url: item.url,
+      businessSignals: socialAnalysis.businessSignals,
+      intentSignals: socialAnalysis.intentSignals,
+      decisionRole: socialAnalysis.decisionRole,
+      businessConfidence: socialAnalysis.businessConfidence,
+      isCommercial: socialAnalysis.isCommercial,
       handle: (() => {
         try { return new URL(item.url).pathname.replace(/^\/|\/$/g, ""); } catch { return ""; }
       })()
     })),
-    accountType: "公司账号（待核验）",
+    accountType: socialAnalysis.accountType,
+    socialBusinessSignals: socialAnalysis.businessSignals,
+    socialIntentSignals: socialAnalysis.intentSignals,
+    socialDecisionRole: socialAnalysis.decisionRole,
+    socialBusinessConfidence: socialAnalysis.businessConfidence,
+    businessSignals: socialAnalysis.businessSignals,
+    intentSignals: socialAnalysis.intentSignals,
     model: finderData.model,
     score: scoreLeadFromText(`${title} ${capture.text || ""}`),
     scoreBasis: "登录态页面初始评分，完成官网核验后重新计算",
@@ -2160,7 +2258,14 @@ function bindForms() {
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const url = safeHttpUrl(data.pageUrl);
     const domain = url ? new URL(url).hostname.toLowerCase() : "";
-    const expectedDomain = data.platform === "Instagram" ? "instagram.com" : "facebook.com";
+    const expectedDomains = {
+      Facebook: "facebook.com",
+      Instagram: "instagram.com",
+      TikTok: "tiktok.com",
+      YouTube: "youtube.com",
+      LinkedIn: "linkedin.com"
+    };
+    const expectedDomain = expectedDomains[data.platform] || "";
     const status = $("#socialLeadStatus");
     if (!url || !domain.includes(expectedDomain)) {
       status.textContent = `网址必须是有效的 ${data.platform} 主页绝对地址。`;
@@ -2171,6 +2276,7 @@ function bindForms() {
     const country = countries.find((item) => item.name === finderData.country);
     const city = country?.cities?.split(" / ")[0] || "";
     const notes = String(data.notes || "").trim();
+    const socialAnalysis = analyzeSocialBusinessText(`${data.company} ${notes}`, data.accountType);
     const lead = normalizeLead({
       company: data.company,
       country: String(finderData.country || "").split(" ")[0],
@@ -2194,14 +2300,21 @@ function bindForms() {
       socialAccounts: [url],
       socialProfiles: [{
         platform: data.platform,
-        accountType: data.accountType,
+        accountType: socialAnalysis.accountType,
         relationship: "Chrome 登录态人工发现",
         title: data.company,
         description: notes || "等待全网核验",
         url,
-        handle: new URL(url).pathname.replace(/^\/|\/$/g, "")
+        handle: new URL(url).pathname.replace(/^\/|\/$/g, ""),
+        ...socialAnalysis
       }],
-      accountType: data.accountType,
+      accountType: socialAnalysis.accountType,
+      socialBusinessSignals: socialAnalysis.businessSignals,
+      socialIntentSignals: socialAnalysis.intentSignals,
+      socialDecisionRole: socialAnalysis.decisionRole,
+      socialBusinessConfidence: socialAnalysis.businessConfidence,
+      businessSignals: socialAnalysis.businessSignals,
+      intentSignals: socialAnalysis.intentSignals,
       model: finderData.model,
       score: scoreLeadFromText(`${data.company} ${notes}`),
       scoreBasis: "社媒人工发现初始评分，完成官网核验后重新计算",

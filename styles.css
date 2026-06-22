@@ -1665,6 +1665,31 @@ textarea {
   font-size: 10px;
 }
 
+.social-business-signals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: 8px 0;
+}
+
+.social-business-signals b {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #edf6ff;
+  color: #24629a;
+  font-size: 10px;
+}
+
+.social-business-signals b.intent {
+  background: #edf9f2;
+  color: #26704a;
+}
+
+.social-business-signals b.person {
+  background: #fff5e8;
+  color: #9a661f;
+}
+
 .social-profile-grid a {
   color: #315f96;
   font-size: 11px;

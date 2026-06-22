@@ -959,6 +959,91 @@ def social_platform(url: str) -> str:
     return "社交媒体"
 
 
+def analyze_social_business_profile(
+    text: str,
+    platform: str = "",
+    account_type: str = "",
+) -> dict:
+    lower = clean_text(text).lower()
+    business_terms = {
+        "汽车进口": ("vehicle importer", "car importer", "automotive importer", "parallel import"),
+        "汽车经销": ("car dealer", "dealership", "showroom", "auto trading", "motors"),
+        "品牌分销": ("distributor", "distribution", "authorized dealer", "brand partner"),
+        "新能源业务": ("electric vehicle", "electric cars", " ev ", "hybrid", "new energy", "chinese cars"),
+        "车队采购": ("fleet", "procurement", "corporate sales", "rental", "chauffeur"),
+        "批发贸易": ("wholesale", "bulk sales", "import export", "trading company"),
+    }
+    intent_terms = {
+        "公开询价": ("rfq", "request for quotation", "quotation request"),
+        "正在采购": ("looking to buy", "want to buy", "vehicle procurement", "sourcing vehicles"),
+        "寻找供应商": ("supplier wanted", "looking for supplier", "seeking supplier"),
+        "招募经销商": ("dealer wanted", "distributor wanted", "seeking distributor"),
+        "寻求品牌合作": ("brand partnership", "new brand", "distribution opportunity", "dealership opportunity"),
+        "批量采购": ("bulk order", "fleet purchase", "wholesale order"),
+    }
+    decision_roles = {
+        "老板/创始人": ("owner", "founder", "co-founder", "proprietor", "ceo"),
+        "总经理": ("general manager", "managing director", "director"),
+        "采购负责人": ("procurement manager", "purchasing manager", "buyer", "sourcing manager"),
+        "进口负责人": ("import manager", "import director"),
+        "销售负责人": ("sales director", "sales manager", "business development manager"),
+        "车队负责人": ("fleet manager", "fleet director"),
+    }
+    business_signals = [
+        label for label, terms in business_terms.items()
+        if any(term in lower for term in terms)
+    ]
+    intent_signals = [
+        label for label, terms in intent_terms.items()
+        if any(term in lower for term in terms)
+    ]
+    role = next(
+        (label for label, terms in decision_roles.items() if any(term in lower for term in terms)),
+        "",
+    )
+    contact_signals = []
+    if re.search(r"[\w.+-]+@[\w.-]+\.[a-z]{2,}", lower, re.I):
+        contact_signals.append("公开邮箱")
+    if "whatsapp" in lower or "wa.me/" in lower:
+        contact_signals.append("公开 WhatsApp")
+    if re.search(r"(?:tel|phone|call|mobile)[:\s+]", lower, re.I):
+        contact_signals.append("公开电话")
+    if any(term in lower for term in ("website", "official site", "link in bio", "www.", "http")):
+        contact_signals.append("公开官网链接")
+
+    company_markers = (
+        "official", "company", "group", "motors", "automotive", "trading",
+        "showroom", "dealer", "importer", "distributor",
+    )
+    person_markers = (
+        "owner", "founder", "manager", "director", "ceo", "entrepreneur",
+    )
+    if role or "个人" in account_type or any(marker in lower for marker in person_markers):
+        detected_type = "个人决策人"
+    elif business_signals or "公司" in account_type or any(marker in lower for marker in company_markers):
+        detected_type = "公司商业账号"
+    else:
+        detected_type = "账号类型待核验"
+
+    confidence = 15
+    confidence += min(36, len(business_signals) * 12)
+    confidence += min(24, len(intent_signals) * 12)
+    confidence += 12 if role else 0
+    confidence += min(12, len(contact_signals) * 4)
+    if platform:
+        confidence += 3
+    confidence = min(confidence, 96)
+    return {
+        "accountType": detected_type,
+        "businessSignals": business_signals[:5],
+        "intentSignals": intent_signals[:5],
+        "decisionRole": role,
+        "contactSignals": contact_signals,
+        "businessConfidence": confidence,
+        "isCommercial": bool(business_signals or intent_signals),
+    }
+
+
 def read_social_profile(
     url: str,
     account_type: str = "公司账号",
@@ -1004,6 +1089,13 @@ def read_social_profile(
         pass
     if not description:
         description = "平台未向匿名访问返回公开简介，请打开原始主页人工核验。"
+    analysis = analyze_social_business_profile(
+        f"{title} {description} {handle}",
+        platform,
+        account_type,
+    )
+    if analysis["accountType"] != "账号类型待核验":
+        account_type = analysis["accountType"]
     return {
         "platform": platform,
         "accountType": account_type,
@@ -1012,6 +1104,8 @@ def read_social_profile(
         "description": clean_text(description)[:700],
         "url": final_url,
         "handle": handle[:120],
+        **analysis,
+        "accountType": account_type,
     }
 
 
@@ -1727,6 +1821,25 @@ def research_company(params: dict[str, list[str]]) -> dict:
             item["title"],
         )
     )
+    social_business_signals = list(dict.fromkeys(
+        signal
+        for profile in social_profiles
+        for signal in profile.get("businessSignals", [])
+    ))[:8]
+    social_intent_signals = list(dict.fromkeys(
+        signal
+        for profile in social_profiles
+        for signal in profile.get("intentSignals", [])
+    ))[:8]
+    social_decision_roles = list(dict.fromkeys(
+        profile.get("decisionRole", "")
+        for profile in social_profiles
+        if profile.get("decisionRole")
+    ))[:5]
+    social_business_confidence = max(
+        (int(profile.get("businessConfidence", 0)) for profile in social_profiles),
+        default=0,
+    )
 
     official_domains = {
         urllib.parse.urlparse(item["url"]).netloc.lower().removeprefix("www.")
@@ -1813,6 +1926,8 @@ def research_company(params: dict[str, list[str]]) -> dict:
     business_signals, intent_signals = opportunity_signals(
         official_website_text or " ".join(item.get("excerpt", "") for item in evidence)
     )
+    business_signals = list(dict.fromkeys([*business_signals, *social_business_signals]))[:8]
+    intent_signals = list(dict.fromkeys([*intent_signals, *social_intent_signals]))[:8]
 
     return {
         "ok": True,
@@ -1834,6 +1949,10 @@ def research_company(params: dict[str, list[str]]) -> dict:
         "contactRoleSources": contacts["contact_role_sources"],
         "socialAccounts": contacts["social_accounts"],
         "socialProfiles": social_profiles,
+        "socialBusinessSignals": social_business_signals,
+        "socialIntentSignals": social_intent_signals,
+        "socialDecisionRole": "、".join(social_decision_roles),
+        "socialBusinessConfidence": social_business_confidence,
         "evidenceSources": evidence,
         "confidence": confidence,
         "confidenceLabel": confidence_label,
@@ -2607,6 +2726,11 @@ def discover(params: dict[str, list[str]]) -> dict:
                     or bool(re.search(r"\b(owner|founder|manager|director)\b", f"{item['title']} {item['snippet']}", re.I))
                 )
                 item["account_type"] = "个人决策人" if is_person else "公司账号"
+                item["social_analysis"] = analyze_social_business_profile(
+                    f"{item['title']} {item['snippet']} {item['url']}",
+                    origin,
+                    item["account_type"],
+                )
             raw_results += social_results
         except (OSError, ValueError, TimeoutError):
             pass
@@ -2648,6 +2772,11 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["source_url"] = item["url"]
                 item["customer_website"] = ""
                 item["account_type"] = youtube_account_type
+                item["social_analysis"] = analyze_social_business_profile(
+                    f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",
+                    "YouTube",
+                    youtube_account_type,
+                )
                 raw_results.append(item)
     leads = []
     seen_sources = set()
@@ -2660,6 +2789,14 @@ def discover(params: dict[str, list[str]]) -> dict:
         title_lower = item["title"].lower()
         is_google_places = item.get("origin") == "Google Maps"
         is_social_result = item.get("origin") in ("Facebook", "Instagram", "TikTok", "LinkedIn", "YouTube")
+        social_analysis = item.get("social_analysis") or (
+            analyze_social_business_profile(
+                f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",
+                item.get("origin", ""),
+                item.get("account_type", ""),
+            )
+            if is_social_result else {}
+        )
         if not is_google_places and not is_social_result and any(
             blocked in domain or blocked in item["url"].lower()
             for blocked in BLOCKED_DOMAINS
@@ -2694,6 +2831,14 @@ def discover(params: dict[str, list[str]]) -> dict:
                 pass
 
         combined = f"{item['title']} {item['snippet']} {page_text}"
+        if is_social_result:
+            social_analysis = analyze_social_business_profile(
+                combined,
+                item.get("origin", ""),
+                item.get("account_type", ""),
+            )
+            if not social_analysis.get("isCommercial"):
+                continue
         if not is_google_places and item.get("origin") != "OpenStreetMap":
             business_match = re.search(
                 r"\b(dealer|dealership|showroom|importer|exporter|trading|distributor|"
@@ -2725,6 +2870,14 @@ def discover(params: dict[str, list[str]]) -> dict:
         source_type = item.get("source_type") or source_details(source_url, origin)[1]
         is_competitor = detect_competitor(combined)
         business_signals, intent_signals = opportunity_signals(combined)
+        business_signals = list(dict.fromkeys([
+            *business_signals,
+            *(social_analysis.get("businessSignals") or []),
+        ]))[:6]
+        intent_signals = list(dict.fromkeys([
+            *intent_signals,
+            *(social_analysis.get("intentSignals") or []),
+        ]))[:6]
         city = infer_city(country, combined)
         source_title = item.get("title") or company
         source_excerpt = item.get("snippet") or page_text[:500]
@@ -2888,14 +3041,24 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "socialProfiles": [
                     {
                         "platform": social_platform(item["url"]),
-                        "accountType": item.get("account_type", "公司账号"),
+                        "accountType": social_analysis.get("accountType") or item.get("account_type", "公司账号"),
                         "relationship": f"{origin} 公开结果",
                         "title": source_title,
                         "description": source_excerpt[:700],
                         "url": item["url"],
                         "handle": urllib.parse.urlparse(item["url"]).path.strip("/").split("/")[-1],
+                        "businessSignals": social_analysis.get("businessSignals") or [],
+                        "intentSignals": social_analysis.get("intentSignals") or [],
+                        "decisionRole": social_analysis.get("decisionRole", ""),
+                        "contactSignals": social_analysis.get("contactSignals") or [],
+                        "businessConfidence": social_analysis.get("businessConfidence", 0),
+                        "isCommercial": social_analysis.get("isCommercial", False),
                     }
                 ] if is_social_profile_url(item["url"]) else [],
+                "socialBusinessSignals": social_analysis.get("businessSignals") or [],
+                "socialIntentSignals": social_analysis.get("intentSignals") or [],
+                "socialDecisionRole": social_analysis.get("decisionRole", ""),
+                "socialBusinessConfidence": social_analysis.get("businessConfidence", 0),
                 "accountType": item.get("account_type", "公司客户"),
                 "isDuplicate": False,
                 "isCompetitor": is_competitor,
