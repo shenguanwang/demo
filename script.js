@@ -2068,22 +2068,33 @@ function renderBeijingGreeting() {
 
 async function init() {
   await hydrateCloudState();
-  renderBeijingGreeting();
+  window.__workbenchInitErrors = [];
+  const startupSteps = [
+    ["北京时间", renderBeijingGreeting],
+    ["市场", renderCountries],
+    ["关键词", renderKeywords],
+    ["线索", renderLeads],
+    ["审核", renderReview],
+    ["客户池", renderCrm],
+    ["开发信", renderDefaultLetter],
+    ["报价", renderQuote],
+    ["报价历史", renderQuoteHistory],
+    ["报价客户", renderQuoteCustomerSelect],
+    ["跟进", renderFollowTasks],
+    ["风险", renderRiskProfile],
+    ["KPI", renderKpis],
+    ["导航", bindNavigation],
+    ["表单", bindForms]
+  ];
+  startupSteps.forEach(([name, callback]) => {
+    try {
+      callback();
+    } catch (error) {
+      window.__workbenchInitErrors.push({ name, message: error.message });
+      console.error(`Workbench module failed: ${name}`, error);
+    }
+  });
   setInterval(renderBeijingGreeting, 1_000);
-  renderCountries();
-  renderKeywords();
-  renderLeads();
-  renderReview();
-  renderCrm();
-  renderDefaultLetter();
-  renderQuote();
-  renderQuoteHistory();
-  renderQuoteCustomerSelect();
-  renderFollowTasks();
-  renderRiskProfile();
-  renderKpis();
-  bindNavigation();
-  bindForms();
   loadDiscoveryJobs().catch((error) => {
     if ($("#discoveryJobList")) {
       $("#discoveryJobList").innerHTML = `<p class="empty">任务读取失败：${escapeHtml(error.message)}</p>`;
