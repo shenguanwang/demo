@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+!.env.example
+google_maps_api_key.txt
+social-captures/
+*.png
+*.zip
+*.log
+.DS_Store
+Thumbs.db

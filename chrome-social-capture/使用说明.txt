@@ -1,0 +1,30 @@
+海外获客页面采集器
+
+安装：
+1. 使用 C:\Program Files\Google\Chrome\Application\chrome.exe 打开 chrome://extensions
+2. 开启右上角“开发者模式”
+3. 点击“加载已解压的扩展程序”
+4. 选择目录：
+   C:\Users\sss\Documents\网站解析\chrome-social-capture
+5. 将“海外获客页面采集器”固定到Chrome工具栏
+
+使用：
+1. 启动海外获客工作台
+2. 在Chrome中登录YouTube、Facebook或Instagram
+3. 打开目标企业主页，并展开简介、About、链接或联系信息弹窗
+4. 保持弹窗可见，点击工具栏中的“海外获客页面采集器”
+5. 点击“读取并发送到工作台”
+6. 工作台会在4秒内自动导入到“线索审核”
+
+采集内容：
+- 当前页面绝对网址
+- 当前页面可见文字
+- 可见邮箱与电话
+- 官网和关联社媒链接
+- 当前浏览器可见区域截图
+
+不会采集：
+- Cookie
+- 密码
+- 浏览历史
+- 未在当前页面显示的私密数据

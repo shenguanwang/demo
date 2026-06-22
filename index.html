@@ -1,0 +1,603 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>华为系新能源汽车海外获客工作台</title>
+  <link rel="stylesheet" href="./styles.css?v=20260619-11">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">H<span>+</span></div>
+      <div>
+        <strong>HIMA Global</strong>
+        <span>海外销售工作台</span>
+      </div>
+    </div>
+    <p class="nav-label">工作流程</p>
+    <nav class="nav" aria-label="主流程">
+      <button class="active" data-section="overview"><span>⌂</span>总览</button>
+      <button data-section="market"><span>01</span>市场选择</button>
+      <button data-section="lead-finder"><span>02</span>自动找客户</button>
+      <button data-section="review"><span>03</span>线索审核</button>
+      <button data-section="crm"><span>04</span>客户池 CRM</button>
+      <button data-section="email"><span>05</span>智能开发信</button>
+      <button data-section="follow"><span>06</span>今日跟进</button>
+      <button data-section="quote"><span>07</span>CIF 报价</button>
+      <button data-section="risk"><span>08</span>售后与风险</button>
+      <button data-section="kpi"><span>09</span>KPI 看板</button>
+    </nav>
+    <div class="side-note">
+      <div class="side-note-icon">↗</div>
+      <div>
+        <span>本周目标</span>
+        <p>新增 20 家高质量海外车商</p>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <section class="section active" id="overview">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Sales workspace</p>
+          <h1>海外获客工作台</h1>
+        </div>
+        <div class="topbar-status"><i></i>本地数据已同步</div>
+      </header>
+      <div class="overview-welcome">
+        <div class="welcome-copy">
+          <span class="status-pill"><i></i> <span id="beijingDate">今日工作台</span></span>
+          <h2><span id="timeGreeting">你好</span>，今天从<br><em>高价值客户</em>开始。</h2>
+          <p>系统已整理好你的获客流程。完成下面的优先任务，就能持续推进海外订单。</p>
+          <div class="welcome-actions">
+            <button class="primary action-main" type="button" data-section="lead-finder">开始自动找客户 <span>→</span></button>
+            <button class="ghost" type="button" data-section="review">审核现有线索</button>
+          </div>
+        </div>
+        <div class="daily-focus">
+          <div class="focus-head">
+            <span>今日优先事项</span>
+            <strong>3 项</strong>
+          </div>
+          <button type="button" data-section="review">
+            <span class="task-check">01</span>
+            <span><strong>审核新增线索</strong><small>筛选值得联系的真实车商</small></span>
+            <b>→</b>
+          </button>
+          <button type="button" data-section="email">
+            <span class="task-check">02</span>
+            <span><strong>生成首轮开发信</strong><small>针对 A 级客户定制英文话术</small></span>
+            <b>→</b>
+          </button>
+          <button type="button" data-section="follow">
+            <span class="task-check">03</span>
+            <span><strong>处理今日跟进</strong><small>推进已联系客户进入报价阶段</small></span>
+            <b>→</b>
+          </button>
+        </div>
+      </div>
+
+      <div class="metric-strip">
+        <button type="button" data-section="review">
+          <span class="metric-icon amber">⌁</span>
+          <span><small>待审核线索</small><strong id="heroPending">0</strong><em>等待判断质量</em></span>
+          <b>→</b>
+        </button>
+        <button type="button" data-section="crm">
+          <span class="metric-icon blue">◎</span>
+          <span><small>正式客户</small><strong id="heroCustomers">0</strong><em>已进入客户池</em></span>
+          <b>→</b>
+        </button>
+        <button type="button" data-section="email">
+          <span class="metric-icon green">◇</span>
+          <span><small>A 级客户</small><strong id="heroGradeA">0</strong><em>建议优先触达</em></span>
+          <b>→</b>
+        </button>
+      </div>
+
+      <div class="overview-block">
+        <div class="block-head">
+          <div>
+            <p class="eyebrow">Sales pipeline</p>
+            <h3>从发现客户到完成报价</h3>
+          </div>
+          <span>按顺序推进，每一步都有明确产出</span>
+        </div>
+        <div class="workflow">
+          <button type="button" data-section="market">
+            <span class="workflow-num">01</span>
+            <div class="workflow-icon">⌖</div>
+            <h3>选择市场</h3>
+            <p>确定国家与主推车型</p>
+          </button>
+          <button type="button" data-section="lead-finder">
+            <span class="workflow-num">02</span>
+            <div class="workflow-icon">⌕</div>
+            <h3>发现车商</h3>
+            <p>自动搜索真实商业客户</p>
+          </button>
+          <button type="button" data-section="review">
+            <span class="workflow-num">03</span>
+            <div class="workflow-icon">✓</div>
+            <h3>审核评分</h3>
+            <p>过滤低质量与重复线索</p>
+          </button>
+          <button type="button" data-section="email">
+            <span class="workflow-num">04</span>
+            <div class="workflow-icon">↗</div>
+            <h3>智能触达</h3>
+            <p>生成个性化英文开发信</p>
+          </button>
+          <button type="button" data-section="quote">
+            <span class="workflow-num">05</span>
+            <div class="workflow-icon">$</div>
+            <h3>跟进报价</h3>
+            <p>持续跟进并生成 CIF 报价</p>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="market">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 1</p>
+          <h2>市场选择</h2>
+          <p>作用：先选最容易成交的国家，系统再按国家生成客户搜索词和开发重点。</p>
+        </div>
+      </div>
+      <div class="cards country-grid" id="countryGrid"></div>
+    </section>
+
+    <section class="section" id="lead-finder">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 2</p>
+          <h2>自动找客户</h2>
+          <p>作用：搜索具备汽车进口、经销、分销或采购意向的客户；不要求对方已经提到华为汽车。</p>
+        </div>
+      </div>
+      <div class="two-col">
+        <form class="panel" id="finderForm">
+          <h3>找客户条件</h3>
+          <label>中文目标描述
+            <textarea name="goal" rows="4">找迪拜卖豪华新能源 SUV 的汽车经销商，适合推荐问界 M9 和尊界 S800。</textarea>
+          </label>
+          <label>目标国家
+            <select name="country" id="finderCountry"></select>
+          </label>
+          <label>主推车型
+            <select name="model">
+              <option>问界 M9</option>
+              <option>尊界 S800</option>
+              <option>享界 S9</option>
+              <option>问界 M8</option>
+              <option>智界 R7</option>
+            </select>
+          </label>
+          <label>客户来源
+            <select name="sourceMode">
+              <option value="combined">综合搜索（地图 + 官网）</option>
+              <option value="social">社媒综合（Facebook + Instagram + TikTok + YouTube + LinkedIn）</option>
+              <option value="google">Google Maps 企业数据</option>
+              <option value="osm">OpenStreetMap 地图</option>
+              <option value="dealer">车商官网 / 汽车行业目录</option>
+              <option value="instagram">Instagram 公开账号</option>
+              <option value="facebook">Facebook 公开主页</option>
+              <option value="tiktok">TikTok 公开账号</option>
+              <option value="youtube">YouTube 公开频道</option>
+              <option value="linkedin">LinkedIn 公司 / 个人主页</option>
+            </select>
+          </label>
+          <label>账号对象
+            <select name="accountScope">
+              <option value="both">公司账号 + 个人决策人</option>
+              <option value="company">仅公司官方账号</option>
+              <option value="person">仅公开个人 / 经营者账号</option>
+            </select>
+          </label>
+          <label>线索时效
+            <select name="freshness">
+              <option value="all">不限时间（建立客户名单）</option>
+              <option value="3">最近 3 天</option>
+              <option value="7">最近 7 天</option>
+              <option value="30">最近 30 天</option>
+            </select>
+          </label>
+          <p class="helper">选择 3 天或 7 天时，只保留能确认发布日期的新消息。OpenStreetMap 是长期商业地点，不属于新闻或社媒消息，因此不适用时间筛选。</p>
+          <p class="helper">地图适合找实体展厅；官网和目录适合找进口商、经销集团；社媒适合查看客户近期经营动态。社媒公开结果数量取决于平台是否允许搜索引擎收录。</p>
+          <button class="primary" type="submit">一键获客到待审核</button>
+        </form>
+        <div class="panel">
+          <h3>系统生成的英文搜索词</h3>
+          <div class="keyword-list" id="keywords"></div>
+          <p class="helper">这些词用于搜索官网、社媒主页、行业目录和车商平台。</p>
+          <div class="source-guide">
+            <h4>客户来源说明</h4>
+            <div><strong>Google Maps</strong><span>官方 Places API 企业资料，可获取商家名称、地址、电话、官网、评分和地图原文。</span></div>
+            <div><strong>OpenStreetMap</strong><span>地图与地理商业目录，用于寻找当地真实汽车展厅和经销商地点。</span></div>
+            <div><strong>车商官网 / 行业目录</strong><span>企业官网或汽车行业网站，用于确认车型、联系方式和经营范围。</span></div>
+            <div><strong>Instagram</strong><span>社交媒体商业主页，用于观察车商近期发布的车辆和营销动态。</span></div>
+            <div><strong>Facebook</strong><span>社交媒体商业主页，用于查找公司主页、公开帖子和联系方式。</span></div>
+            <div><strong>TikTok</strong><span>短视频公开账号，用于发现车商、展厅、经营者及其公开营销内容和主页链接。</span></div>
+            <div><strong>YouTube</strong><span>公开频道与简介，用于核对公司品牌、联系方式、经营活动及公开人员频道。</span></div>
+            <div><strong>LinkedIn</strong><span>企业与职业社交平台，用于确认公司信息和可能的采购、销售负责人。</span></div>
+          </div>
+          <div class="insight-box">
+            <div class="finder-progress-head">
+              <div>
+                <span>一键获客进度</span>
+                <strong id="finderProgressTitle">等待开始</strong>
+              </div>
+              <div class="finder-progress-stat">
+                <strong id="finderProgressPercent">0%</strong>
+                <small id="finderElapsed">尚未运行</small>
+              </div>
+            </div>
+            <div class="finder-progress-track" role="progressbar" aria-label="一键获客进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <div id="finderProgressBar"></div>
+            </div>
+            <div class="finder-progress-steps" id="finderProgressSteps">
+              <div class="progress-step" data-progress-stage="search"><i>1</i><span>搜索来源</span></div>
+              <div class="progress-step" data-progress-stage="extract"><i>2</i><span>提取企业</span></div>
+              <div class="progress-step" data-progress-stage="verify"><i>3</i><span>交叉核验</span></div>
+              <div class="progress-step" data-progress-stage="done"><i>4</i><span>完成入库</span></div>
+            </div>
+            <p id="finderStatus">点击左侧按钮后，将显示搜索、提取和核验的实时流程进度。</p>
+          </div>
+        </div>
+      </div>
+      <div class="panel section-gap social-prospecting">
+        <div class="panel-head">
+          <div>
+            <h3>社媒登录态主动开发与页面采集</h3>
+            <p>使用当前 Google Chrome 登录状态；打开简介弹窗后可用扩展采集邮箱、官网和关联社媒。</p>
+          </div>
+          <span class="social-login-state" id="captureInboxStatus">等待 Chrome 采集器</span>
+        </div>
+        <div class="extension-install-note">
+          <div>
+            <strong>Chrome扩展目录</strong>
+            <code>C:\Users\sss\Documents\网站解析\chrome-social-capture</code>
+          </div>
+          <p>在 <b>chrome://extensions</b> 开启开发者模式，点击“加载已解压的扩展程序”，选择上面的目录。之后在社媒页面打开简介弹窗，再点击工具栏中的“海外获客页面采集器”。</p>
+        </div>
+        <div class="social-prospecting-grid">
+          <div class="social-search-box">
+            <span>平台适配搜索包</span>
+            <strong id="socialSearchQuery">每次只搜索一个短词，避免平台返回空结果</strong>
+            <div class="platform-search-group">
+              <div class="platform-search-title"><b>Facebook 主页</b><small>短词搜索，打开后保持“公共主页”筛选</small></div>
+              <div class="social-query-links" id="facebookSearchLinks"></div>
+            </div>
+            <div class="platform-search-group">
+              <div class="platform-search-title"><b>Instagram 标签</b><small>优先从行业标签进入，再查看账号主页</small></div>
+              <div class="social-query-links instagram-links" id="instagramSearchLinks"></div>
+            </div>
+            <ol>
+              <li>先在 Chrome 登录 Facebook 和 Instagram。</li>
+              <li>逐个打开短词或标签，不要把多个业务条件合并成一个长搜索词。</li>
+              <li>进入账号主页，确认企业确实经营汽车进口、经销、展厅或采购业务。</li>
+              <li>复制企业主页网址，填写右侧表单并保存到待审核。</li>
+            </ol>
+          </div>
+          <form class="social-capture-form" id="socialLeadForm">
+            <div class="social-form-grid">
+              <label>平台
+                <select name="platform">
+                  <option value="Facebook">Facebook</option>
+                  <option value="Instagram">Instagram</option>
+                </select>
+              </label>
+              <label>账号类型
+                <select name="accountType">
+                  <option value="公司账号">公司账号</option>
+                  <option value="个人决策人">个人决策人</option>
+                </select>
+              </label>
+            </div>
+            <label>公司或联系人名称
+              <input name="company" required placeholder="例如 Dubai Premium Motors">
+            </label>
+            <label>主页绝对网址
+              <input name="pageUrl" type="url" required placeholder="https://www.facebook.com/...">
+            </label>
+            <label>页面公开信息摘要
+              <textarea name="notes" rows="3" placeholder="例如：迪拜豪华车展厅，主页展示多品牌进口车，并公开 WhatsApp。"></textarea>
+            </label>
+            <div class="social-capture-actions">
+              <span id="socialLeadStatus">保存后进入线索审核，不会直接进入客户池。</span>
+              <button class="primary" type="submit">保存到待审核</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <div class="panel section-gap">
+        <div class="panel-head">
+          <h3>发现的候选客户</h3>
+          <span>进入审核前先不直接联系</span>
+        </div>
+        <div class="lead-list" id="leadList"></div>
+      </div>
+    </section>
+
+    <section class="section" id="review">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 3</p>
+          <h2>线索审核</h2>
+          <p>作用：自动找来的客户先经过中文审核，确认是不是车商、是否有联系方式、是否值得联系。</p>
+        </div>
+        <button class="primary" id="researchAllLeads" type="button">全网补全全部线索</button>
+      </div>
+      <div class="review-grid" id="reviewGrid"></div>
+    </section>
+
+    <section class="section" id="crm">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 4</p>
+          <h2>客户池 CRM</h2>
+          <p>作用：把通过审核的客户统一管理，记录阶段、负责人、适合车型和下一步动作。</p>
+        </div>
+      </div>
+      <form class="panel crm-form" id="leadForm">
+        <div class="panel-head">
+          <h3>手动新增线索</h3>
+          <span>先进入审核，不直接进客户池</span>
+        </div>
+        <div class="form-grid compact">
+          <label>公司名 <input name="company" required placeholder="例如 Dubai Premium Motors"></label>
+          <label>国家 <input name="country" required placeholder="例如 UAE"></label>
+          <label>城市 <input name="city" required placeholder="例如 Dubai"></label>
+          <label>客户类型
+            <select name="type">
+              <option>Luxury car showroom</option>
+              <option>Auto importer</option>
+              <option>EV dealer</option>
+              <option>Parallel import dealer</option>
+              <option>Fleet buyer</option>
+            </select>
+          </label>
+          <label>来源 <input name="source" value="Website"></label>
+          <label>适合车型
+            <select name="model">
+              <option>问界 M9</option>
+              <option>尊界 S800</option>
+              <option>享界 S9</option>
+              <option>问界 M8</option>
+              <option>智界 R7</option>
+            </select>
+          </label>
+          <label>客户官网内容
+            <textarea name="website" rows="3" placeholder="粘贴官网简介、社媒简介或你看到的客户信息"></textarea>
+          </label>
+          <label>下一步动作
+            <textarea name="next" rows="3">发送 WhatsApp 首次开发信</textarea>
+          </label>
+        </div>
+        <button class="primary" type="submit">保存到待审核</button>
+      </form>
+      <div class="split-actions section-gap">
+        <button class="primary" id="exportCustomerTable" type="button">导出客户表格 CSV</button>
+        <button class="ghost" id="exportData" type="button">导出完整备份 JSON</button>
+        <button class="ghost" id="clearSavedData" type="button">清空本机保存数据</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>客户</th>
+              <th>国家/城市</th>
+              <th>类型</th>
+              <th>适合车型</th>
+              <th>评分</th>
+              <th>阶段</th>
+              <th>下一步</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="crmRows"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="section" id="email">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 5</p>
+          <h2>智能开发信</h2>
+          <p>作用：根据线索信息和客户官网内容，自动融合你们的产品优势，生成英文开发信和中文解释。</p>
+        </div>
+      </div>
+      <div class="email-builder">
+        <form class="panel" id="emailForm">
+          <h3>客户与官网信息</h3>
+          <label>从客户池选择
+            <select id="leadSelect"></select>
+          </label>
+          <button class="ghost inline-action" id="fillLeadFromCrm" type="button">带入这个客户</button>
+          <label>客户公司名
+            <input name="company" required placeholder="审核通过后可从客户池带入">
+          </label>
+          <input name="contactName" type="hidden">
+          <label>客户官网 / 社媒主页
+            <input name="website" placeholder="客户官网或社媒主页">
+          </label>
+          <label>从客户官网看到的信息
+            <textarea name="websiteText" rows="6" placeholder="粘贴客户官网简介、About us、社媒简介或你看到的业务信息"></textarea>
+          </label>
+          <label>主推车型
+            <select name="model">
+              <option>问界 M9</option>
+              <option>尊界 S800</option>
+              <option>享界 S9</option>
+              <option>问界 M8</option>
+              <option>智界 R7</option>
+            </select>
+          </label>
+          <label>联系渠道
+            <select name="channel">
+              <option>WhatsApp</option>
+              <option>Email</option>
+              <option>Instagram DM</option>
+            </select>
+          </label>
+          <button class="primary" type="submit">自动生成开发信</button>
+        </form>
+        <div class="panel result-panel">
+          <div class="panel-head">
+            <h3>生成结果</h3>
+            <button class="ghost" id="copyEmail" type="button">复制英文</button>
+          </div>
+          <div class="insight-box">
+            <span>中文判断</span>
+            <p id="leadInsight">这家公司是迪拜豪华车展厅，适合推荐问界 M9 或尊界 S800。</p>
+          </div>
+          <div class="letter-block">
+            <span>英文开发信</span>
+            <pre id="englishLetter"></pre>
+          </div>
+          <div class="letter-block muted">
+            <span>中文意思</span>
+            <p id="chineseMeaning"></p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="follow">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 6</p>
+          <h2>今日跟进</h2>
+          <p>作用：系统每天告诉你该联系谁、为什么联系、应该怎么说。</p>
+        </div>
+      </div>
+      <div class="task-list" id="followTasks"></div>
+    </section>
+
+    <section class="section" id="quote">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 7</p>
+          <h2>CIF 报价</h2>
+          <p>作用：客户有兴趣后，快速计算到港参考价。CIF 不包含客户国家关税、VAT 和上牌费。</p>
+        </div>
+      </div>
+      <div class="quote-layout">
+        <form class="panel quote-calculator" id="quoteForm">
+          <div class="panel-head">
+            <h3>CIF报价计算器</h3>
+            <span>报价版本保存后不可覆盖</span>
+          </div>
+          <div class="quote-form-grid">
+            <label>选择线索
+              <select name="customer" id="quoteCustomer"><option value="">未选择客户</option></select>
+            </label>
+            <label>车型
+              <select name="model" id="quoteModel">
+                <option value="问界 M9">问界 M9 / AITO M9</option>
+                <option value="问界 M8">问界 M8 / AITO M8</option>
+                <option value="尊界 S800">尊界 S800 / Maextro S800</option>
+                <option value="享界 S9">享界 S9 / Stelato S9</option>
+                <option value="智界 R7">智界 R7 / Luxeed R7</option>
+              </select>
+            </label>
+            <label>数量 <input name="qty" type="number" value="1" min="1"></label>
+            <label>目的港
+              <select name="destination">
+                <option>Jebel Ali, UAE</option>
+                <option>Dammam, Saudi Arabia</option>
+                <option>Doha, Qatar</option>
+                <option>Kuwait City, Kuwait</option>
+                <option>Aktau, Kazakhstan</option>
+                <option>Vladivostok, Russia</option>
+                <option>Poti, Georgia (transit to Uzbekistan)</option>
+                <option>Alat Port, Azerbaijan</option>
+              </select>
+            </label>
+            <label>车辆采购价 USD <input name="price" id="quotePrice" type="number" value="68000" min="0"></label>
+            <label>国内费用/车 USD <input name="local" type="number" value="950" min="0"></label>
+            <label>保险费率 <input name="insurance" type="number" value="0.008" min="0" step="0.001"></label>
+            <label>文件/认证费 USD <input name="docs" type="number" value="1800" min="0"></label>
+            <label>海运费 USD <input name="freight" type="number" value="3600" min="0"></label>
+            <label>其他杂费 USD <input name="other" type="number" value="650" min="0"></label>
+            <label>报价有效期
+              <select name="validDays">
+                <option value="7">7 天</option>
+                <option value="15">15 天</option>
+                <option value="30">30 天</option>
+              </select>
+            </label>
+          </div>
+          <div class="quote-actions">
+            <button class="primary" type="submit">计算CIF</button>
+            <button class="ghost" id="saveQuote" type="button">保存报价版本</button>
+          </div>
+        </form>
+        <div class="panel quote-result">
+          <div class="panel-head">
+            <div>
+              <p class="quote-result-kicker">Quotation summary</p>
+              <h3>报价结果</h3>
+            </div>
+            <span class="quote-tax-note">不含目的国关税与本地税</span>
+          </div>
+          <div id="quoteResult"></div>
+        </div>
+      </div>
+      <div class="panel section-gap">
+        <div class="panel-head">
+          <h3>报价历史</h3>
+          <span id="quoteVersionCount">0 个版本</span>
+        </div>
+        <div class="table-wrap quote-history-wrap">
+          <table>
+            <thead><tr><th>版本</th><th>线索</th><th>车型</th><th>数量</th><th>CIF总价</th><th>有效期</th><th>创建时间</th><th>操作</th></tr></thead>
+            <tbody id="quoteHistory"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="risk">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 8</p>
+          <h2>售后与风险提醒</h2>
+          <p>作用：新能源车出口不只是卖车，还要提前确认清关、上牌、语言、质保和售后问题。</p>
+        </div>
+        <label class="section-filter">目标市场
+          <select id="riskCountry"></select>
+        </label>
+      </div>
+      <div class="cards risk-grid" id="riskGrid"></div>
+      <p class="risk-disclaimer">以上为成交前核验清单，不构成清关或法律结论。正式报价前应让当地清关代理、认证机构和保险方书面确认。</p>
+    </section>
+
+    <section class="section" id="kpi">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 9</p>
+          <h2>KPI 看板</h2>
+          <p>作用：看哪个国家、哪个车型、哪个渠道最有效，让你少做无用功。</p>
+        </div>
+      </div>
+      <div class="kpi-grid">
+        <div><span>待审核线索</span><strong id="kpiPending">0</strong><p>一键获客后先进入这里</p></div>
+        <div><span>已完成核验</span><strong id="kpiVerified">0</strong><p>有多来源证据链的线索</p></div>
+        <div><span>正式客户</span><strong id="kpiCustomers">0</strong><p>审核通过后进入客户池</p></div>
+        <div><span>已联系客户</span><strong id="kpiContacted">0</strong><p>已完成首次触达</p></div>
+        <div><span>有回复客户</span><strong id="kpiReplied">0</strong><p>进入有效销售沟通</p></div>
+        <div><span>报价版本</span><strong id="kpiQuotes">0</strong><p>每次保存生成一个历史版本</p></div>
+      </div>
+      <div class="panel section-gap kpi-insight" id="kpiInsight"></div>
+    </section>
+  </main>
+
+  <script src="./script.js?v=20260619-19"></script>
+</body>
+</html>

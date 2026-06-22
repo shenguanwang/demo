@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="popup.css">
+  <title>页面采集器</title>
+</head>
+<body>
+  <main>
+    <span class="eyebrow">SOCIAL CAPTURE</span>
+    <h1>采集当前页面</h1>
+    <p>先打开账号简介、About或链接弹窗，再点击下面的按钮。</p>
+    <div class="preview" id="preview">
+      <strong>等待读取页面</strong>
+      <span>支持 YouTube、Facebook、Instagram、TikTok、LinkedIn。</span>
+    </div>
+    <button id="captureButton" type="button">读取并发送到工作台</button>
+    <div class="status" id="status">不会读取 Cookie、密码或非当前页面内容。</div>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

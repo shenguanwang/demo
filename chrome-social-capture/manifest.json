@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "海外获客页面采集器",
+  "version": "1.0.0",
+  "description": "采集当前社媒页面可见的邮箱、链接和简介，发送到本地海外获客工作台。",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1:8815/*"],
+  "action": {
+    "default_title": "采集当前社媒页面",
+    "default_popup": "popup.html"
+  }
+}

@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: overseas-lead-workbench
+    runtime: python
+    plan: free
+    buildCommand: python -m py_compile server.py
+    startCommand: python server.py
+    healthCheckPath: /health
+    envVars:
+      - key: LEAD_TOOL_HOST
+        value: 0.0.0.0
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
