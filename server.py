@@ -637,6 +637,29 @@ def cancel_discovery_job(job_id: str) -> dict | None:
     return get_discovery_job(job_id)
 
 
+def delete_discovery_job(job_id: str) -> bool:
+    job = load_discovery_job(job_id)
+    if not job:
+        return False
+    if job.get("status") in {"queued", "running"}:
+        raise ValueError("运行中的任务请先取消，再删除")
+    initialize_state_store()
+    with DISCOVERY_JOBS_LOCK:
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM discovery_jobs WHERE job_id = %s", (job_id,))
+                    deleted = cursor.rowcount > 0
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                cursor = connection.execute(
+                    "DELETE FROM discovery_jobs WHERE job_id = ?",
+                    (job_id,),
+                )
+                deleted = cursor.rowcount > 0
+    return deleted
+
+
 def resume_interrupted_discovery_jobs() -> int:
     initialize_state_store()
     query = (
@@ -3370,6 +3393,22 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 self.send_json(200, {"ok": True, "job": job})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/discover/delete":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                job_id = str(payload.get("id", ""))
+                if not delete_discovery_job(job_id):
+                    self.send_json(404, {"ok": False, "error": "获客任务不存在"})
+                    return
+                self.send_json(200, {"ok": True, "id": job_id})
+            except json.JSONDecodeError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except ValueError as exc:
+                self.send_json(409, {"ok": False, "error": str(exc)})
+            except (OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path != "/api/social-capture":

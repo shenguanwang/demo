@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>华为系新能源汽车海外获客工作台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-social5">
+  <link rel="stylesheet" href="./styles.css?v=20260622-jobs-ui">
 </head>
 <body>
   <aside class="sidebar">
@@ -262,7 +262,11 @@
             <h3>云端获客任务</h3>
             <p>页面关闭或换设备后任务仍会继续。完成的任务可以随时导入待审核线索。</p>
           </div>
-          <button class="ghost compact" id="refreshDiscoveryJobs" type="button">刷新任务</button>
+          <div class="discovery-task-controls">
+            <span id="discoveryJobCount">0 个任务</span>
+            <button class="ghost compact" id="toggleDiscoveryJobs" type="button" hidden>展开全部</button>
+            <button class="ghost compact" id="refreshDiscoveryJobs" type="button">刷新任务</button>
+          </div>
         </div>
         <div class="discovery-job-list" id="discoveryJobList">
           <p class="empty">正在读取云端任务…</p>
@@ -632,6 +636,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260622-social5"></script>
+  <script src="./script.js?v=20260622-jobs-ui"></script>
 </body>
 </html>

@@ -1002,6 +1002,19 @@ textarea {
   align-items: center;
 }
 
+.discovery-task-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.discovery-task-controls > span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .ghost.compact {
   min-height: 36px;
   padding: 0 14px;
@@ -1108,12 +1121,37 @@ textarea {
   color: #8c959e;
 }
 
+.discovery-job-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.discovery-job-delete {
+  min-height: 38px;
+  padding: 0 11px;
+  border: 1px solid #e5c9c5;
+  border-radius: 9px;
+  background: #fff;
+  color: #a33c32;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.discovery-job-delete:disabled {
+  border-color: #e4e7ea;
+  color: #a0a7ae;
+  background: #f4f5f6;
+}
+
 @media (max-width: 700px) {
   .discovery-job {
     grid-template-columns: 1fr;
   }
 
-  .discovery-job-action {
+  .discovery-job-actions,
+  .discovery-job-action,
+  .discovery-job-delete {
     width: 100%;
   }
 }

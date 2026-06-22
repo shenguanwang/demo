@@ -138,6 +138,7 @@ let cloudSaveTimer = null;
 let cloudSaveChain = Promise.resolve();
 let discoveryJobs = [];
 let discoveryJobsTimer = null;
+let discoveryJobsExpanded = false;
 
 const productProfiles = {
   "问界 M9": {
@@ -1858,7 +1859,23 @@ function renderDiscoveryJobs() {
     failed: "失败",
     canceled: "已取消"
   };
-  box.innerHTML = discoveryJobs.length ? discoveryJobs.map((job) => {
+  const activeJobs = discoveryJobs.filter((job) => ["queued", "running"].includes(job.status));
+  const inactiveJobs = discoveryJobs.filter((job) => !["queued", "running"].includes(job.status));
+  const collapsedJobs = [
+    ...activeJobs,
+    ...inactiveJobs.slice(0, Math.max(0, 4 - activeJobs.length))
+  ];
+  const visibleJobs = discoveryJobsExpanded ? discoveryJobs : collapsedJobs;
+  const count = $("#discoveryJobCount");
+  if (count) count.textContent = `${discoveryJobs.length} 个任务`;
+  const toggle = $("#toggleDiscoveryJobs");
+  if (toggle) {
+    toggle.hidden = discoveryJobs.length <= collapsedJobs.length;
+    toggle.textContent = discoveryJobsExpanded
+      ? "收起任务"
+      : `展开全部（${discoveryJobs.length}）`;
+  }
+  box.innerHTML = visibleJobs.length ? visibleJobs.map((job) => {
     const count = Number(job.result?.count || job.result?.leads?.length || 0);
     const canImport = job.status === "completed" && !job.imported && count > 0;
     const canRetry = ["failed", "canceled"].includes(job.status);
@@ -1897,10 +1914,17 @@ function renderDiscoveryJobs() {
             <p>${escapeHtml(job.error || job.message || "等待云端处理")}</p>
           </div>
         </div>
-        <button class="discovery-job-action" type="button"
-          ${actionAttribute} ${canImport || canRetry || canCancel ? "" : "disabled"}>
-          ${escapeHtml(actionLabel)}
-        </button>
+        <div class="discovery-job-actions">
+          <button class="discovery-job-action" type="button"
+            ${actionAttribute} ${canImport || canRetry || canCancel ? "" : "disabled"}>
+            ${escapeHtml(actionLabel)}
+          </button>
+          <button class="discovery-job-delete" type="button"
+            data-delete-job="${escapeHtml(job.id)}"
+            ${canCancel ? `disabled title="请先取消运行中的任务"` : ""}>
+            删除
+          </button>
+        </div>
       </article>
     `;
   }).join("") : `<p class="empty">暂无云端获客任务。</p>`;
@@ -2000,6 +2024,34 @@ async function cancelDiscoveryJob(jobId) {
       stage: "done",
       state: "error",
       title: "取消任务失败",
+      message: error.message
+    });
+  }
+}
+
+async function deleteDiscoveryJob(jobId) {
+  if (!jobId || !window.confirm("确定删除这条云端获客任务记录吗？")) return;
+  const button = document.querySelector(`[data-delete-job="${CSS.escape(jobId)}"]`);
+  if (button) {
+    button.disabled = true;
+    button.textContent = "删除中";
+  }
+  try {
+    const response = await fetch("/api/discover/delete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: jobId })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    await loadDiscoveryJobs();
+  } catch (error) {
+    await loadDiscoveryJobs().catch(() => undefined);
+    setFinderProgress({
+      percent: 100,
+      stage: "done",
+      state: "error",
+      title: "任务删除失败",
       message: error.message
     });
   }
@@ -2130,6 +2182,11 @@ async function runCloudDiscovery(data, words, onProgress) {
 }
 
 function bindForms() {
+  $("#toggleDiscoveryJobs")?.addEventListener("click", () => {
+    discoveryJobsExpanded = !discoveryJobsExpanded;
+    renderDiscoveryJobs();
+  });
+
   $("#refreshDiscoveryJobs")?.addEventListener("click", () => {
     loadDiscoveryJobs().catch((error) => {
       $("#discoveryJobList").innerHTML = `<p class="empty">任务读取失败：${escapeHtml(error.message)}</p>`;
@@ -2143,6 +2200,8 @@ function bindForms() {
     if (retryButton && !retryButton.disabled) retryDiscoveryJob(retryButton.dataset.retryJob);
     const cancelButton = event.target.closest("[data-cancel-job]");
     if (cancelButton && !cancelButton.disabled) cancelDiscoveryJob(cancelButton.dataset.cancelJob);
+    const deleteButton = event.target.closest("[data-delete-job]");
+    if (deleteButton && !deleteButton.disabled) deleteDiscoveryJob(deleteButton.dataset.deleteJob);
   });
 
   $("#countryGrid").addEventListener("click", (event) => {
