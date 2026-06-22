@@ -597,6 +597,76 @@ button:disabled {
   box-shadow: 0 12px 36px rgba(22, 29, 38, 0.05);
 }
 
+.follow-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.follow-summary span {
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.follow-summary strong {
+  margin-left: 4px;
+  color: #263340;
+  font-size: 14px;
+}
+
+.follow-summary .overdue,
+.follow-overdue {
+  border-color: #efc7c1;
+  background: #fff9f8;
+}
+
+.follow-entry {
+  display: grid;
+  grid-template-columns: minmax(130px, .7fr) minmax(140px, .7fr) minmax(220px, 1.5fr) auto;
+  gap: 7px;
+  margin: 12px 0;
+}
+
+.follow-entry select,
+.follow-entry input,
+.follow-entry button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 9px;
+  font-size: 11px;
+}
+
+.follow-entry button {
+  background: #263340;
+  color: #fff;
+  font-weight: 700;
+}
+
+.follow-history {
+  margin: 9px 0;
+  padding: 9px 10px;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+
+.follow-history summary {
+  cursor: pointer;
+  color: #53606d;
+  font-size: 11px;
+}
+
+.follow-history p {
+  margin: 7px 0 0;
+  font-size: 11px;
+}
+
 .workflow > button {
   position: relative;
   min-width: 0;
@@ -2464,6 +2534,21 @@ tbody tr:last-child td {
   background: #fff0ee;
 }
 
+.quote-row-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.quote-row-actions button {
+  min-height: 30px;
+  padding: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: #44515e;
+  font-size: 10px;
+}
+
 .risk-grid,
 .kpi-grid {
   grid-template-columns: repeat(4, minmax(180px, 1fr));
@@ -2610,6 +2695,10 @@ tbody tr:last-child td {
   .task-list,
   .risk-grid,
   .kpi-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .follow-entry {
     grid-template-columns: 1fr;
   }
 

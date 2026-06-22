@@ -1074,7 +1074,7 @@ function updateCustomerStage(index, stage) {
   lead.stage = stage;
   lead.next = defaultNextAction(stage);
   lead.nextFollowAt = stage === "已联系"
-    ? new Date(Date.now() + 3 * 86400000).toLocaleDateString("zh-CN")
+    ? new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10)
     : lead.nextFollowAt || "";
   refreshAllLeadViews();
 }
@@ -1210,6 +1210,8 @@ function normalizeLead(raw) {
     stage: raw.stage || "待审核",
     next: raw.next || "审核通过后生成英文开发信",
     nextFollowAt: raw.nextFollowAt || "",
+    lastContactAt: raw.lastContactAt || "",
+    followUpHistory: Array.isArray(raw.followUpHistory) ? raw.followUpHistory : [],
     website,
     reason: raw.reason || `${raw.city || raw.country} 的${raw.type || "汽车相关客户"}，建议人工审核后再联系。`
   };
@@ -1688,6 +1690,10 @@ function renderQuote(values = {}) {
   const other = Number(values.other || 650);
   const destination = values.destination || "Jebel Ali, UAE";
   const validDays = Number(values.validDays || 7);
+  const configuration = String(values.configuration || "").trim();
+  const deliveryDays = Number(values.deliveryDays || 45);
+  const paymentTerms = String(values.paymentTerms || "30% deposit, 70% before shipment");
+  const quoteNotes = String(values.quoteNotes || "").trim();
   const vehicleTotal = price * qty;
   const localTotal = local * qty;
   const insurance = vehicleTotal * insuranceRate;
@@ -1707,8 +1713,12 @@ function renderQuote(values = {}) {
     other,
     total,
     validUntil,
+    configuration,
+    deliveryDays,
+    paymentTerms,
+    quoteNotes,
     createdAt: new Date().toLocaleString(),
-    english: `CIF reference price for ${productProfiles[model]?.english || model}: ${money(total)}. This price does not include destination import duty, VAT, registration fee or local delivery cost.`
+    english: `CIF quotation for ${productProfiles[model]?.english || model}: ${money(total)} to ${destination}. Payment: ${paymentTerms}. Estimated delivery: ${deliveryDays} days. Destination import duty, VAT, registration and local delivery are excluded.`
   };
 
   $("#quoteResult").innerHTML = `
@@ -1720,7 +1730,10 @@ function renderQuote(values = {}) {
     <div class="quote-summary-grid">
       <div><span>车型</span><strong>${escapeHtml(model)}</strong></div>
       <div><span>数量</span><strong>${qty} 辆</strong></div>
+      <div class="wide"><span>配置/颜色</span><strong>${escapeHtml(configuration || "待客户确认")}</strong></div>
       <div class="wide"><span>目的港</span><strong>${escapeHtml(destination)}</strong></div>
+      <div class="wide"><span>付款条款</span><strong>${escapeHtml(paymentTerms)}</strong></div>
+      <div><span>预计交期</span><strong>${deliveryDays} 天</strong></div>
       <div class="wide"><span>有效期</span><strong>至 ${escapeHtml(validUntil)}</strong></div>
     </div>
     <div class="quote-cost-head">
@@ -1735,8 +1748,25 @@ function renderQuote(values = {}) {
       <div><dt>文件与认证</dt><dd>${money(docs)}</dd></div>
       <div><dt>其他杂费</dt><dd>${money(other)}</dd></div>
     </dl>
-    <p class="quote-disclaimer">此结果仅作报价参考，不包含目的国进口关税、VAT、注册及本地交付费用。</p>
+    <p class="quote-disclaimer">此结果仅作报价参考，不包含目的国进口关税、VAT、注册及本地交付费用。${quoteNotes ? `备注：${escapeHtml(quoteNotes)}` : ""}</p>
   `;
+}
+
+function quoteDocumentHtml(quote) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(quote.id)} Quotation</title>
+  <style>body{font-family:Arial,sans-serif;color:#18222d;max-width:900px;margin:40px auto;padding:0 28px}h1{margin-bottom:4px}.meta{color:#66717c}.total{font-size:28px;font-weight:700;margin:24px 0}table{width:100%;border-collapse:collapse}td{padding:10px;border-bottom:1px solid #ddd}td:first-child{color:#66717c;width:35%}.note{margin-top:28px;padding:16px;background:#f5f7f9;line-height:1.6}</style>
+  </head><body><h1>Commercial Quotation</h1><p class="meta">Quotation No. ${escapeHtml(quote.id)} · ${escapeHtml(quote.createdAt)}</p>
+  <div class="total">${money(quote.total)} CIF ${escapeHtml(quote.destination)}</div><table>
+  <tr><td>Customer</td><td>${escapeHtml(quote.customer)}</td></tr><tr><td>Model</td><td>${escapeHtml(productProfiles[quote.model]?.english || quote.model)}</td></tr>
+  <tr><td>Configuration / Color</td><td>${escapeHtml(quote.configuration || "To be confirmed")}</td></tr><tr><td>Quantity</td><td>${escapeHtml(quote.qty)}</td></tr>
+  <tr><td>Unit reference price</td><td>${money(quote.total / Math.max(1, quote.qty))}</td></tr><tr><td>Payment terms</td><td>${escapeHtml(quote.paymentTerms)}</td></tr>
+  <tr><td>Estimated delivery</td><td>${escapeHtml(quote.deliveryDays)} days</td></tr><tr><td>Valid until</td><td>${escapeHtml(quote.validUntil)}</td></tr></table>
+  <div class="note">${escapeHtml(quote.english)}${quote.quoteNotes ? `<br><br>Notes: ${escapeHtml(quote.quoteNotes)}` : ""}</div></body></html>`;
+}
+
+function downloadQuoteDocument(quote = lastQuote) {
+  if (!quote) return;
+  downloadFile(quoteDocumentHtml(quote), `${quote.id}-${quote.customer || "customer"}.html`, "text/html;charset=utf-8");
 }
 
 function renderQuoteHistory() {
@@ -1751,26 +1781,48 @@ function renderQuoteHistory() {
       <td>${escapeHtml(quote.model)}</td>
       <td>${escapeHtml(quote.qty)}</td>
       <td><strong>${money(quote.total)}</strong></td>
+      <td>${escapeHtml(quote.deliveryDays || 45)} 天</td>
       <td>${escapeHtml(quote.validUntil || "未设置")}</td>
       <td>${escapeHtml(quote.createdAt)}</td>
-      <td><button class="quote-delete" type="button" data-quote-delete="${index}" aria-label="删除这个报价版本">删除</button></td>
+      <td><div class="quote-row-actions"><button type="button" data-quote-download="${index}">导出</button><button class="quote-delete" type="button" data-quote-delete="${index}" aria-label="删除这个报价版本">删除</button></div></td>
     </tr>
-  `).join("") : `<tr><td colspan="8" class="quote-empty">暂无报价版本</td></tr>`;
+  `).join("") : `<tr><td colspan="9" class="quote-empty">暂无报价版本</td></tr>`;
 }
 
 function renderFollowTasks() {
   const box = $("#followTasks");
   if (!box) return;
-  const tasks = customers
+  const today = new Date().toISOString().slice(0, 10);
+  const filter = $("#followFilter")?.value || "due";
+  const allTasks = customers
     .map((lead, index) => ({ lead, index }))
-    .filter(({ lead }) => !["已成交", "已流失"].includes(lead.stage))
-    .slice(0, 8);
+    .filter(({ lead }) => !["已成交", "已流失"].includes(lead.stage));
+  const dueCount = allTasks.filter(({ lead }) => !lead.nextFollowAt || lead.nextFollowAt <= today).length;
+  const overdueCount = allTasks.filter(({ lead }) => lead.nextFollowAt && lead.nextFollowAt < today).length;
+  const summary = $("#followSummary");
+  if (summary) summary.innerHTML = `<span>待跟进 <strong>${allTasks.length}</strong></span><span>今日到期 <strong>${dueCount}</strong></span><span class="${overdueCount ? "overdue" : ""}">已逾期 <strong>${overdueCount}</strong></span>`;
+  const tasks = allTasks
+    .filter(({ lead }) => filter === "all"
+      || (filter === "recent" ? (lead.followUpHistory || []).length : !lead.nextFollowAt || lead.nextFollowAt <= today))
+    .sort((a, b) => String(a.lead.nextFollowAt || "").localeCompare(String(b.lead.nextFollowAt || "")))
+    .slice(0, 30);
   box.innerHTML = tasks.length ? tasks.map(({ lead, index }) => `
-    <article>
+    <article class="${lead.nextFollowAt && lead.nextFollowAt < today ? "follow-overdue" : ""}">
       <span>${escapeHtml(lead.stage || "待跟进")}${lead.score >= 75 ? " · A 级优先" : ""}</span>
       <h3>${escapeHtml(lead.company)}</h3>
       <p>建议动作：${escapeHtml(lead.next || `根据客户官网信息生成英文开发信，推荐${lead.model}。`)}</p>
-      ${lead.nextFollowAt ? `<small>计划跟进：${escapeHtml(lead.nextFollowAt)}</small>` : ""}
+      <small>计划跟进：${escapeHtml(lead.nextFollowAt || "今天")}${lead.lastContactAt ? ` · 最近联系：${escapeHtml(lead.lastContactAt)}` : ""}</small>
+      <div class="follow-entry">
+        <select data-follow-outcome="${index}">
+          <option value="已发送消息">已发送消息</option><option value="客户有回复">客户有回复</option>
+          <option value="需要报价">需要报价</option><option value="继续跟进">继续跟进</option>
+          <option value="暂缓">暂缓</option><option value="无效客户">无效客户</option>
+        </select>
+        <input data-follow-date="${index}" type="date" value="${escapeHtml(lead.nextFollowAt || today)}">
+        <input data-follow-note="${index}" placeholder="记录客户反馈或下一步">
+        <button type="button" data-follow-action="record" data-index="${index}">保存记录</button>
+      </div>
+      ${(lead.followUpHistory || []).length ? `<details class="follow-history"><summary>查看历史（${lead.followUpHistory.length}）</summary>${lead.followUpHistory.slice(0, 5).map((item) => `<p><b>${escapeHtml(item.at)}</b> · ${escapeHtml(item.outcome)}${item.note ? ` · ${escapeHtml(item.note)}` : ""}</p>`).join("")}</details>` : ""}
       <div class="task-actions">
         <button type="button" data-follow-action="email" data-index="${index}">写开发信</button>
         ${lead.stage === "准备联系" ? `<button type="button" data-follow-action="contacted" data-index="${index}">标记已联系</button>` : ""}
@@ -1778,6 +1830,24 @@ function renderFollowTasks() {
       </div>
     </article>
   `).join("") : `<p class="empty">暂无今日跟进。线索审核通过后，会自动生成跟进任务。</p>`;
+}
+
+function recordFollowUp(index) {
+  const lead = customers[index];
+  if (!lead) return;
+  const outcome = document.querySelector(`[data-follow-outcome="${index}"]`)?.value || "继续跟进";
+  const nextDate = document.querySelector(`[data-follow-date="${index}"]`)?.value || "";
+  const note = document.querySelector(`[data-follow-note="${index}"]`)?.value.trim() || "";
+  const today = new Date().toISOString().slice(0, 10);
+  lead.followUpHistory = [{ at: today, outcome, note, nextFollowAt: nextDate }, ...(lead.followUpHistory || [])].slice(0, 100);
+  lead.lastContactAt = today;
+  lead.nextFollowAt = nextDate;
+  if (outcome === "客户有回复") lead.stage = "有回复";
+  if (outcome === "需要报价") lead.stage = "报价中";
+  if (outcome === "暂缓") lead.stage = "暂缓";
+  if (outcome === "无效客户") lead.stage = "已流失";
+  lead.next = note || defaultNextAction(lead.stage);
+  refreshAllLeadViews();
 }
 
 function renderKpis() {
@@ -2504,12 +2574,23 @@ function bindForms() {
     if (customer && !["谈判中", "已成交"].includes(customer.stage)) {
       customer.stage = "报价中";
       customer.next = "发送报价并确认客户对价格、配置和交期的反馈";
+      customer.nextFollowAt = new Date(Date.now() + 2 * 86400000).toISOString().slice(0, 10);
+      customer.followUpHistory = [{
+        at: new Date().toISOString().slice(0, 10),
+        outcome: "已生成报价",
+        note: `${lastQuote.id} · ${money(lastQuote.total)} · ${lastQuote.destination}`,
+        nextFollowAt: customer.nextFollowAt
+      }, ...(customer.followUpHistory || [])].slice(0, 100);
     }
     saveState();
     renderQuoteHistory();
     renderCrm();
     renderFollowTasks();
     renderKpis();
+  });
+  $("#downloadQuote").addEventListener("click", () => {
+    renderQuote(Object.fromEntries(new FormData($("#quoteForm")).entries()));
+    downloadQuoteDocument(lastQuote);
   });
 
   $("#researchAllLeads").addEventListener("click", researchAllLeads);
@@ -2544,11 +2625,18 @@ function bindForms() {
     if (button.dataset.followAction === "email") openCustomerInEmail(index);
     if (button.dataset.followAction === "quote") openCustomerInQuote(index);
     if (button.dataset.followAction === "contacted") updateCustomerStage(index, "已联系");
+    if (button.dataset.followAction === "record") recordFollowUp(index);
   });
+  $("#followFilter")?.addEventListener("change", renderFollowTasks);
 
   $("#riskCountry").addEventListener("change", (event) => renderRiskProfile(event.target.value));
 
   $("#quoteHistory").addEventListener("click", (event) => {
+    const downloadButton = event.target.closest("[data-quote-download]");
+    if (downloadButton) {
+      downloadQuoteDocument(quoteHistory[Number(downloadButton.dataset.quoteDownload)]);
+      return;
+    }
     const button = event.target.closest("[data-quote-delete]");
     if (!button) return;
     const index = Number(button.dataset.quoteDelete);

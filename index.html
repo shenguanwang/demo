@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>华为系新能源汽车海外获客工作台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-jobs-ui">
+  <link rel="stylesheet" href="./styles.css?v=20260622-priority67">
 </head>
 <body>
   <aside class="sidebar">
@@ -513,7 +513,15 @@
           <h2>今日跟进</h2>
           <p>作用：系统每天告诉你该联系谁、为什么联系、应该怎么说。</p>
         </div>
+        <label class="section-filter">任务范围
+          <select id="followFilter">
+            <option value="due">今日与逾期</option>
+            <option value="all">全部待跟进</option>
+            <option value="recent">最近已记录</option>
+          </select>
+        </label>
       </div>
+      <div class="follow-summary" id="followSummary"></div>
       <div class="task-list" id="followTasks"></div>
     </section>
 
@@ -570,10 +578,33 @@
                 <option value="30">30 天</option>
               </select>
             </label>
+            <label>车辆配置/颜色
+              <input name="configuration" placeholder="例如 Max版 / 黑外棕内">
+            </label>
+            <label>预计交期
+              <select name="deliveryDays">
+                <option value="30">约 30 天</option>
+                <option value="45" selected>约 45 天</option>
+                <option value="60">约 60 天</option>
+                <option value="90">约 90 天</option>
+              </select>
+            </label>
+            <label>付款条款
+              <select name="paymentTerms">
+                <option>30% deposit, 70% before shipment</option>
+                <option>50% deposit, 50% before shipment</option>
+                <option>100% T/T before shipment</option>
+                <option>Irrevocable L/C at sight</option>
+              </select>
+            </label>
+            <label>报价备注
+              <input name="quoteNotes" placeholder="例如：最终价格以库存和船期确认为准">
+            </label>
           </div>
           <div class="quote-actions">
             <button class="primary" type="submit">计算CIF</button>
             <button class="ghost" id="saveQuote" type="button">保存报价版本</button>
+            <button class="ghost" id="downloadQuote" type="button">导出英文报价单</button>
           </div>
         </form>
         <div class="panel quote-result">
@@ -594,7 +625,7 @@
         </div>
         <div class="table-wrap quote-history-wrap">
           <table>
-            <thead><tr><th>版本</th><th>线索</th><th>车型</th><th>数量</th><th>CIF总价</th><th>有效期</th><th>创建时间</th><th>操作</th></tr></thead>
+            <thead><tr><th>版本</th><th>线索</th><th>车型</th><th>数量</th><th>CIF总价</th><th>交期</th><th>有效期</th><th>创建时间</th><th>操作</th></tr></thead>
             <tbody id="quoteHistory"></tbody>
           </table>
         </div>
@@ -636,6 +667,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260622-jobs-ui"></script>
+  <script src="./script.js?v=20260622-priority67"></script>
 </body>
 </html>
