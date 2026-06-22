@@ -131,6 +131,9 @@ let rejectedLeads = savedState.rejectedLeads;
 let quoteHistory = savedState.quotes;
 let lastQuote = null;
 let cloudStateReady = false;
+let cloudStateVersion = Number(savedState._cloudVersion || 0);
+let localStateDirty = Boolean(savedState._cloudDirty);
+let cloudHydrating = false;
 let cloudSaveTimer = null;
 let cloudSaveChain = Promise.resolve();
 let discoveryJobs = [];
@@ -337,6 +340,16 @@ function exportCustomersCsv() {
     ["公司社媒账号", (lead) => (lead.socialProfiles || []).filter((item) => !String(item.accountType || "").includes("个人")).map((item) => `${item.platform}: ${item.url}`).join(" ; ")],
     ["个人/经营者账号", (lead) => (lead.socialProfiles || []).filter((item) => String(item.accountType || "").includes("个人")).map((item) => `${item.title}: ${item.url}`).join(" ; ")],
     ["客户评分", (lead) => lead.score],
+    ["系统原始评分", (lead) => lead.baseScore],
+    ["客户等级", (lead) => lead.scoreTier],
+    ["人工校准", (lead) => lead.manualScoreAdjustment || 0],
+    ["进出口资质分", (lead) => lead.scoreDimensions?.tradeQualification || 0],
+    ["客户匹配分", (lead) => lead.scoreDimensions?.customerFit || 0],
+    ["采购意向分", (lead) => lead.scoreDimensions?.purchaseIntent || 0],
+    ["经营能力分", (lead) => lead.scoreDimensions?.businessCapacity || 0],
+    ["车型匹配分", (lead) => lead.scoreDimensions?.modelFit || 0],
+    ["可触达性分", (lead) => lead.scoreDimensions?.contactability || 0],
+    ["风险扣分", (lead) => lead.scoreDimensions?.penalty || 0],
     ["信息可信度", (lead) => `${lead.confidenceLabel || ""} ${lead.confidence || 0}%`.trim()],
     ["推荐车型", (lead) => (lead.recommendedModels || [lead.model]).join("、")],
     ["主推车型", (lead) => lead.model],
@@ -367,7 +380,14 @@ function exportCustomersCsv() {
 }
 
 function loadSavedState() {
-  const fallback = { reviewLeads: [], customers: [], rejectedLeads: [], quotes: [] };
+  const fallback = {
+    reviewLeads: [],
+    customers: [],
+    rejectedLeads: [],
+    quotes: [],
+    _cloudVersion: 0,
+    _cloudDirty: false
+  };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return fallback;
@@ -376,7 +396,9 @@ function loadSavedState() {
       reviewLeads: Array.isArray(parsed.reviewLeads) ? parsed.reviewLeads : [],
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
       rejectedLeads: Array.isArray(parsed.rejectedLeads) ? parsed.rejectedLeads : [],
-      quotes: Array.isArray(parsed.quotes) ? parsed.quotes : []
+      quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
+      _cloudVersion: Number(parsed._cloudVersion || 0),
+      _cloudDirty: Boolean(parsed._cloudDirty)
     };
   } catch {
     return fallback;
@@ -392,6 +414,76 @@ function workspaceStateSnapshot() {
   };
 }
 
+function persistLocalState(dirty = localStateDirty) {
+  localStateDirty = dirty;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({
+    ...workspaceStateSnapshot(),
+    _cloudVersion: cloudStateVersion,
+    _cloudDirty: localStateDirty
+  }));
+}
+
+function recordIdentity(record, type) {
+  if (type === "quotes") {
+    if (record?.id) return `quotes:id:${record.id}`;
+    return `${type}:${record?.customer || ""}|${record?.model || ""}|${record?.createdAt || ""}`;
+  }
+  if (record?.id) return `lead:id:${record.id}`;
+  return `lead:${record?.company || ""}|${record?.country || ""}|${
+    record?.customerWebsite || record?.sourceUrl || record?.source || ""
+  }`.toLowerCase();
+}
+
+function mergeRecordLists(remoteList, localList, type) {
+  const merged = new Map();
+  (Array.isArray(remoteList) ? remoteList : []).forEach((record) => {
+    merged.set(recordIdentity(record, type), record);
+  });
+  (Array.isArray(localList) ? localList : []).forEach((record) => {
+    merged.set(recordIdentity(record, type), record);
+  });
+  return Array.from(merged.values()).slice(0, 5000);
+}
+
+function mergeWorkspaceStates(remoteState, localState) {
+  const merged = {
+    reviewLeads: mergeRecordLists(remoteState?.reviewLeads, localState?.reviewLeads, "reviewLeads"),
+    customers: mergeRecordLists(remoteState?.customers, localState?.customers, "customers"),
+    rejectedLeads: mergeRecordLists(remoteState?.rejectedLeads, localState?.rejectedLeads, "rejectedLeads"),
+    quotes: mergeRecordLists(remoteState?.quotes, localState?.quotes, "quotes")
+  };
+  const localBuckets = new Map();
+  ["reviewLeads", "customers", "rejectedLeads"].forEach((bucket) => {
+    (Array.isArray(localState?.[bucket]) ? localState[bucket] : []).forEach((record) => {
+      localBuckets.set(recordIdentity(record, bucket), bucket);
+    });
+  });
+  ["reviewLeads", "customers", "rejectedLeads"].forEach((bucket) => {
+    merged[bucket] = merged[bucket].filter((record) => {
+      const localBucket = localBuckets.get(recordIdentity(record, bucket));
+      return !localBucket || localBucket === bucket;
+    });
+  });
+  return merged;
+}
+
+function applyWorkspaceState(state, render = false) {
+  reviewLeads = Array.isArray(state?.reviewLeads) ? state.reviewLeads.map(normalizeLead) : [];
+  customers = Array.isArray(state?.customers) ? state.customers.map(normalizeLead) : [];
+  rejectedLeads = Array.isArray(state?.rejectedLeads) ? state.rejectedLeads.map(normalizeLead) : [];
+  quoteHistory = Array.isArray(state?.quotes) ? state.quotes : [];
+  persistLocalState(localStateDirty);
+  if (render) {
+    renderLeads();
+    renderReview();
+    renderCrm();
+    renderFollowTasks();
+    renderKpis();
+    renderQuoteHistory();
+    renderQuoteCustomerSelect();
+  }
+}
+
 function setCloudSyncStatus(text, state = "syncing") {
   const status = $("#cloudSyncStatus");
   if (!status) return;
@@ -400,17 +492,27 @@ function setCloudSyncStatus(text, state = "syncing") {
   if (label) label.textContent = text;
 }
 
-async function pushCloudState(state = workspaceStateSnapshot()) {
+async function pushCloudState(state = workspaceStateSnapshot(), mergeAttempts = 0) {
   setCloudSyncStatus("正在同步云端数据", "syncing");
   const response = await fetch("/api/workspace-state", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ state })
+    body: JSON.stringify({ state, expectedVersion: cloudStateVersion })
   });
   const result = await response.json().catch(() => ({}));
+  if (response.status === 409 && result.conflict && result.current && mergeAttempts < 2) {
+    const merged = mergeWorkspaceStates(result.current.state, state);
+    cloudStateVersion = Number(result.current.version || 0);
+    localStateDirty = true;
+    applyWorkspaceState(merged, true);
+    setCloudSyncStatus("检测到多端修改，正在安全合并", "conflict");
+    return pushCloudState(merged, mergeAttempts + 1);
+  }
   if (!response.ok || !result.ok) {
     throw new Error(result.error || `HTTP ${response.status}`);
   }
+  cloudStateVersion = Number(result.version || cloudStateVersion);
+  persistLocalState(false);
   setCloudSyncStatus("云端数据已同步", "synced");
   return result;
 }
@@ -430,20 +532,28 @@ function scheduleCloudStateSave() {
   }, 650);
 }
 
-async function hydrateCloudState() {
+async function hydrateCloudState(render = false) {
+  if (cloudHydrating) return;
+  cloudHydrating = true;
   setCloudSyncStatus("正在读取云端数据", "syncing");
   try {
     const response = await fetch("/api/workspace-state", { cache: "no-store" });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    cloudStateVersion = Number(result.version || 0);
     if (result.exists) {
-      const state = result.state || {};
-      reviewLeads = Array.isArray(state.reviewLeads) ? state.reviewLeads.map(normalizeLead) : [];
-      customers = Array.isArray(state.customers) ? state.customers.map(normalizeLead) : [];
-      rejectedLeads = Array.isArray(state.rejectedLeads) ? state.rejectedLeads.map(normalizeLead) : [];
-      quoteHistory = Array.isArray(state.quotes) ? state.quotes : [];
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaceStateSnapshot()));
-      setCloudSyncStatus("云端数据已同步", "synced");
+      if (localStateDirty) {
+        const merged = mergeWorkspaceStates(result.state || {}, workspaceStateSnapshot());
+        applyWorkspaceState(merged, render);
+        cloudStateReady = true;
+        setCloudSyncStatus("正在补传离线修改", "conflict");
+        await pushCloudState(merged);
+      } else {
+        localStateDirty = false;
+        applyWorkspaceState(result.state || {}, render);
+        persistLocalState(false);
+        setCloudSyncStatus("云端数据已同步", "synced");
+      }
     } else {
       await pushCloudState(workspaceStateSnapshot());
     }
@@ -452,22 +562,78 @@ async function hydrateCloudState() {
     cloudStateReady = false;
     setCloudSyncStatus("云端不可用，当前使用本地副本", "error");
     console.error("Cloud workspace load failed:", error);
+  } finally {
+    cloudHydrating = false;
   }
 }
 
 function saveState() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(workspaceStateSnapshot()));
+  persistLocalState(true);
   scheduleCloudStateSave();
 }
 
-function scoreLeadFromText(text) {
+function evaluateLeadScore(text, options = {}) {
   const value = String(text || "").toLowerCase();
-  let score = 45;
-  if (/dealer|showroom|import|trading|distributor|经销|进口|展厅|贸易/.test(value)) score += 20;
-  if (/luxury|premium|executive|豪华|高端|vip/.test(value)) score += 12;
-  if (/ev|electric|hybrid|new energy|新能源|电动/.test(value)) score += 12;
-  if (/china|chinese|byd|aito|huawei|中国|华为|问界/.test(value)) score += 8;
-  return Math.min(96, score);
+  const dimensions = {
+    tradeQualification: /import.{0,8}(license|licence|permit)|export.{0,8}(license|licence|permit)|licensed importer|customs (registration|registered|code)|trade license|commercial registration|进出口资质|进出口许可证|进口许可证|出口许可证|海关注册|海关备案|报关资质|贸易许可证|授权进口商/.test(value)
+      ? 30
+      : /vehicle importer|car importer|parallel import|import and export|汽车进口|平行进口/.test(value) ? 16 : 0,
+    customerFit: /import|distributor|进口|分销|平行进口/.test(value)
+      ? 25
+      : /dealer|showroom|trading|经销|展厅|贸易/.test(value)
+        ? 20
+        : /fleet|rental|procurement|车队|租赁|采购/.test(value)
+          ? 18
+          : /automotive|vehicle|cars|汽车/.test(value) ? 10 : 0,
+    purchaseIntent: /rfq|looking to buy|supplier wanted|dealer wanted|bulk order|询价|求购|招募经销商|批量采购/.test(value)
+      ? 18
+      : /procurement|wholesale|fleet purchase|采购|批发|车队/.test(value) ? 13 : 0,
+    businessCapacity: /branches|locations|regional network|集团|分店|区域网络/.test(value)
+      ? 11
+      : /multi-brand|brand portfolio|多品牌/.test(value)
+        ? 9
+        : /luxury|premium|supercar|豪华|高端/.test(value) ? 6 : 0,
+    modelFit: /electric|hybrid|new energy|chinese car|新能源|电动|混动|中国汽车/.test(value)
+      ? 6
+      : options.model ? 3 : 0,
+    contactability: /owner|founder|director|procurement manager|老板|创始人|采购经理/.test(value)
+      ? 5
+      : /@|whatsapp|phone|contact|邮箱|电话|联系/.test(value) ? 4 : 0,
+    penalty: 0
+  };
+  if (/repair|workshop|spare parts|car wash|detailing|维修|配件|洗车|美容/.test(value) &&
+      !/import|distributor|dealer|showroom|vehicle sales|进口|分销|经销|展厅/.test(value)) {
+    dimensions.penalty -= 45;
+  }
+  if (/classified|marketplace|individual seller|private seller|分类信息|个人卖家/.test(value)) {
+    dimensions.penalty -= 55;
+  }
+  if (/china car exporter|vehicle export from china|中国汽车出口商/.test(value)) {
+    dimensions.penalty -= 70;
+  }
+  const score = Math.max(0, Math.min(100, Object.values(dimensions).reduce((sum, points) => sum + points, 0)));
+  return {
+    score,
+    dimensions,
+    tier: score >= 80 ? "A" : score >= 65 ? "B" : score >= 50 ? "C" : "D"
+  };
+}
+
+function scoreLeadFromText(text, options = {}) {
+  return evaluateLeadScore(text, options).score;
+}
+
+function scoreTierLabel(tier) {
+  return {
+    A: "A级 · 高优先",
+    B: "B级 · 值得跟进",
+    C: "C级 · 继续核验",
+    D: "D级 · 低优先"
+  }[tier] || "待评级";
+}
+
+function scoreVisualClass(score) {
+  return Number(score) >= 80 ? "excellent" : Number(score) >= 65 ? "good" : Number(score) >= 50 ? "mid" : "low";
 }
 
 function summarizeLead(lead) {
@@ -553,7 +719,7 @@ function renderLeads() {
         <span>${escapeHtml(lead.sourceType || "公开商业网站")}</span>
       </div>
       <p>${escapeHtml(lead.reason)}</p>
-      <strong class="score ${lead.score >= 75 ? "good" : "mid"}">${lead.score} 分</strong>
+      <strong class="score ${scoreVisualClass(lead.score)}">${lead.score} 分 · ${escapeHtml(lead.scoreTier || "D")}级</strong>
     </article>
   `).join("") : `<p class="empty">暂无待审核线索。请先点击“一键获客到待审核”。</p>`;
 }
@@ -637,7 +803,7 @@ function renderReview() {
           <span>系统建议</span>
           <strong>${escapeHtml(lead.sourceCoverage?.decision || (lead.researchAt ? "建议人工复核" : "等待自动尽调"))}</strong>
         </div>
-        <div class="decision-score"><span>官网业务评分</span><strong>${escapeHtml(lead.score)} 分</strong></div>
+        <div class="decision-score"><span>商业机会评分</span><strong>${escapeHtml(lead.score)} 分 · ${escapeHtml(scoreTierLabel(lead.scoreTier))}</strong></div>
         <div><span>公开来源</span><strong>${escapeHtml(lead.sourceCoverage?.total || lead.evidenceSources?.length || 0)}</strong></div>
         <div><span>官方来源</span><strong>${escapeHtml(lead.sourceCoverage?.official || 0)}</strong></div>
         <div><span>独立域名</span><strong>${escapeHtml(lead.sourceCoverage?.independentDomains || 0)}</strong></div>
@@ -678,10 +844,27 @@ function renderReview() {
       </dl>
       <p class="review-recommendation"><strong>推荐联系理由：</strong>${escapeHtml(lead.contactReason || lead.reason)}</p>
       <div class="score-breakdown">
-        <span>评分依据</span>
+        <span>评分依据${lead.manualScoreAdjustment ? ` · 人工校准 ${lead.manualScoreAdjustment > 0 ? "+" : ""}${escapeHtml(lead.manualScoreAdjustment)}` : ""}</span>
+        <div class="score-dimensions">
+          <span>进出口资质 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/30</strong></span>
+          <span>客户匹配 <strong>${escapeHtml(lead.scoreDimensions?.customerFit || 0)}/25</strong></span>
+          <span>采购意向 <strong>${escapeHtml(lead.scoreDimensions?.purchaseIntent || 0)}/18</strong></span>
+          <span>经营能力 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/12</strong></span>
+          <span>车型匹配 <strong>${escapeHtml(lead.scoreDimensions?.modelFit || 0)}/10</strong></span>
+          <span>可触达性 <strong>${escapeHtml(lead.scoreDimensions?.contactability || 0)}/5</strong></span>
+          ${Number(lead.scoreDimensions?.penalty || 0) < 0
+            ? `<span class="penalty">风险扣分 <strong>${escapeHtml(lead.scoreDimensions.penalty)}</strong></span>`
+            : ""}
+        </div>
         <div>${(lead.scoreBreakdown || []).length
           ? lead.scoreBreakdown.map((item) => `<b class="${Number(item.points) < 0 ? "negative" : ""}">${escapeHtml(item.label)} ${Number(item.points) > 0 ? "+" : ""}${escapeHtml(item.points)}</b>`).join("")
           : `<b>${escapeHtml(lead.scoreBasis || "等待官网核验")}</b>`}
+        </div>
+        <div class="score-calibration">
+          <span>人工校准</span>
+          <button type="button" data-score-adjust="-5" data-index="${index}">-5</button>
+          <button type="button" data-score-adjust="5" data-index="${index}">+5</button>
+          <button type="button" data-score-reset data-index="${index}">恢复系统分</button>
         </div>
       </div>
       <details class="review-more">
@@ -790,7 +973,7 @@ function renderCrm() {
       <td>${escapeHtml(lead.country)}<br>${escapeHtml(lead.city)}</td>
       <td>${escapeHtml(lead.type)}</td>
       <td>${escapeHtml(lead.model)}</td>
-      <td><span class="score ${lead.score >= 75 ? "good" : "mid"}">${lead.score}</span></td>
+      <td><span class="score ${scoreVisualClass(lead.score)}">${lead.score} · ${escapeHtml(lead.scoreTier || "D")}级</span></td>
       <td>
         <select class="crm-stage" data-crm-stage="${index}">
           ${salesStages.map((stage) => `<option ${stage === lead.stage ? "selected" : ""}>${stage}</option>`).join("")}
@@ -900,8 +1083,34 @@ function refreshAllLeadViews() {
 
 function normalizeLead(raw) {
   const website = raw.website || raw.reason || `${raw.company || "Unknown"} ${raw.type || ""}`;
-  const score = Number(raw.score || scoreLeadFromText(`${raw.company} ${raw.type} ${raw.country} ${website}`));
+  const fallbackEvaluation = evaluateLeadScore(
+    `${raw.company} ${raw.type} ${raw.country} ${website}`,
+    { model: raw.model }
+  );
+  const scoreModelVersion = Number(raw.scoreModelVersion || 0);
+  const baseScore = scoreModelVersion >= 6
+    ? Number(raw.baseScore ?? raw.score ?? fallbackEvaluation.score)
+    : fallbackEvaluation.score;
+  const manualScoreAdjustment = Math.max(-20, Math.min(20, Number(raw.manualScoreAdjustment || 0)));
+  const score = Math.max(0, Math.min(100, baseScore + manualScoreAdjustment));
+  const scoreTier = score >= 80 ? "A" : score >= 65 ? "B" : score >= 50 ? "C" : "D";
+  const fallbackBreakdown = Object.entries(fallbackEvaluation.dimensions)
+    .filter(([, points]) => points)
+    .map(([category, points]) => ({
+      category,
+      label: {
+        tradeQualification: "进出口资质",
+        customerFit: "客户类型匹配",
+        purchaseIntent: "采购意向信号",
+        businessCapacity: "经营能力信号",
+        modelFit: "目标车型匹配",
+        contactability: "公开可触达性",
+        penalty: "风险扣分"
+      }[category],
+      points
+    }));
   return {
+    id: raw.id || recordIdentity(raw, "lead"),
     company: raw.company || "未命名客户",
     country: raw.country || "",
     city: raw.city || "",
@@ -970,12 +1179,24 @@ function normalizeLead(raw) {
     googleRating: Number(raw.googleRating || 0),
     googleReviews: Number(raw.googleReviews || 0),
     businessStatus: raw.businessStatus || "",
-    scoreBreakdown: Array.isArray(raw.scoreBreakdown) ? raw.scoreBreakdown : [],
-    scoreBasis: raw.scoreBasis || "根据企业公开业务信息综合评分",
+    baseScore,
+    scoreModelVersion: 6,
+    manualScoreAdjustment,
+    scoreTier,
+    scoreDimensions: scoreModelVersion >= 6 && raw.scoreDimensions
+      ? raw.scoreDimensions
+      : fallbackEvaluation.dimensions,
+    scoreBreakdown: scoreModelVersion >= 6 && Array.isArray(raw.scoreBreakdown) && raw.scoreBreakdown.length
+      ? raw.scoreBreakdown
+      : fallbackBreakdown,
+    scoreBasis: scoreModelVersion >= 6 && raw.scoreBasis
+      ? raw.scoreBasis
+      : "100分机会模型：进出口资质30、客户匹配25、采购意向18、经营能力12、车型匹配10、可触达性5",
     model: raw.model || "问界 M9",
     score,
-    stage: "待审核",
+    stage: raw.stage || "待审核",
     next: raw.next || "审核通过后生成英文开发信",
+    nextFollowAt: raw.nextFollowAt || "",
     website,
     reason: raw.reason || `${raw.city || raw.country} 的${raw.type || "汽车相关客户"}，建议人工审核后再联系。`
   };
@@ -992,6 +1213,17 @@ function approveLead(index) {
     next: "生成英文开发信并人工确认",
     nextFollowAt: ""
   });
+  refreshAllLeadViews();
+}
+
+function calibrateLeadScore(index, delta = 0, reset = false) {
+  const lead = reviewLeads[index];
+  if (!lead) return;
+  lead.manualScoreAdjustment = reset
+    ? 0
+    : Math.max(-20, Math.min(20, Number(lead.manualScoreAdjustment || 0) + Number(delta || 0)));
+  lead.score = Math.max(0, Math.min(100, Number(lead.baseScore || 0) + lead.manualScoreAdjustment));
+  lead.scoreTier = lead.score >= 80 ? "A" : lead.score >= 65 ? "B" : lead.score >= 50 ? "C" : "D";
   refreshAllLeadViews();
 }
 
@@ -1012,18 +1244,24 @@ async function researchLead(index) {
       company: lead.company,
       country: [lead.city, lead.country].filter(Boolean).join(", "),
       website: lead.customerWebsite || "",
-      sourceUrl: lead.sourceUrl || lead.source || ""
+      sourceUrl: lead.sourceUrl || lead.source || "",
+      model: lead.model || "",
+      type: lead.type || ""
     })}`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const result = await response.json();
     if (!result.ok) throw new Error(result.error || "检索失败");
-    const verifiedPriority = lead.isCompetitor
-      ? Math.min(45, Number(result.score || lead.score || 0))
-      : Number(result.score || lead.score || 0);
+    const verifiedPriority = result.isCompetitor
+      ? Math.min(45, Number(result.score || lead.baseScore || lead.score || 0))
+      : Number(result.score || lead.baseScore || lead.score || 0);
     reviewLeads[index] = normalizeLead({
       ...lead,
       ...result,
       score: verifiedPriority,
+      baseScore: verifiedPriority,
+      manualScoreAdjustment: lead.manualScoreAdjustment || 0,
+      scoreTier: result.scoreTier,
+      scoreDimensions: result.scoreDimensions,
       evidenceSources: result.evidenceSources || lead.evidenceSources,
       contactName: result.contactName || lead.contactName,
       contactRole: result.contactRole || lead.contactRole,
@@ -1519,20 +1757,32 @@ function renderDiscoveryJobs() {
     queued: "排队中",
     running: "运行中",
     completed: "已完成",
-    failed: "失败"
+    failed: "失败",
+    canceled: "已取消"
   };
   box.innerHTML = discoveryJobs.length ? discoveryJobs.map((job) => {
     const count = Number(job.result?.count || job.result?.leads?.length || 0);
     const canImport = job.status === "completed" && !job.imported && count > 0;
+    const canRetry = ["failed", "canceled"].includes(job.status);
+    const canCancel = ["queued", "running"].includes(job.status);
     const actionLabel = job.imported
       ? "已导入"
       : canImport
         ? `导入 ${count} 条`
-        : job.status === "failed"
-          ? "执行失败"
+        : canRetry
+          ? "重新执行"
+          : canCancel
+            ? "取消任务"
           : job.status === "completed"
             ? "无新线索"
             : `${Number(job.progress || 0)}%`;
+    const actionAttribute = canImport
+      ? `data-import-job="${escapeHtml(job.id)}"`
+      : canRetry
+        ? `data-retry-job="${escapeHtml(job.id)}"`
+        : canCancel
+          ? `data-cancel-job="${escapeHtml(job.id)}"`
+        : "";
     return `
       <article class="discovery-job">
         <div class="discovery-job-main">
@@ -1550,7 +1800,7 @@ function renderDiscoveryJobs() {
           </div>
         </div>
         <button class="discovery-job-action" type="button"
-          data-import-job="${escapeHtml(job.id)}" ${canImport ? "" : "disabled"}>
+          ${actionAttribute} ${canImport || canRetry || canCancel ? "" : "disabled"}>
           ${escapeHtml(actionLabel)}
         </button>
       </article>
@@ -1586,6 +1836,75 @@ async function markDiscoveryImported(jobId) {
     body: JSON.stringify({ id: jobId })
   }).catch(() => undefined);
   await loadDiscoveryJobs().catch(() => undefined);
+}
+
+async function retryDiscoveryJob(jobId) {
+  const button = document.querySelector(`[data-retry-job="${CSS.escape(jobId)}"]`);
+  if (button) {
+    button.disabled = true;
+    button.textContent = "正在重试";
+  }
+  try {
+    const response = await fetch("/api/discover/retry", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: jobId })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    await loadDiscoveryJobs();
+    setFinderProgress({
+      percent: 5,
+      stage: "search",
+      state: "running",
+      title: "失败任务已重新启动",
+      elapsed: "后台持续运行",
+      message: "新任务已经进入云端执行队列，可关闭页面后稍后回来查看。"
+    });
+  } catch (error) {
+    await loadDiscoveryJobs().catch(() => undefined);
+    setFinderProgress({
+      percent: 100,
+      stage: "done",
+      state: "error",
+      title: "任务重试失败",
+      message: error.message
+    });
+  }
+}
+
+async function cancelDiscoveryJob(jobId) {
+  const button = document.querySelector(`[data-cancel-job="${CSS.escape(jobId)}"]`);
+  if (button) {
+    button.disabled = true;
+    button.textContent = "正在取消";
+  }
+  try {
+    const response = await fetch("/api/discover/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: jobId })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    await loadDiscoveryJobs();
+    setFinderProgress({
+      percent: 100,
+      stage: "done",
+      state: "error",
+      title: "任务已取消",
+      message: "任务结果将不会写入任务中心。如需继续，可点击“重新执行”。"
+    });
+  } catch (error) {
+    await loadDiscoveryJobs().catch(() => undefined);
+    setFinderProgress({
+      percent: 100,
+      stage: "done",
+      state: "error",
+      title: "取消任务失败",
+      message: error.message
+    });
+  }
 }
 
 function mergeDiscoveryResult(result) {
@@ -1656,16 +1975,44 @@ async function runCloudDiscovery(data, words, onProgress) {
   if (!startResponse.ok || !startResult.ok || !startResult.job?.id) {
     throw new Error(startResult.error || `云端任务创建失败（HTTP ${startResponse.status}）`);
   }
+  if (typeof onProgress === "function" && startResult.job.reused) {
+    onProgress({
+      ...startResult.job,
+      message: "检测到相同搜索正在运行，已接入现有任务，未重复创建。"
+    });
+  }
 
   const deadline = Date.now() + 12 * 60 * 1000;
+  let consecutiveReadErrors = 0;
   while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 1800));
-    const statusResponse = await fetch(`/api/discover/status?${new URLSearchParams({
-      id: startResult.job.id
-    })}`, { cache: "no-store" });
-    const statusResult = await statusResponse.json().catch(() => ({}));
-    if (!statusResponse.ok || !statusResult.ok) {
-      throw new Error(statusResult.error || `无法读取云端任务状态（HTTP ${statusResponse.status}）`);
+    await new Promise((resolve) => setTimeout(resolve, document.hidden ? 5000 : 1800));
+    let statusResponse;
+    let statusResult;
+    try {
+      statusResponse = await fetch(`/api/discover/status?${new URLSearchParams({
+        id: startResult.job.id
+      })}`, { cache: "no-store" });
+      statusResult = await statusResponse.json().catch(() => ({}));
+      if (!statusResponse.ok || !statusResult.ok) {
+        throw new Error(statusResult.error || `HTTP ${statusResponse.status}`);
+      }
+      consecutiveReadErrors = 0;
+    } catch (error) {
+      consecutiveReadErrors += 1;
+      if (statusResponse?.status === 401 || consecutiveReadErrors >= 5) {
+        const statusError = new Error(`连续无法读取云端任务状态：${error.message}`);
+        statusError.code = "JOB_STATUS_UNAVAILABLE";
+        throw statusError;
+      }
+      if (typeof onProgress === "function") {
+        onProgress({
+          status: "running",
+          stage: "search",
+          progress: Math.min(90, 12 + consecutiveReadErrors * 3),
+          message: `网络短暂中断，正在第 ${consecutiveReadErrors} 次重新连接任务。`
+        });
+      }
+      continue;
     }
     const job = statusResult.job || {};
     if (typeof onProgress === "function") onProgress(job);
@@ -1673,8 +2020,15 @@ async function runCloudDiscovery(data, words, onProgress) {
       return { ...(job.result || { ok: true, leads: [], count: 0 }), __jobId: job.id };
     }
     if (job.status === "failed") throw new Error(job.error || job.message || "云端搜索失败");
+    if (job.status === "canceled") {
+      const canceledError = new Error("云端搜索任务已取消");
+      canceledError.code = "JOB_CANCELED";
+      throw canceledError;
+    }
   }
-  throw new Error("云端搜索超过 12 分钟，请缩小搜索范围后重试");
+  const timeoutError = new Error("页面等待已超过 12 分钟，任务仍在云端后台运行。");
+  timeoutError.code = "JOB_WAIT_TIMEOUT";
+  throw timeoutError;
 }
 
 function bindForms() {
@@ -1685,8 +2039,12 @@ function bindForms() {
   });
 
   $("#discoveryJobList")?.addEventListener("click", (event) => {
-    const button = event.target.closest("[data-import-job]");
-    if (button && !button.disabled) importDiscoveryJob(button.dataset.importJob);
+    const importButton = event.target.closest("[data-import-job]");
+    if (importButton && !importButton.disabled) importDiscoveryJob(importButton.dataset.importJob);
+    const retryButton = event.target.closest("[data-retry-job]");
+    if (retryButton && !retryButton.disabled) retryDiscoveryJob(retryButton.dataset.retryJob);
+    const cancelButton = event.target.closest("[data-cancel-job]");
+    if (cancelButton && !cancelButton.disabled) cancelDiscoveryJob(cancelButton.dataset.cancelJob);
   });
 
   $("#countryGrid").addEventListener("click", (event) => {
@@ -1763,13 +2121,23 @@ function bindForms() {
       })
       .catch((error) => {
         const elapsedSeconds = searchProgress.stop();
+        const backgroundOnly = ["JOB_WAIT_TIMEOUT", "JOB_STATUS_UNAVAILABLE"].includes(error.code);
+        const canceled = error.code === "JOB_CANCELED";
         setFinderProgress({
-          percent: 100,
-          stage: "done",
-          state: "error",
-          title: "本轮获客失败",
+          percent: backgroundOnly ? 80 : 100,
+          stage: backgroundOnly ? "verify" : "done",
+          state: backgroundOnly ? "running" : canceled ? "complete" : "error",
+          title: backgroundOnly
+            ? "任务仍在后台执行"
+            : canceled
+              ? "任务已取消"
+              : "本轮获客失败",
           elapsed: `用时 ${elapsedSeconds} 秒`,
-          message: `云端实时获客失败：${error.message}。请保持当前网页打开后重试，不需要启动本地 BAT。`
+          message: backgroundOnly
+            ? `${error.message} 请稍后在“云端获客任务”中刷新查看，避免重复发起相同搜索。`
+            : canceled
+              ? "任务已停止接收搜索结果，可从任务中心重新执行。"
+              : `云端实时获客失败：${error.message}。请稍后重试，不需要启动本地 BAT。`
         });
       })
       .finally(() => {
@@ -1900,6 +2268,19 @@ function bindForms() {
   });
 
   $("#reviewGrid").addEventListener("click", (event) => {
+    const adjustmentButton = event.target.closest("[data-score-adjust]");
+    if (adjustmentButton) {
+      calibrateLeadScore(
+        Number(adjustmentButton.dataset.index),
+        Number(adjustmentButton.dataset.scoreAdjust)
+      );
+      return;
+    }
+    const resetButton = event.target.closest("[data-score-reset]");
+    if (resetButton) {
+      calibrateLeadScore(Number(resetButton.dataset.index), 0, true);
+      return;
+    }
     const researchButton = event.target.closest("[data-research-index]");
     if (researchButton) {
       researchLead(Number(researchButton.dataset.researchIndex));
@@ -2103,6 +2484,14 @@ async function init() {
   discoveryJobsTimer = window.setInterval(() => {
     loadDiscoveryJobs().catch(() => undefined);
   }, 5_000);
+  window.addEventListener("online", () => {
+    hydrateCloudState(true).catch(() => undefined);
+  });
+  window.setInterval(() => {
+    if (!cloudStateReady && navigator.onLine) {
+      hydrateCloudState(true).catch(() => undefined);
+    }
+  }, 30_000);
   updateSocialProspectingQueries();
   importSocialCaptures();
   setInterval(importSocialCaptures, 4_000);

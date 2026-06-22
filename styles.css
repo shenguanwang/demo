@@ -262,6 +262,16 @@ button {
   box-shadow: 0 0 0 4px rgba(201, 95, 82, 0.12);
 }
 
+.topbar-status[data-sync-state="conflict"] {
+  color: #8a6420;
+}
+
+.topbar-status[data-sync-state="conflict"] i {
+  background: #c99a42;
+  box-shadow: 0 0 0 4px rgba(201, 154, 66, 0.12);
+  animation: syncPulse 650ms ease-in-out infinite alternate;
+}
+
 @keyframes syncPulse {
   to { opacity: 0.45; }
 }
@@ -1076,6 +1086,11 @@ textarea {
   color: #a03830;
 }
 
+.job-state.canceled {
+  color: #64748b;
+  background: rgba(100, 116, 139, 0.12);
+}
+
 .discovery-job-action {
   min-width: 96px;
   min-height: 38px;
@@ -1373,6 +1388,35 @@ textarea {
   gap: 6px;
 }
 
+.score-breakdown .score-dimensions {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(110px, 1fr));
+  width: 100%;
+  margin-bottom: 7px;
+}
+
+.score-dimensions span {
+  padding: 7px 8px;
+  border: 1px solid #e5e9ed;
+  border-radius: 7px;
+  background: #fafbfc;
+  color: #65707b;
+  font-size: 10px;
+}
+
+.score-dimensions strong {
+  display: block;
+  margin-top: 2px;
+  color: #24313e;
+  font-size: 12px;
+}
+
+.score-dimensions .penalty {
+  color: #a33c32;
+  background: #fff5f3;
+  border-color: #f1d2cd;
+}
+
 .score-breakdown b {
   padding: 5px 8px;
   border-radius: 6px;
@@ -1385,6 +1429,28 @@ textarea {
 .score-breakdown b.negative {
   background: #fff0ee;
   color: #a33c32;
+}
+
+.score-breakdown .score-calibration {
+  width: 100%;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.score-calibration span {
+  margin-right: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.score-calibration button {
+  min-height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: #394553;
+  font-size: 11px;
 }
 
 .review-decision span,
@@ -1873,10 +1939,22 @@ textarea {
   border-color: #bcebd8;
 }
 
+.score.excellent {
+  background: #e8f3ff;
+  color: #185b9d;
+  border-color: #b7d7f5;
+}
+
 .score.mid {
   background: #fff7ed;
   color: #b45309;
   border-color: #fed7aa;
+}
+
+.score.low {
+  background: #f5f6f7;
+  color: #727d88;
+  border-color: #d9dee3;
 }
 
 .table-wrap {
@@ -2532,6 +2610,10 @@ tbody tr:last-child td {
   .review-decision .decision-main,
   .review-decision .decision-missing {
     grid-column: 1 / -1;
+  }
+
+  .score-breakdown .score-dimensions {
+    grid-template-columns: 1fr 1fr;
   }
 
   .workflow > button,

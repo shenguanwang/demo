@@ -32,17 +32,28 @@ SOCIAL_CAPTURE_DIR = ROOT / "social-captures"
 SOCIAL_CAPTURE_FILE = SOCIAL_CAPTURE_DIR / "captures.json"
 SOCIAL_CAPTURE_LOCK = threading.Lock()
 DISCOVERY_JOBS: dict[str, dict] = {}
-DISCOVERY_JOBS_LOCK = threading.Lock()
+DISCOVERY_JOBS_LOCK = threading.RLock()
+DISCOVERY_CREATE_LOCK = threading.Lock()
+ACTIVE_DISCOVERY_WORKERS: set[str] = set()
+ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
+DISCOVERY_MAX_CONCURRENCY = max(1, int(os.environ.get("DISCOVERY_MAX_CONCURRENCY", "2")))
+DISCOVERY_WORKER_SLOTS = threading.BoundedSemaphore(DISCOVERY_MAX_CONCURRENCY)
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 SQLITE_STATE_FILE = Path(os.environ.get("STATE_DATABASE_PATH") or (ROOT / "workbench-state.db"))
-STATE_LOCK = threading.Lock()
+STATE_LOCK = threading.RLock()
 STATE_KEY = "admin-default"
 AUTH_USERNAME = os.environ.get("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.environ.get("APP_PASSWORD", "admin123")
 AUTH_SECRET = os.environ.get("APP_AUTH_SECRET") or secrets.token_hex(32)
 AUTH_COOKIE = "hima_session"
 AUTH_MAX_AGE = 60 * 60 * 24 * 7
+
+
+class WorkspaceVersionConflict(Exception):
+    def __init__(self, current: dict):
+        super().__init__("云端数据已被其他设备更新")
+        self.current = current
 
 
 def postgres_connection():
@@ -179,12 +190,16 @@ def load_workspace_state() -> dict:
         }
 
 
-def save_workspace_state(payload: dict) -> dict:
+def save_workspace_state(payload: dict, expected_version: int | None = None) -> dict:
     state = normalize_workspace_state(payload)
     encoded = json.dumps(state, ensure_ascii=False)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with STATE_LOCK:
         initialize_state_store()
+        current = load_workspace_state()
+        current_version = int(current.get("version", 0))
+        if expected_version is not None and int(expected_version) != current_version:
+            raise WorkspaceVersionConflict(current)
         if DATABASE_URL:
             with postgres_connection() as connection:
                 with connection.cursor() as cursor:
@@ -291,6 +306,7 @@ def discovery_job_public(job: dict) -> dict:
         "model": str(payload.get("model", "")),
         "sourceMode": str(payload.get("sourceMode", "")),
         "goal": str(payload.get("goal", "")),
+        "reused": bool(job.get("reused", False)),
     }
 
 
@@ -429,47 +445,82 @@ def list_discovery_jobs(limit: int = 20) -> list[dict]:
     return [discovery_job_public(row_to_discovery_job(row)) for row in rows]
 
 
-def update_discovery_job(job_id: str, **changes) -> None:
-    now = datetime.now(timezone.utc)
-    job = load_discovery_job(job_id)
-    if not job:
-        return
-    job.update(changes)
-    job["updatedAt"] = now.isoformat(timespec="seconds")
-    save_discovery_job(job)
+def update_discovery_job(
+    job_id: str,
+    *,
+    skip_statuses: tuple[str, ...] = (),
+    **changes,
+) -> bool:
+    with DISCOVERY_JOBS_LOCK:
+        now = datetime.now(timezone.utc)
+        job = load_discovery_job(job_id)
+        if not job or job.get("status") in skip_statuses:
+            return False
+        job.update(changes)
+        job["updatedAt"] = now.isoformat(timespec="seconds")
+        save_discovery_job(job)
+    return True
 
 
 def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
-    update_discovery_job(
-        job_id,
-        status="running",
-        stage="search",
-        progress=12,
-        message="云端正在检索地图、企业官网、行业目录和公开社媒来源。",
-    )
     try:
-        result = discover(params)
-        update_discovery_job(
-            job_id,
-            status="completed",
-            stage="done",
-            progress=100,
-            message=f"云端搜索完成，共发现 {result.get('count', 0)} 条线索。",
-            result=result,
-        )
+        with DISCOVERY_WORKER_SLOTS:
+            started = update_discovery_job(
+                job_id,
+                skip_statuses=("canceled",),
+                status="running",
+                stage="search",
+                progress=12,
+                message="云端正在检索地图、企业官网、行业目录和公开社媒来源。",
+            )
+            if not started:
+                return
+            result = discover(params)
+            update_discovery_job(
+                job_id,
+                skip_statuses=("canceled",),
+                status="completed",
+                stage="done",
+                progress=100,
+                message=f"云端搜索完成，共发现 {result.get('count', 0)} 条线索。",
+                result=result,
+            )
     except Exception as exc:
         update_discovery_job(
             job_id,
+            skip_statuses=("canceled",),
             status="failed",
             stage="done",
             progress=100,
             message="云端获客任务执行失败。",
             error=str(exc),
         )
+    finally:
+        with ACTIVE_DISCOVERY_WORKERS_LOCK:
+            ACTIVE_DISCOVERY_WORKERS.discard(job_id)
 
 
-def create_discovery_job(payload: dict) -> dict:
-    cleanup_discovery_jobs()
+def launch_discovery_worker(job_id: str, params: dict[str, list[str]]) -> bool:
+    with ACTIVE_DISCOVERY_WORKERS_LOCK:
+        if job_id in ACTIVE_DISCOVERY_WORKERS:
+            return False
+        ACTIVE_DISCOVERY_WORKERS.add(job_id)
+    worker = threading.Thread(
+        target=run_discovery_job,
+        args=(job_id, params),
+        name=f"discovery-{job_id[:8]}",
+        daemon=True,
+    )
+    try:
+        worker.start()
+    except Exception:
+        with ACTIVE_DISCOVERY_WORKERS_LOCK:
+            ACTIVE_DISCOVERY_WORKERS.discard(job_id)
+        raise
+    return True
+
+
+def discovery_params(payload: dict) -> dict[str, list[str]]:
     allowed_fields = {
         "goal",
         "country",
@@ -485,34 +536,72 @@ def create_discovery_job(payload: dict) -> dict:
         "verificationLevel",
         "minSources",
     }
-    params = {
+    return {
         key: [str(value)[:4000]]
         for key, value in payload.items()
         if key in allowed_fields and value is not None
     }
-    job_id = uuid.uuid4().hex
-    now = datetime.now(timezone.utc)
-    job = {
-        "id": job_id,
-        "payload": {key: value[0] for key, value in params.items()},
-        "status": "queued",
-        "stage": "search",
-        "progress": 5,
-        "message": "云端任务已创建，正在分配搜索资源。",
-        "createdAt": now.isoformat(timespec="seconds"),
-        "updatedAt": now.isoformat(timespec="seconds"),
-        "result": None,
-        "error": "",
-        "imported": False,
+
+
+def discovery_payload_signature(payload: dict) -> str:
+    normalized = {
+        key: re.sub(r"\s+", " ", str(value)).strip().lower()
+        for key, value in payload.items()
+        if value is not None and str(value).strip()
     }
-    save_discovery_job(job)
-    worker = threading.Thread(
-        target=run_discovery_job,
-        args=(job_id, params),
-        name=f"discovery-{job_id[:8]}",
-        daemon=True,
+    return json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def find_matching_active_discovery_job(payload: dict) -> dict | None:
+    target = discovery_payload_signature(payload)
+    initialize_state_store()
+    query = (
+        "SELECT job_id, payload, status, stage, progress, message, result, error, "
+        "imported, created_at, updated_at FROM discovery_jobs "
+        "WHERE status IN ('queued', 'running') ORDER BY created_at DESC"
     )
-    worker.start()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute(query).fetchall()
+    for row in rows:
+        job = row_to_discovery_job(row)
+        if discovery_payload_signature(job.get("payload") or {}) == target:
+            return job
+    return None
+
+
+def create_discovery_job(payload: dict, *, force: bool = False) -> dict:
+    cleanup_discovery_jobs()
+    params = discovery_params(payload)
+    normalized_payload = {key: value[0] for key, value in params.items()}
+    with DISCOVERY_CREATE_LOCK:
+        if not force:
+            existing = find_matching_active_discovery_job(normalized_payload)
+            if existing:
+                existing["reused"] = True
+                return discovery_job_public(existing)
+        job_id = uuid.uuid4().hex
+        now = datetime.now(timezone.utc)
+        job = {
+            "id": job_id,
+            "payload": normalized_payload,
+            "status": "queued",
+            "stage": "search",
+            "progress": 5,
+            "message": "云端任务已创建，正在分配搜索资源。",
+            "createdAt": now.isoformat(timespec="seconds"),
+            "updatedAt": now.isoformat(timespec="seconds"),
+            "result": None,
+            "error": "",
+            "imported": False,
+        }
+        save_discovery_job(job)
+        launch_discovery_worker(job_id, params)
     return discovery_job_public(job)
 
 
@@ -532,33 +621,51 @@ def mark_discovery_job_imported(job_id: str) -> dict | None:
     return discovery_job_public(job)
 
 
-def mark_interrupted_discovery_jobs() -> None:
+def cancel_discovery_job(job_id: str) -> dict | None:
+    job = load_discovery_job(job_id)
+    if not job:
+        return None
+    if job.get("status") in {"queued", "running"}:
+        update_discovery_job(
+            job_id,
+            status="canceled",
+            stage="done",
+            progress=100,
+            message="任务已取消，后续搜索结果不会写入任务中心。",
+            error="",
+        )
+    return get_discovery_job(job_id)
+
+
+def resume_interrupted_discovery_jobs() -> int:
     initialize_state_store()
-    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    message = "服务更新期间任务被中断，请重新发起搜索。"
+    query = (
+        "SELECT job_id, payload, status, stage, progress, message, result, error, "
+        "imported, created_at, updated_at FROM discovery_jobs "
+        "WHERE status IN ('queued', 'running') ORDER BY created_at"
+    )
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    UPDATE discovery_jobs
-                    SET status = 'failed', stage = 'done', progress = 100,
-                        message = %s, error = %s, updated_at = NOW()
-                    WHERE status IN ('queued', 'running')
-                    """,
-                    (message, message),
-                )
+                cursor.execute(query)
+                rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            connection.execute(
-                """
-                UPDATE discovery_jobs
-                SET status = 'failed', stage = 'done', progress = 100,
-                    message = ?, error = ?, updated_at = ?
-                WHERE status IN ('queued', 'running')
-                """,
-                (message, message, now),
-            )
+            rows = connection.execute(query).fetchall()
+    resumed = 0
+    for row in rows:
+        job = row_to_discovery_job(row)
+        update_discovery_job(
+            job["id"],
+            status="queued",
+            stage="search",
+            progress=max(5, min(int(job.get("progress", 5)), 10)),
+            message="服务已恢复，正在重新接续云端获客任务。",
+            error="",
+        )
+        if launch_discovery_worker(job["id"], discovery_params(job.get("payload") or {})):
+            resumed += 1
+    return resumed
 
 
 COUNTRY_HINTS = {
@@ -1361,6 +1468,8 @@ def official_site_pages(website: str) -> list[dict]:
 def research_company(params: dict[str, list[str]]) -> dict:
     company = clean_text((params.get("company") or [""])[0])
     country = clean_text((params.get("country") or [""])[0])
+    requested_model = clean_text((params.get("model") or [""])[0])
+    lead_type = clean_text((params.get("type") or [""])[0])
     website = normalize_public_url((params.get("website") or [""])[0])
     source_url = normalize_public_url((params.get("sourceUrl") or [""])[0])
     if not company:
@@ -1680,10 +1789,26 @@ def research_company(params: dict[str, list[str]]) -> dict:
         if confidence >= 50
         else "证据不足，暂不联系"
     )
-    website_score, website_score_breakdown = website_business_score(
-        official_website_text or " ".join(item.get("excerpt", "") for item in evidence),
+    scoring_text = official_website_text or " ".join(item.get("excerpt", "") for item in evidence)
+    is_competitor = detect_competitor(scoring_text)
+    website_score, website_score_breakdown, score_dimensions, score_tier = lead_opportunity_score(
+        scoring_text,
         bool(site_pages or website),
         contactable,
+        requested_model=requested_model,
+        lead_type=lead_type,
+        is_competitor=is_competitor,
+    )
+    decision = (
+        "疑似同行，建议排除"
+        if is_competitor
+        else "建议优先联系"
+        if website_score >= 80 and confidence >= 65 and contactable
+        else "值得跟进"
+        if website_score >= 65 and confidence >= 50
+        else "继续核验"
+        if website_score >= 50
+        else "低优先级，是否入池由人工决定"
     )
     business_signals, intent_signals = opportunity_signals(
         official_website_text or " ".join(item.get("excerpt", "") for item in evidence)
@@ -1713,8 +1838,13 @@ def research_company(params: dict[str, list[str]]) -> dict:
         "confidence": confidence,
         "confidenceLabel": confidence_label,
         "score": website_score,
+        "baseScore": website_score,
+        "scoreModelVersion": 6,
+        "scoreTier": score_tier,
+        "scoreDimensions": score_dimensions,
         "scoreBreakdown": website_score_breakdown,
-        "scoreBasis": "根据官网业务、进口分销能力、车型结构、采购意向和公开联系方式评分",
+        "scoreBasis": "100分机会模型：进出口资质30、客户匹配25、采购意向18、经营能力12、车型匹配10、可触达性5，另计风险扣分",
+        "isCompetitor": is_competitor,
         "businessSignals": business_signals,
         "intentSignals": intent_signals,
         "sourceCoverage": {
@@ -2101,8 +2231,128 @@ def infer_type(text: str) -> str:
 
 
 def score_lead(text: str, contact: str) -> int:
-    score, _ = website_business_score(text, bool(re.search(r"https?://|www\.", text, re.I)), bool(contact))
+    score, _, _, _ = lead_opportunity_score(
+        text,
+        bool(re.search(r"https?://|www\.", text, re.I)),
+        bool(contact),
+    )
     return score
+
+
+def lead_opportunity_score(
+    text: str,
+    has_official_website: bool,
+    has_contact: bool,
+    google_reviews: int = 0,
+    requested_model: str = "",
+    lead_type: str = "",
+    is_competitor: bool = False,
+) -> tuple[int, list[dict], dict, str]:
+    lower = clean_text(f"{text} {lead_type}").lower()
+    dimensions = {
+        "customerFit": 0,
+        "tradeQualification": 0,
+        "purchaseIntent": 0,
+        "businessCapacity": 0,
+        "modelFit": 0,
+        "contactability": 0,
+        "penalty": 0,
+    }
+    breakdown: list[dict] = []
+
+    def set_dimension(key: str, label: str, points: int):
+        if points <= dimensions[key]:
+            return
+        dimensions[key] = points
+        breakdown[:] = [item for item in breakdown if item.get("category") != key]
+        breakdown.append({"category": key, "label": label, "points": points})
+
+    qualification_terms = (
+        "import license", "import licence", "export license", "export licence",
+        "import export license", "import-export license", "licensed importer",
+        "licensed exporter", "customs registration", "customs registered",
+        "customs code", "trade license", "trading license",
+        "commercial registration", "authorized importer", "import permit",
+        "export permit", "进出口资质", "进出口许可证", "进口许可证",
+        "出口许可证", "海关注册", "海关备案", "报关资质",
+        "贸易许可证", "商业登记", "授权进口商",
+    )
+    if any(term in lower for term in qualification_terms):
+        set_dimension("tradeQualification", "明确具备进出口、海关或贸易许可资质", 30)
+    elif any(term in lower for term in (
+        "vehicle importer", "car importer", "automotive importer",
+        "parallel import", "import and export",
+    )):
+        set_dimension("tradeQualification", "公开业务显示具备车辆进口经验，资质待核验", 16)
+
+    if any(term in lower for term in ("vehicle importer", "car importer", "automotive importer", "parallel import", "import and export")):
+        set_dimension("customerFit", "汽车进口或平行进口客户", 25)
+    elif any(term in lower for term in ("distributor", "distribution", "authorized dealer", "exclusive dealer")):
+        set_dimension("customerFit", "品牌分销或代理客户", 23)
+    elif any(term in lower for term in ("dealer", "dealership", "showroom", "motors", "auto trading", "automotive trading")):
+        set_dimension("customerFit", "汽车经销、展厅或贸易客户", 20)
+    elif any(term in lower for term in ("fleet", "rental", "chauffeur", "procurement", "corporate buyer")):
+        set_dimension("customerFit", "车队、租赁或企业采购客户", 18)
+    elif any(term in lower for term in ("automotive", "vehicles", "cars", "auto business")):
+        set_dimension("customerFit", "汽车行业相关客户", 10)
+
+    if any(term in lower for term in ("luxury", "premium", "supercar", "range rover", "mercedes", "bmw", "porsche", "bentley")):
+        set_dimension("businessCapacity", "经营豪华或高端汽车", 6)
+    if any(term in lower for term in ("our brands", "brands we represent", "multi-brand", "wide range of brands", "brand portfolio")):
+        set_dimension("businessCapacity", "具备多品牌经营能力", 9)
+    if any(term in lower for term in ("branches", "locations", "group of companies", "nationwide", "regional network")):
+        set_dimension("businessCapacity", "具备多网点或区域经营能力", 11)
+    if google_reviews >= 100:
+        set_dimension("businessCapacity", "地图评价量显示经营规模较稳定", 12)
+    elif google_reviews >= 20:
+        set_dimension("businessCapacity", "地图经营评价较充分", 7)
+    elif any(term in lower for term in ("wholesale", "fleet", "corporate sales", "bulk sales")):
+        set_dimension("businessCapacity", "具备批发、车队或企业销售能力", 8)
+
+    if any(term in lower for term in BUYING_INTENT_TERMS):
+        set_dimension("purchaseIntent", "存在明确采购、询价或招商意向", 18)
+    elif any(term in lower for term in ("fleet", "procurement", "wholesale", "bulk order", "corporate sales")):
+        set_dimension("purchaseIntent", "存在车队、批发或企业采购场景", 13)
+    elif any(term in lower for term in ("new brand", "brand partnership", "new models", "expanding portfolio")):
+        set_dimension("purchaseIntent", "存在引入新品牌或扩充车型信号", 11)
+
+    model_lower = requested_model.lower()
+    if any(term in lower for term in ("electric vehicle", "electric cars", " ev ", "hybrid", "new energy", "chinese car", "chinese vehicle")):
+        set_dimension("modelFit", "经营新能源或中国汽车", 6)
+    if any(term in lower for term in ("luxury", "premium", "executive", "vip", "flagship")) and any(
+        term in model_lower for term in ("m9", "s800", "s9", "问界", "尊界", "享界")
+    ):
+        set_dimension("modelFit", "高端客户画像与目标车型匹配", 10)
+    elif any(term in lower for term in ("suv", "4x4", "family")) and any(
+        term in model_lower for term in ("m9", "m8", "r7", "问界", "智界")
+    ):
+        set_dimension("modelFit", "SUV 客群与目标车型匹配", 9)
+    elif requested_model and dimensions["modelFit"] == 0:
+        set_dimension("modelFit", "汽车业务与目标车型存在基础匹配", 3)
+
+    if has_official_website:
+        set_dimension("contactability", "可核验企业官网", 2)
+    if has_contact:
+        set_dimension("contactability", "存在公开商业联系方式", 4)
+    if re.search(r"\b(owner|founder|director|general manager|procurement manager|purchasing manager)\b", lower):
+        set_dimension("contactability", "发现公开决策人或采购岗位", 5)
+
+    if re.search(r"\b(repair|workshop|spare parts|car wash|detailing|tyres?)\b", lower) and not re.search(
+        r"\b(importer|distributor|dealer|dealership|showroom|vehicle sales)\b", lower
+    ):
+        dimensions["penalty"] -= 45
+        breakdown.append({"category": "penalty", "label": "仅维修、配件或美容业务", "points": -45})
+    if re.search(r"\b(classifieds?|marketplace|individual seller|private seller)\b", lower):
+        dimensions["penalty"] -= 55
+        breakdown.append({"category": "penalty", "label": "交易平台或个人卖家特征", "points": -55})
+    if is_competitor or detect_competitor(lower):
+        dimensions["penalty"] -= 70
+        breakdown.append({"category": "penalty", "label": "中国汽车出口同行特征", "points": -70})
+
+    score = sum(dimensions.values())
+    score = max(0, min(score, 100))
+    tier = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
+    return score, breakdown, dimensions, tier
 
 
 def website_business_score(
@@ -2111,47 +2361,13 @@ def website_business_score(
     has_contact: bool,
     google_reviews: int = 0,
 ) -> tuple[int, list[dict]]:
-    lower = clean_text(text).lower()
-    score = 8
-    breakdown: list[dict] = []
-
-    def add(label: str, points: int):
-        nonlocal score
-        score += points
-        breakdown.append({"label": label, "points": points})
-
-    if any(term in lower for term in ("vehicle importer", "car importer", "automotive importer", "parallel import", "import and export")):
-        add("官网明确包含汽车进口业务", 26)
-    elif any(term in lower for term in ("distributor", "distribution", "authorized dealer", "exclusive dealer")):
-        add("官网明确包含品牌分销/代理业务", 23)
-    elif any(term in lower for term in ("dealer", "dealership", "showroom", "motors", "auto trading", "automotive trading")):
-        add("官网显示汽车经销、展厅或贸易业务", 18)
-
-    if any(term in lower for term in ("luxury", "premium", "supercar", "range rover", "mercedes", "bmw", "porsche", "bentley")):
-        add("经营豪华或高端汽车", 12)
-    if any(term in lower for term in ("electric vehicle", "electric cars", " ev ", "hybrid", "new energy", "chinese car", "chinese vehicle")):
-        add("经营新能源或中国汽车", 12)
-    if any(term in lower for term in ("our brands", "brands we represent", "multi-brand", "wide range of brands", "brand portfolio")):
-        add("具备多品牌经营能力", 8)
-    if any(term in lower for term in BUYING_INTENT_TERMS):
-        add("存在采购、招商或供应商合作意向", 14)
-    elif any(term in lower for term in ("fleet", "procurement", "wholesale", "bulk order", "corporate sales")):
-        add("具备车队、批发或企业采购业务", 9)
-    if has_official_website:
-        add("可核验企业官网", 7)
-    if has_contact:
-        add("官网存在公开联系方式", 5)
-    if google_reviews >= 20:
-        add("地图经营评价较充分", 4)
-
-    if re.search(r"\b(repair|workshop|spare parts|car wash|detailing|tyres?)\b", lower) and not re.search(
-        r"\b(importer|distributor|dealer|dealership|showroom|vehicle sales)\b", lower
-    ):
-        add("仅维修、配件或美容业务", -28)
-    if re.search(r"\b(classifieds?|marketplace|individual seller|private seller)\b", lower):
-        add("交易平台或个人卖家特征", -18)
-
-    return max(5, min(score, 98)), breakdown
+    score, breakdown, _, _ = lead_opportunity_score(
+        text,
+        has_official_website,
+        has_contact,
+        google_reviews,
+    )
+    return score, breakdown
 
 
 def opportunity_signals(text: str) -> tuple[list[str], list[str]]:
@@ -2507,12 +2723,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         origin = item.get("origin", "公开网页搜索")
         source_url = item.get("source_url") or item["url"]
         source_type = item.get("source_type") or source_details(source_url, origin)[1]
-        score, score_breakdown = website_business_score(
-            combined,
-            bool(item.get("customer_website") or source_type == "车商官网或汽车行业网站"),
-            bool(contact),
-            int(item.get("google_reviews") or 0),
-        )
+        is_competitor = detect_competitor(combined)
         business_signals, intent_signals = opportunity_signals(combined)
         city = infer_city(country, combined)
         source_title = item.get("title") or company
@@ -2589,8 +2800,16 @@ def discover(params: dict[str, list[str]]) -> dict:
             {"value": value, "sources": [{"url": source_url, "name": origin}]}
             for value in contacts.get("whatsapps") or ([contacts["whatsapp"]] if contacts["whatsapp"] else [])
         ]
-        is_competitor = detect_competitor(combined)
         recommended_models = recommend_models(combined, model)
+        score, score_breakdown, score_dimensions, score_tier = lead_opportunity_score(
+            combined,
+            bool(customer_website),
+            bool(verified_email_sources or phone_sources or whatsapp_sources),
+            int(item.get("google_reviews") or 0),
+            requested_model=model,
+            lead_type=lead_type,
+            is_competitor=is_competitor,
+        )
         confidence, confidence_label = confidence_score(
             customer_website,
             source_url,
@@ -2716,8 +2935,12 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "businessStatus": item.get("business_status", ""),
                 "model": model,
                 "score": score,
+                "baseScore": score,
+                "scoreModelVersion": 6,
+                "scoreTier": score_tier,
+                "scoreDimensions": score_dimensions,
                 "scoreBreakdown": score_breakdown,
-                "scoreBasis": "根据官网业务、进口分销能力、车型结构、采购意向和公开联系方式评分",
+                "scoreBasis": "100分机会模型：进出口资质30、客户匹配25、采购意向18、经营能力12、车型匹配10、可触达性5，另计风险扣分",
                 "stage": "准备联系" if score >= 75 else "待审核",
                 "next": "生成英文开发信并人工确认",
                 "website": combined[:1000],
@@ -2914,8 +3137,24 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 20_500_000)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-                result = save_workspace_state(payload.get("state", payload))
+                expected_version = payload.get("expectedVersion")
+                if expected_version is not None:
+                    expected_version = int(expected_version)
+                result = save_workspace_state(
+                    payload.get("state", payload),
+                    expected_version=expected_version,
+                )
                 self.send_json(200, {"ok": True, **result})
+            except WorkspaceVersionConflict as exc:
+                self.send_json(
+                    409,
+                    {
+                        "ok": False,
+                        "conflict": True,
+                        "error": str(exc),
+                        "current": exc.current,
+                    },
+                )
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
@@ -2927,7 +3166,7 @@ class Handler(SimpleHTTPRequestHandler):
                     raise ValueError("请求格式无效")
                 job = create_discovery_job(payload)
                 self.send_json(202, {"ok": True, "job": job})
-            except (ValueError, json.JSONDecodeError) as exc:
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/discover/mark-imported":
@@ -2935,6 +3174,34 @@ class Handler(SimpleHTTPRequestHandler):
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                 job = mark_discovery_job_imported(str(payload.get("id", "")))
+                if not job:
+                    self.send_json(404, {"ok": False, "error": "获客任务不存在"})
+                    return
+                self.send_json(200, {"ok": True, "job": job})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/discover/retry":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                previous = load_discovery_job(str(payload.get("id", "")))
+                if not previous:
+                    self.send_json(404, {"ok": False, "error": "获客任务不存在"})
+                    return
+                if previous.get("status") not in {"failed", "completed", "canceled"}:
+                    self.send_json(409, {"ok": False, "error": "任务仍在运行，无需重试"})
+                    return
+                job = create_discovery_job(previous.get("payload") or {}, force=True)
+                self.send_json(202, {"ok": True, "job": job})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/discover/cancel":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                job = cancel_discovery_job(str(payload.get("id", "")))
                 if not job:
                     self.send_json(404, {"ok": False, "error": "获客任务不存在"})
                     return
@@ -2967,8 +3234,10 @@ class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
 
 if __name__ == "__main__":
     initialize_state_store()
-    mark_interrupted_discovery_jobs()
+    resumed_jobs = resume_interrupted_discovery_jobs()
     with ReusableThreadingTCPServer((HOST, PORT), Handler) as httpd:
         display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
         print(f"获客工作台已启动：http://{display_host}:{PORT}/index.html")
+        if resumed_jobs:
+            print(f"已恢复 {resumed_jobs} 个中断的获客任务。")
         httpd.serve_forever()

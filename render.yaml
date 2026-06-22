@@ -19,3 +19,5 @@ services:
         value: admin123
       - key: APP_AUTH_SECRET
         generateValue: true
+      - key: DISCOVERY_MAX_CONCURRENCY
+        value: 2
