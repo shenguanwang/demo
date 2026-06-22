@@ -30,6 +30,9 @@ GOOGLE_MAPS_KEY_FILE = ROOT / "google_maps_api_key.txt"
 SOCIAL_CAPTURE_DIR = ROOT / "social-captures"
 SOCIAL_CAPTURE_FILE = SOCIAL_CAPTURE_DIR / "captures.json"
 SOCIAL_CAPTURE_LOCK = threading.Lock()
+DISCOVERY_JOBS: dict[str, dict] = {}
+DISCOVERY_JOBS_LOCK = threading.Lock()
+DISCOVERY_JOB_TTL = 60 * 60
 AUTH_USERNAME = os.environ.get("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.environ.get("APP_PASSWORD", "admin123")
 AUTH_SECRET = os.environ.get("APP_AUTH_SECRET") or secrets.token_hex(32)
@@ -65,6 +68,117 @@ def verify_session_token(token: str) -> bool:
         )
     except (ValueError, TypeError, UnicodeDecodeError, binascii.Error):
         return False
+
+
+def cleanup_discovery_jobs() -> None:
+    cutoff = datetime.now(timezone.utc).timestamp() - DISCOVERY_JOB_TTL
+    with DISCOVERY_JOBS_LOCK:
+        expired = [
+            job_id
+            for job_id, job in DISCOVERY_JOBS.items()
+            if float(job.get("updatedAtTimestamp", 0)) < cutoff
+        ]
+        for job_id in expired:
+            DISCOVERY_JOBS.pop(job_id, None)
+
+
+def update_discovery_job(job_id: str, **changes) -> None:
+    now = datetime.now(timezone.utc)
+    with DISCOVERY_JOBS_LOCK:
+        job = DISCOVERY_JOBS.get(job_id)
+        if not job:
+            return
+        job.update(changes)
+        job["updatedAt"] = now.isoformat(timespec="seconds")
+        job["updatedAtTimestamp"] = now.timestamp()
+
+
+def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
+    update_discovery_job(
+        job_id,
+        status="running",
+        stage="search",
+        progress=12,
+        message="云端正在检索地图、企业官网、行业目录和公开社媒来源。",
+    )
+    try:
+        result = discover(params)
+        update_discovery_job(
+            job_id,
+            status="completed",
+            stage="done",
+            progress=100,
+            message=f"云端搜索完成，共发现 {result.get('count', 0)} 条线索。",
+            result=result,
+        )
+    except Exception as exc:
+        update_discovery_job(
+            job_id,
+            status="failed",
+            stage="done",
+            progress=100,
+            message="云端获客任务执行失败。",
+            error=str(exc),
+        )
+
+
+def create_discovery_job(payload: dict) -> dict:
+    cleanup_discovery_jobs()
+    allowed_fields = {
+        "goal",
+        "country",
+        "model",
+        "sourceMode",
+        "accountScope",
+        "freshness",
+        "keywords",
+        "cityFocus",
+        "customerTypes",
+        "exclusions",
+        "resultLimit",
+        "verificationLevel",
+        "minSources",
+    }
+    params = {
+        key: [str(value)[:4000]]
+        for key, value in payload.items()
+        if key in allowed_fields and value is not None
+    }
+    job_id = uuid.uuid4().hex
+    now = datetime.now(timezone.utc)
+    job = {
+        "id": job_id,
+        "status": "queued",
+        "stage": "search",
+        "progress": 5,
+        "message": "云端任务已创建，正在分配搜索资源。",
+        "createdAt": now.isoformat(timespec="seconds"),
+        "updatedAt": now.isoformat(timespec="seconds"),
+        "updatedAtTimestamp": now.timestamp(),
+    }
+    with DISCOVERY_JOBS_LOCK:
+        DISCOVERY_JOBS[job_id] = job
+    worker = threading.Thread(
+        target=run_discovery_job,
+        args=(job_id, params),
+        name=f"discovery-{job_id[:8]}",
+        daemon=True,
+    )
+    worker.start()
+    return job.copy()
+
+
+def get_discovery_job(job_id: str) -> dict | None:
+    cleanup_discovery_jobs()
+    with DISCOVERY_JOBS_LOCK:
+        job = DISCOVERY_JOBS.get(job_id)
+        if not job:
+            return None
+        return {
+            key: value
+            for key, value in job.items()
+            if key != "updatedAtTimestamp"
+        }
 
 
 COUNTRY_HINTS = {
@@ -2303,6 +2417,16 @@ class Handler(SimpleHTTPRequestHandler):
                 },
             )
             return
+        if parsed.path == "/api/discover/status":
+            if not self.require_auth(api=True):
+                return
+            job_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
+            job = get_discovery_job(job_id)
+            if not job:
+                self.send_json(404, {"ok": False, "error": "获客任务不存在或已过期"})
+                return
+            self.send_json(200, {"ok": True, "job": job})
+            return
         if parsed.path in ("/", "/index.html") and not self.require_auth():
             return
         if parsed.path.startswith("/api/") and not self.require_auth(api=True):
@@ -2388,6 +2512,17 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         if not self.require_auth(api=True):
+            return
+        if parsed.path == "/api/discover/start":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("请求格式无效")
+                job = create_discovery_job(payload)
+                self.send_json(202, {"ok": True, "job": job})
+            except (ValueError, json.JSONDecodeError) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path != "/api/social-capture":
             self.send_error(404)

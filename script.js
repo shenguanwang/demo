@@ -1406,6 +1406,43 @@ function showSection(id) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+async function runCloudDiscovery(data, words, onProgress) {
+  const startResponse = await fetch("/api/discover/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      goal: data.goal,
+      country: data.country,
+      model: data.model,
+      sourceMode: data.sourceMode,
+      accountScope: data.accountScope,
+      freshness: data.freshness,
+      keywords: words.join(" | ")
+    })
+  });
+  const startResult = await startResponse.json().catch(() => ({}));
+  if (!startResponse.ok || !startResult.ok || !startResult.job?.id) {
+    throw new Error(startResult.error || `云端任务创建失败（HTTP ${startResponse.status}）`);
+  }
+
+  const deadline = Date.now() + 12 * 60 * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+    const statusResponse = await fetch(`/api/discover/status?${new URLSearchParams({
+      id: startResult.job.id
+    })}`, { cache: "no-store" });
+    const statusResult = await statusResponse.json().catch(() => ({}));
+    if (!statusResponse.ok || !statusResult.ok) {
+      throw new Error(statusResult.error || `无法读取云端任务状态（HTTP ${statusResponse.status}）`);
+    }
+    const job = statusResult.job || {};
+    if (typeof onProgress === "function") onProgress(job);
+    if (job.status === "completed") return job.result || { ok: true, leads: [], count: 0 };
+    if (job.status === "failed") throw new Error(job.error || job.message || "云端搜索失败");
+  }
+  throw new Error("云端搜索超过 12 分钟，请缩小搜索范围后重试");
+}
+
 function bindForms() {
   $("#countryGrid").addEventListener("click", (event) => {
     const card = event.target.closest("[data-country]");
@@ -1429,16 +1466,9 @@ function bindForms() {
     const words = generateKeywords(data.goal, data.country, data.model);
     renderKeywords(words);
     const searchProgress = startFinderSearchProgress();
-    fetch(`/api/discover?${new URLSearchParams({
-      goal: data.goal,
-      country: data.country,
-      model: data.model,
-      sourceMode: data.sourceMode,
-      accountScope: data.accountScope,
-      freshness: data.freshness,
-      keywords: words.join(" | ")
-    })}`)
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error(`HTTP ${response.status}`)))
+    runCloudDiscovery(data, words, (job) => {
+      setFinderStatus(job.message || "云端正在检索公开商业来源，无需启动本地工作台。");
+    })
       .then(async (result) => {
         const elapsedSeconds = searchProgress.stop();
         const found = Array.isArray(result.leads) ? result.leads : [];
@@ -1498,7 +1528,7 @@ function bindForms() {
           state: "error",
           title: "本轮获客失败",
           elapsed: `用时 ${elapsedSeconds} 秒`,
-          message: `实时获客失败：${error.message}。请确认使用“启动获客工作台.bat”打开，并且电脑可以联网。`
+          message: `云端实时获客失败：${error.message}。请保持当前网页打开后重试，不需要启动本地 BAT。`
         });
       })
       .finally(() => {
