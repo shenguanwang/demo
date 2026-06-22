@@ -1518,7 +1518,14 @@ function bindForms() {
           });
           return;
         }
-        await autoResearchNewLeads(fresh.length, sourceLabel, freshnessLabel);
+        setFinderProgress({
+          percent: 100,
+          stage: "done",
+          state: "complete",
+          title: `已新增 ${fresh.length} 条待审核线索`,
+          elapsed: `总用时 ${elapsedSeconds} 秒`,
+          message: `${sourceLabel} · ${freshnessLabel}：线索已保存。请进入“线索审核”，按评分从高到低查看；需要更完整的邮箱、联系人和多来源证据时，再执行全网核验。`
+        });
       })
       .catch((error) => {
         const elapsedSeconds = searchProgress.stop();
