@@ -140,6 +140,7 @@ let cloudSaveChain = Promise.resolve();
 let discoveryJobs = [];
 let discoveryJobsTimer = null;
 let discoveryJobsExpanded = false;
+let reviewSelectedIds = new Set();
 
 const productProfiles = {
   "问界 M9": {
@@ -842,14 +843,36 @@ function startFinderSearchProgress() {
 }
 
 function renderReview() {
+  // Keep the review queue stable. Scores are decision support, not a reason to
+  // move the card the reviewer is currently working on after manual calibration.
+  renderReviewFilterOptions();
   const rankedLeads = reviewLeads
     .map((lead, index) => ({ lead, index }))
-    .sort((a, b) => Number(b.lead.score || 0) - Number(a.lead.score || 0));
+    .filter(({ lead }) => reviewLeadMatchesFilters(lead));
+  const visibleIds = new Set(rankedLeads.map(({ lead }) => lead.id));
+  reviewSelectedIds = new Set([...reviewSelectedIds].filter((id) => reviewLeads.some((lead) => lead.id === id)));
+  const selectedVisibleCount = [...reviewSelectedIds].filter((id) => visibleIds.has(id)).length;
+  const summary = $("#reviewFilterSummary");
+  if (summary) summary.textContent = `显示 ${rankedLeads.length} / ${reviewLeads.length} 条${reviewSelectedIds.size ? ` · 已选 ${reviewSelectedIds.size} 条` : ""}`;
+  const selectVisibleButton = $("#selectVisibleReviewLeads");
+  if (selectVisibleButton) {
+    selectVisibleButton.disabled = !rankedLeads.length;
+    selectVisibleButton.textContent = rankedLeads.length && selectedVisibleCount === rankedLeads.length ? "取消选择当前结果" : "全选当前结果";
+  }
+  const deleteSelectedButton = $("#deleteSelectedReviewLeads");
+  if (deleteSelectedButton) {
+    deleteSelectedButton.disabled = !reviewSelectedIds.size;
+    deleteSelectedButton.textContent = `删除已选（${reviewSelectedIds.size}）`;
+  }
   $("#reviewGrid").innerHTML = rankedLeads.length ? rankedLeads.map(({ lead, index }, rankIndex) => `
     <article class="review-card">
       <div class="review-title-row">
         <div>
-          <span class="tag">#${rankIndex + 1} · ${lead.researchAt ? "已完成公开信息尽调" : "待全网补全"}</span>
+          <div class="review-card-meta">
+            <label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>
+            <span class="tag">#${rankIndex + 1} · ${lead.researchAt ? "已完成公开信息尽调" : "待全网补全"}</span>
+            <span class="review-captured-at">${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.source || lead.origin || "未知来源")}</span>
+          </div>
           <h3>${escapeHtml(lead.company)}</h3>
           <p>${escapeHtml(lead.researchSummary || "当前只有原始发现来源，请先执行全网补全。")}</p>
         </div>
@@ -932,6 +955,13 @@ function renderReview() {
           <small>${lead.sourceCoverage?.total || lead.evidenceSources?.length || 0} 个来源 · ${(lead.socialProfiles || []).length} 个社媒账号</small>
         </summary>
         <div class="review-more-content">
+      <div class="review-drawer-head">
+        <div>
+          <strong>${escapeHtml(lead.company)} · 核验详情</strong>
+          <span>在右侧查看，不影响当前线索列表位置</span>
+        </div>
+        <button class="ghost compact" type="button" data-close-review-details>关闭</button>
+      </div>
       <dl class="source-evidence">
         <div><dt>来源网站</dt><dd>${escapeHtml(lead.origin || "公开网页")}</dd></div>
         <div><dt>网站类型</dt><dd>${escapeHtml(lead.sourceType || "公开商业网站")}</dd></div>
@@ -1027,9 +1057,63 @@ function renderReview() {
           : `<button class="ghost" type="button" disabled title="该线索没有可打开的原始网址">查看线索原文</button>`}
         <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
         <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
+        <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
       </div>
     </article>
   `).join("") : `<p class="empty">暂无待审核线索。一键获客抓到的客户会先出现在这里。</p>`;
+}
+
+function reviewLeadTimestamp(lead) {
+  const value = lead.createdAt || lead.importedAt || lead.discoveredAt || lead.researchAt || lead.publishedAt || "";
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime()) ? date : null;
+}
+
+function formatReviewLeadTime(lead) {
+  const date = reviewLeadTimestamp(lead);
+  return date ? `入池 ${date.toLocaleDateString("zh-CN")}` : "入池时间未知";
+}
+
+function renderReviewFilterOptions() {
+  const sourceSelect = $("#reviewSourceFilter");
+  if (!sourceSelect) return;
+  const current = sourceSelect.value || "all";
+  const sources = [...new Set(reviewLeads.map((lead) => String(lead.source || lead.origin || "未知来源").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b, "zh-CN"));
+  sourceSelect.innerHTML = `<option value="all">全部来源</option>${sources.map((source) => `<option value="${escapeHtml(source)}">${escapeHtml(source)}</option>`).join("")}`;
+  sourceSelect.value = sources.includes(current) ? current : "all";
+}
+
+function reviewLeadMatchesFilters(lead) {
+  const timeFilter = $("#reviewTimeFilter")?.value || "all";
+  const sourceFilter = $("#reviewSourceFilter")?.value || "all";
+  const tierFilter = $("#reviewTierFilter")?.value || "all";
+  const source = String(lead.source || lead.origin || "未知来源").trim();
+  if (sourceFilter !== "all" && source !== sourceFilter) return false;
+  if (tierFilter !== "all" && lead.scoreTier !== tierFilter) return false;
+  if (timeFilter === "all") return true;
+  const date = reviewLeadTimestamp(lead);
+  if (!date) return timeFilter === "unknown";
+  if (timeFilter === "unknown") return false;
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const ageDays = (Date.now() - date.getTime()) / 86400000;
+  if (timeFilter === "today") return date >= startOfToday;
+  if (timeFilter === "7") return ageDays >= 0 && ageDays < 7;
+  if (timeFilter === "30") return ageDays >= 0 && ageDays < 30;
+  return ageDays >= 30;
+}
+
+function deleteReviewLeads(ids) {
+  const idSet = new Set(ids.filter(Boolean));
+  const selected = reviewLeads.filter((lead) => idSet.has(lead.id));
+  if (!selected.length) return;
+  const description = selected.length === 1 ? `“${selected[0].company}”` : `${selected.length} 条线索`;
+  if (!confirm(`确认删除${description}吗？删除后不会进入客户池或拒绝记录。`)) return;
+  selected.forEach((lead) => rememberDeletedRecord(lead, "reviewLeads"));
+  reviewLeads = reviewLeads.filter((lead) => !idSet.has(lead.id));
+  reviewSelectedIds = new Set([...reviewSelectedIds].filter((id) => !idSet.has(id)));
+  refreshAllLeadViews();
 }
 
 function renderCrm() {
@@ -1264,6 +1348,7 @@ function normalizeLead(raw) {
       ? raw.scoreBasis
       : "100分机会模型：进出口资质30、客户匹配25、采购意向18、经营能力12、车型匹配10、可触达性5",
     model: raw.model || "问界 M9",
+    createdAt: raw.createdAt || raw.importedAt || raw.discoveredAt || new Date().toISOString(),
     score,
     stage: raw.stage || "待审核",
     next: raw.next || "审核通过后生成英文开发信",
@@ -1303,7 +1388,9 @@ function calibrateLeadScore(index, delta = 0, reset = false) {
     : Math.max(-20, Math.min(20, Number(lead.manualScoreAdjustment || 0) + Number(delta || 0)));
   lead.score = Math.max(0, Math.min(100, Number(lead.baseScore || 0) + lead.manualScoreAdjustment));
   lead.scoreTier = lead.score >= 80 ? "A" : lead.score >= 65 ? "B" : lead.score >= 50 ? "C" : "D";
-  refreshAllLeadViews();
+  renderReview();
+  renderKpis();
+  saveState();
 }
 
 function rejectLead(index) {
@@ -2698,6 +2785,11 @@ function bindForms() {
   });
 
   $("#reviewGrid").addEventListener("click", (event) => {
+    const closeDetailsButton = event.target.closest("[data-close-review-details]");
+    if (closeDetailsButton) {
+      closeDetailsButton.closest("details")?.removeAttribute("open");
+      return;
+    }
     const adjustmentButton = event.target.closest("[data-score-adjust]");
     if (adjustmentButton) {
       calibrateLeadScore(
@@ -2721,7 +2813,36 @@ function bindForms() {
     const index = Number(button.dataset.index);
     if (button.dataset.reviewAction === "approve") approveLead(index);
     if (button.dataset.reviewAction === "reject") rejectLead(index);
+    if (button.dataset.reviewAction === "delete") deleteReviewLeads([reviewLeads[index]?.id]);
   });
+
+  $("#reviewGrid").addEventListener("change", (event) => {
+    const checkbox = event.target.closest("[data-review-select]");
+    if (!checkbox) return;
+    if (checkbox.checked) reviewSelectedIds.add(checkbox.dataset.reviewSelect);
+    else reviewSelectedIds.delete(checkbox.dataset.reviewSelect);
+    renderReview();
+  });
+
+  ["#reviewTimeFilter", "#reviewSourceFilter", "#reviewTierFilter"].forEach((selector) => {
+    $(selector)?.addEventListener("change", renderReview);
+  });
+
+  $("#clearReviewFilters")?.addEventListener("click", () => {
+    $("#reviewTimeFilter").value = "all";
+    $("#reviewSourceFilter").value = "all";
+    $("#reviewTierFilter").value = "all";
+    renderReview();
+  });
+
+  $("#selectVisibleReviewLeads")?.addEventListener("click", () => {
+    const visible = reviewLeads.filter(reviewLeadMatchesFilters).map((lead) => lead.id);
+    const allVisibleSelected = visible.length && visible.every((id) => reviewSelectedIds.has(id));
+    visible.forEach((id) => allVisibleSelected ? reviewSelectedIds.delete(id) : reviewSelectedIds.add(id));
+    renderReview();
+  });
+
+  $("#deleteSelectedReviewLeads")?.addEventListener("click", () => deleteReviewLeads([...reviewSelectedIds]));
 
   $("#copyEmail").addEventListener("click", async () => {
     const text = $("#englishLetter").textContent.trim();
