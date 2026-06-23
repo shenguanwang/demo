@@ -1018,15 +1018,14 @@ function renderReview() {
         <p>${escapeHtml(lead.sourceExcerpt || lead.website || "暂无可提取的原文内容，请点击原文链接核实。")}</p>
       </div>
       <p><strong>中文判断：</strong>${escapeHtml(lead.reason)}</p>
-      <p><strong>审核作用：</strong>确认这是可联系的商业客户，不把文章页、重复客户或无授权线索放进客户池。</p>
+      <p><strong>审核说明：</strong>证据完整度和系统评分仅供参考；即使证据不足，也可以由人工判断后点击“通过”。</p>
         </div>
       </details>
       <div class="split-actions">
-        ${safeHttpUrl(lead.sourceUrl || lead.source) ? `<a class="button-link ghost" href="${escapeHtml(safeHttpUrl(lead.sourceUrl || lead.source))}" target="_blank" rel="noopener noreferrer">查看线索原文</a>` : ""}
-        <button class="primary" type="button" data-review-action="approve" data-index="${index}"
-          ${!lead.researchAt || lead.confidence < 50 || lead.isCompetitor ? "disabled" : ""}>
-          ${lead.isCompetitor ? "疑似同行，不建议入池" : !lead.researchAt ? "先完成全网补全" : lead.confidence < 50 ? "证据不足，暂不能通过" : "通过，进入客户池"}
-        </button>
+        ${safeHttpUrl(lead.sourceUrl || lead.source)
+          ? `<a class="button-link ghost" href="${escapeHtml(safeHttpUrl(lead.sourceUrl || lead.source))}" target="_blank" rel="noopener noreferrer">查看线索原文</a>`
+          : `<button class="ghost" type="button" disabled title="该线索没有可打开的原始网址">查看线索原文</button>`}
+        <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
         <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
       </div>
     </article>
@@ -1273,6 +1272,8 @@ function normalizeLead(raw) {
     assignedTo: raw.assignedTo || "管理员",
     customerTimezone: raw.customerTimezone || "",
     preferredChannel: raw.preferredChannel || "WhatsApp",
+    manualApproval: Boolean(raw.manualApproval),
+    manualApprovalAt: raw.manualApprovalAt || "",
     lastContactAt: raw.lastContactAt || "",
     followUpHistory: Array.isArray(raw.followUpHistory) ? raw.followUpHistory : [],
     website,
@@ -1281,12 +1282,12 @@ function normalizeLead(raw) {
 }
 
 function approveLead(index) {
-  const candidate = reviewLeads[index];
-  if (!candidate || !candidate.researchAt || candidate.confidence < 50 || candidate.isCompetitor) return;
   const lead = reviewLeads.splice(index, 1)[0];
   if (!lead) return;
   customers.unshift({
     ...lead,
+    manualApproval: true,
+    manualApprovalAt: new Date().toISOString(),
     stage: "准备联系",
     next: "生成英文开发信并人工确认",
     nextFollowAt: ""
