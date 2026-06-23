@@ -1718,6 +1718,12 @@ function captureToLead(capture) {
 async function importSocialCaptures() {
   const status = $("#captureInboxStatus");
   if (!status) return;
+  const localHosts = new Set(["localhost", "127.0.0.1", "::1"]);
+  if (!localHosts.has(window.location.hostname)) {
+    status.textContent = "云端公开搜索可用";
+    status.title = "Chrome 登录态采集器只连接本机工作台；云端五平台公开搜索不需要扩展。";
+    return;
+  }
   try {
     const response = await apiFetch("/api/social-captures", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
