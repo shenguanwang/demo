@@ -1521,6 +1521,42 @@ function socialPlatformFromUrl(url) {
   return "官网";
 }
 
+function inferSocialNameFromUrl(url) {
+  try {
+    const parsed = new URL(url);
+    const ignored = new Set(["company", "in", "pages", "channel", "user", "c"]);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const handle = [...parts].reverse().find((part) => !ignored.has(part.toLowerCase())) || "";
+    return decodeURIComponent(handle)
+      .replace(/^@/, "")
+      .replace(/[-_.]+/g, " ")
+      .replace(/\b\w/g, (letter) => letter.toUpperCase())
+      .trim();
+  } catch {
+    return "";
+  }
+}
+
+function autoFillSocialFormFromUrl() {
+  const form = $("#socialLeadForm");
+  if (!form) return;
+  const url = safeHttpUrl(form.pageUrl.value);
+  if (!url) return;
+  const platform = socialPlatformFromUrl(url);
+  if (["Facebook", "Instagram", "TikTok", "YouTube", "LinkedIn"].includes(platform)) {
+    form.platform.value = platform;
+  }
+  if (form.accountType.value === "自动判断") {
+    const path = new URL(url).pathname.toLowerCase();
+    form.accountType.value = platform === "LinkedIn" && path.startsWith("/in/")
+      ? "个人决策人"
+      : "公司账号";
+  }
+  if (!form.company.value.trim()) {
+    form.company.value = inferSocialNameFromUrl(url);
+  }
+}
+
 function analyzeSocialBusinessText(text, accountType = "") {
   const value = String(text || "").toLowerCase();
   const signalRules = {
@@ -2513,13 +2549,39 @@ function bindForms() {
 
   $("#finderForm").addEventListener("input", updateSocialProspectingQueries);
   $("#finderForm").addEventListener("change", updateSocialProspectingQueries);
+  $("#runSocialDiscovery")?.addEventListener("click", () => {
+    const finderForm = $("#finderForm");
+    const submitButton = finderForm?.querySelector('button[type="submit"]');
+    const autoButton = $("#runSocialDiscovery");
+    if (!finderForm || !submitButton || submitButton.disabled) {
+      setFinderStatus("已有云端获客任务正在启动，请稍后查看任务中心。");
+      return;
+    }
+    finderForm.sourceMode.value = "social";
+    finderForm.accountScope.value = "both";
+    finderForm.freshness.value = "all";
+    updateSocialProspectingQueries();
+    autoButton.disabled = true;
+    autoButton.textContent = "正在启动云端搜索…";
+    finderForm.requestSubmit(submitButton);
+    const observer = new MutationObserver(() => {
+      if (submitButton.disabled) return;
+      observer.disconnect();
+      autoButton.disabled = false;
+      autoButton.textContent = "再次搜索五平台";
+    });
+    observer.observe(submitButton, { attributes: true, attributeFilter: ["disabled"] });
+  });
   $(".social-search-box").addEventListener("click", (event) => {
     const link = event.target.closest("[data-social-platform]");
     if (link) $("#socialLeadForm").platform.value = link.dataset.socialPlatform;
   });
+  $("#socialLeadForm").pageUrl.addEventListener("change", autoFillSocialFormFromUrl);
+  $("#socialLeadForm").pageUrl.addEventListener("blur", autoFillSocialFormFromUrl);
 
   $("#socialLeadForm").addEventListener("submit", (event) => {
     event.preventDefault();
+    autoFillSocialFormFromUrl();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const url = safeHttpUrl(data.pageUrl);
     const domain = url ? new URL(url).hostname.toLowerCase() : "";

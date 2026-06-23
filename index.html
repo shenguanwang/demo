@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>华为系新能源汽车海外获客工作台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260623-auditfix">
+  <link rel="stylesheet" href="./styles.css?v=20260623-socialauto">
 </head>
 <body>
   <aside class="sidebar">
@@ -276,9 +276,16 @@
         <div class="panel-head">
           <div>
             <h3>社媒登录态主动开发与页面采集</h3>
-            <p>使用当前 Google Chrome 登录状态；打开简介弹窗后可用扩展采集邮箱、官网和关联社媒。</p>
+            <p>云端可自动搜索五个平台的公开商业账号；需要读取登录后才显示的简介、邮箱或弹窗时，再使用本机 Chrome 采集器。</p>
           </div>
           <span class="social-login-state" id="captureInboxStatus">等待 Chrome 采集器</span>
+        </div>
+        <div class="social-auto-run">
+          <div>
+            <strong>五平台云端自动获客</strong>
+            <span>自动搜索 Facebook、Instagram、TikTok、YouTube、LinkedIn，去重、识别商业信号并保存到待审核。</span>
+          </div>
+          <button class="primary" id="runSocialDiscovery" type="button">自动搜索五平台</button>
         </div>
         <div class="extension-install-note">
           <div>
@@ -315,7 +322,7 @@
               <li>优先选择公开可访问的公司主页、频道或明确标注职位的经营者主页。</li>
               <li>确认简介或帖子包含进口、经销、展厅、采购、批发或品牌合作信号。</li>
               <li>保留原始主页网址；系统会区分企业账号、个人决策人和待核验账号。</li>
-              <li>公开社媒搜索由云端执行，其他设备不需要安装本地扩展。</li>
+              <li>公开账号搜索由云端执行，其他设备无需扩展；只有采集登录后可见内容时才需要本机 Chrome 扩展。</li>
             </ol>
           </div>
           <form class="social-capture-form" id="socialLeadForm">
@@ -331,6 +338,7 @@
               </label>
               <label>账号类型
                 <select name="accountType">
+                  <option value="自动判断">自动判断</option>
                   <option value="公司账号">公司账号</option>
                   <option value="个人决策人">个人决策人</option>
                 </select>
@@ -688,6 +696,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260623-authfix"></script>
+  <script src="./script.js?v=20260623-socialauto"></script>
 </body>
 </html>
