@@ -1473,6 +1473,23 @@ textarea {
   background: #fff;
 }
 
+@media (min-width: 821px) {
+  .review-toolbar {
+    position: sticky;
+    top: 12px;
+    z-index: 12;
+    box-shadow: 0 10px 24px rgba(22, 29, 38, 0.05);
+  }
+
+  .review-filter-group {
+    flex: 1 1 auto;
+  }
+
+  .review-bulk-actions {
+    flex: 0 0 auto;
+  }
+}
+
 .review-filter-group,
 .review-bulk-actions,
 .review-card-meta {
@@ -1499,6 +1516,13 @@ textarea {
   background: #fff;
   color: #26313c;
   font: inherit;
+}
+
+.review-filter-group select:focus-visible,
+.review-select input:focus-visible,
+.danger-button:focus-visible {
+  outline: 3px solid rgba(36, 85, 139, 0.22);
+  outline-offset: 2px;
 }
 
 .review-bulk-actions {
@@ -1556,6 +1580,10 @@ textarea {
   box-shadow: 0 12px 36px rgba(22, 29, 38, 0.045);
 }
 
+.review-card:hover {
+  border-color: #d9e1e8;
+}
+
 .review-title-row {
   display: flex;
   align-items: flex-start;
@@ -1570,6 +1598,14 @@ textarea {
   font-size: 22px;
 }
 
+.review-title-row > div {
+  min-width: 0;
+}
+
+.review-title-row .research-button {
+  flex: 0 0 auto;
+}
+
 .review-title-row p {
   margin: 0;
   color: var(--muted);
@@ -1578,7 +1614,7 @@ textarea {
 
 .review-decision {
   display: grid;
-  grid-template-columns: 1.3fr 0.7fr repeat(3, 0.55fr) 1.2fr;
+  grid-template-columns: minmax(180px, 1.35fr) minmax(122px, 0.8fr) repeat(3, minmax(76px, 0.55fr)) minmax(140px, 1.1fr);
   gap: 9px;
   margin: 16px 0 4px;
 }
@@ -2852,9 +2888,21 @@ tbody tr:last-child td {
   }
 
   .lead-list,
-  .review-grid,
   .task-list {
     grid-template-columns: repeat(2, minmax(220px, 1fr));
+  }
+
+  .review-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .review-bulk-actions {
+    justify-content: flex-start;
   }
 
   .kpi-insight {
@@ -2943,6 +2991,19 @@ tbody tr:last-child td {
   .section-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .section-head > .primary {
+    width: 100%;
+    margin-bottom: 0;
+  }
+
+  .review-card {
+    padding: 18px;
+  }
+
+  .review-card-meta {
+    align-items: flex-start;
   }
 
   .source-evidence,
@@ -3146,5 +3207,28 @@ tbody tr:last-child td {
   .review-filter-group label,
   .review-bulk-actions button {
     width: 100%;
+  }
+
+  .review-card {
+    padding: 16px;
+    border-radius: 12px;
+  }
+
+  .review-title-row h3 {
+    font-size: 20px;
+  }
+
+  .review-captured-at {
+    width: 100%;
+  }
+
+  .review-decision > div {
+    padding: 10px;
+  }
+
+  .review-key-info > div,
+  .source-evidence > div {
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 8px;
   }
 }
