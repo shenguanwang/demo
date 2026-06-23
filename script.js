@@ -129,6 +129,7 @@ let reviewLeads = savedState.reviewLeads;
 let customers = savedState.customers;
 let rejectedLeads = savedState.rejectedLeads;
 let quoteHistory = savedState.quotes;
+let deletedRecords = savedState.deletedRecords;
 let lastQuote = null;
 let cloudStateReady = false;
 let cloudStateVersion = Number(savedState._cloudVersion || 0);
@@ -386,6 +387,7 @@ function loadSavedState() {
     customers: [],
     rejectedLeads: [],
     quotes: [],
+    deletedRecords: [],
     _cloudVersion: 0,
     _cloudDirty: false
   };
@@ -398,6 +400,7 @@ function loadSavedState() {
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
       rejectedLeads: Array.isArray(parsed.rejectedLeads) ? parsed.rejectedLeads : [],
       quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
+      deletedRecords: Array.isArray(parsed.deletedRecords) ? parsed.deletedRecords : [],
       _cloudVersion: Number(parsed._cloudVersion || 0),
       _cloudDirty: Boolean(parsed._cloudDirty)
     };
@@ -411,7 +414,8 @@ function workspaceStateSnapshot() {
     reviewLeads,
     customers,
     rejectedLeads,
-    quotes: quoteHistory
+    quotes: quoteHistory,
+    deletedRecords
   };
 }
 
@@ -425,6 +429,7 @@ function persistLocalState(dirty = localStateDirty) {
 }
 
 function recordIdentity(record, type) {
+  if (type === "deletedRecords") return `deleted:${record?.key || ""}`;
   if (type === "quotes") {
     if (record?.id) return `quotes:id:${record.id}`;
     return `${type}:${record?.customer || ""}|${record?.model || ""}|${record?.createdAt || ""}`;
@@ -433,6 +438,17 @@ function recordIdentity(record, type) {
   return `lead:${record?.company || ""}|${record?.country || ""}|${
     record?.customerWebsite || record?.sourceUrl || record?.source || ""
   }`.toLowerCase();
+}
+
+function rememberDeletedRecord(record, type) {
+  const key = recordIdentity(record, type);
+  if (!key || deletedRecords.some((item) => item.key === key)) return;
+  deletedRecords.unshift({
+    key,
+    type,
+    deletedAt: new Date().toISOString()
+  });
+  deletedRecords = deletedRecords.slice(0, 10_000);
 }
 
 function mergeRecordLists(remoteList, localList, type) {
@@ -447,11 +463,22 @@ function mergeRecordLists(remoteList, localList, type) {
 }
 
 function mergeWorkspaceStates(remoteState, localState) {
+  const mergedDeletedRecords = mergeRecordLists(
+    remoteState?.deletedRecords,
+    localState?.deletedRecords,
+    "deletedRecords"
+  );
+  const deletedKeys = new Set(mergedDeletedRecords.map((record) => record.key));
   const merged = {
-    reviewLeads: mergeRecordLists(remoteState?.reviewLeads, localState?.reviewLeads, "reviewLeads"),
-    customers: mergeRecordLists(remoteState?.customers, localState?.customers, "customers"),
-    rejectedLeads: mergeRecordLists(remoteState?.rejectedLeads, localState?.rejectedLeads, "rejectedLeads"),
+    reviewLeads: mergeRecordLists(remoteState?.reviewLeads, localState?.reviewLeads, "reviewLeads")
+      .filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads"))),
+    customers: mergeRecordLists(remoteState?.customers, localState?.customers, "customers")
+      .filter((record) => !deletedKeys.has(recordIdentity(record, "customers"))),
+    rejectedLeads: mergeRecordLists(remoteState?.rejectedLeads, localState?.rejectedLeads, "rejectedLeads")
+      .filter((record) => !deletedKeys.has(recordIdentity(record, "rejectedLeads"))),
     quotes: mergeRecordLists(remoteState?.quotes, localState?.quotes, "quotes")
+      .filter((record) => !deletedKeys.has(recordIdentity(record, "quotes"))),
+    deletedRecords: mergedDeletedRecords
   };
   const localBuckets = new Map();
   ["reviewLeads", "customers", "rejectedLeads"].forEach((bucket) => {
@@ -469,10 +496,20 @@ function mergeWorkspaceStates(remoteState, localState) {
 }
 
 function applyWorkspaceState(state, render = false) {
-  reviewLeads = Array.isArray(state?.reviewLeads) ? state.reviewLeads.map(normalizeLead) : [];
-  customers = Array.isArray(state?.customers) ? state.customers.map(normalizeLead) : [];
-  rejectedLeads = Array.isArray(state?.rejectedLeads) ? state.rejectedLeads.map(normalizeLead) : [];
-  quoteHistory = Array.isArray(state?.quotes) ? state.quotes : [];
+  deletedRecords = Array.isArray(state?.deletedRecords) ? state.deletedRecords : [];
+  const deletedKeys = new Set(deletedRecords.map((record) => record.key));
+  reviewLeads = Array.isArray(state?.reviewLeads)
+    ? state.reviewLeads.filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads"))).map(normalizeLead)
+    : [];
+  customers = Array.isArray(state?.customers)
+    ? state.customers.filter((record) => !deletedKeys.has(recordIdentity(record, "customers"))).map(normalizeLead)
+    : [];
+  rejectedLeads = Array.isArray(state?.rejectedLeads)
+    ? state.rejectedLeads.filter((record) => !deletedKeys.has(recordIdentity(record, "rejectedLeads"))).map(normalizeLead)
+    : [];
+  quoteHistory = Array.isArray(state?.quotes)
+    ? state.quotes.filter((record) => !deletedKeys.has(recordIdentity(record, "quotes")))
+    : [];
   persistLocalState(localStateDirty);
   if (render) {
     renderLeads();
@@ -639,7 +676,7 @@ function scoreVisualClass(score) {
 
 function summarizeLead(lead) {
   if (lead.reason) return lead.reason;
-  const grade = lead.score >= 75 ? "适合优先联系" : "需要人工复核";
+  const grade = lead.score >= 80 ? "适合优先联系" : "需要人工复核";
   return `${lead.city || lead.country} 的${lead.type}，${grade}。建议结合官网信息推荐${lead.model}。`;
 }
 
@@ -993,13 +1030,14 @@ function renderCrm() {
         <div class="crm-actions">
           <button type="button" data-crm-action="email" data-index="${index}">写开发信</button>
           <button type="button" data-crm-action="quote" data-index="${index}">去报价</button>
+          <button type="button" data-crm-action="delete" data-index="${index}">删除</button>
         </div>
       </td>
     </tr>
   `).join("") : `<tr><td colspan="8">暂无正式客户。请先完成全网核验，再在线索审核中点击“通过”。</td></tr>`;
   $("#heroPending").textContent = reviewLeads.length;
   $("#heroCustomers").textContent = customers.length;
-  $("#heroGradeA").textContent = customers.filter((lead) => lead.score >= 75).length;
+  $("#heroGradeA").textContent = customers.filter((lead) => lead.score >= 80).length;
   renderLeadSelect();
 }
 
@@ -1210,6 +1248,10 @@ function normalizeLead(raw) {
     stage: raw.stage || "待审核",
     next: raw.next || "审核通过后生成英文开发信",
     nextFollowAt: raw.nextFollowAt || "",
+    nextFollowTime: raw.nextFollowTime || "10:00",
+    assignedTo: raw.assignedTo || "管理员",
+    customerTimezone: raw.customerTimezone || "",
+    preferredChannel: raw.preferredChannel || "WhatsApp",
     lastContactAt: raw.lastContactAt || "",
     followUpHistory: Array.isArray(raw.followUpHistory) ? raw.followUpHistory : [],
     website,
@@ -1666,13 +1708,33 @@ function generateLetter(data) {
   const insight = `这家公司官网显示它是${traits.join("、")}，适合推荐${data.model}。系统会把客户官网信息和车型卖点融合，而不是发一封通用群发邮件。`;
   const recipient = data.contactName ? data.contactName : `${data.company} team`;
 
-  const english = data.channel === "Email"
-    ? `Subject: Dealer CIF quotation for ${profile.english} from China\n\nHi ${recipient},\n\nI found your website and noticed that you focus on ${traits.join(", ")}. We supply HIMA smart EV models from China, including ${profile.english}.\n\n${profile.english} is ${profile.pitch}. I believe it could be a strong fit for customers looking for premium Chinese smart vehicles.\n\nWould it be relevant for your team to review the available colors, export specifications and a dealer CIF quotation for ${profile.english}?\n\nBest regards`
-    : `Hi ${recipient}, I found your website and noticed that you focus on ${traits.join(", ")}.\n\nWe supply HIMA smart EV models from China, including ${profile.english}. It is ${profile.pitch}.\n\nWould it be relevant for your team to review dealer CIF prices, available colors and export specifications for ${profile.english}?`;
+  const messages = {
+    Email: `Subject: Dealer CIF quotation for ${profile.english} from China\n\nHi ${recipient},\n\nI found your website and noticed that you focus on ${traits.join(", ")}. We supply HIMA smart EV models from China, including ${profile.english}.\n\n${profile.english} is ${profile.pitch}. I believe it could be a strong fit for your market.\n\nWould it be relevant for your team to review available colors, export specifications and a dealer CIF quotation?\n\nBest regards`,
+    WhatsApp: `Hi ${recipient}, I noticed your ${traits.join(" / ")} business. We export HIMA smart EVs from China, including ${profile.english}. Would you like me to send available colors and a dealer CIF price?`,
+    "Instagram DM": `Hi ${recipient} — your ${traits[0]} caught my attention. We supply ${profile.english} smart EVs from China. Open to receiving a short dealer price/spec sheet?`,
+    LinkedIn: `Hi ${recipient}, I came across your automotive business and thought ${profile.english} may fit your portfolio. We support dealer export specifications and CIF quotations from China. Would a brief product and pricing overview be useful?`
+  };
+  const english = messages[data.channel] || messages.WhatsApp;
+  const followUps = [
+    {
+      day: "第1天",
+      text: data.channel === "Email"
+        ? `Hi ${recipient}, just checking whether the ${profile.english} dealer quotation would be relevant for your team.`
+        : `Hi ${recipient}, would you like a quick ${profile.english} price and color list?`
+    },
+    {
+      day: "第3天",
+      text: `We can share export specifications, available colors and a CIF reference for ${profile.english}. Which destination port do you normally use?`
+    },
+    {
+      day: "第7天",
+      text: `Last follow-up from my side: should I keep you updated on ${profile.english} stock and dealer pricing, or is another HIMA model more relevant?`
+    }
+  ];
 
   const chinese = `中文意思：我看到你们官网主要做${traits.join("、")}。我们供应中国华为系鸿蒙智行新能源车型，包括${data.model}。这款车的优势是${profile.chinese}。想问你们是否有兴趣了解经销商 CIF 报价、现车颜色和出口细节。`;
 
-  return { insight, english, chinese };
+  return { insight, english, chinese, followUps };
 }
 
 function renderQuote(values = {}) {
@@ -1694,6 +1756,9 @@ function renderQuote(values = {}) {
   const deliveryDays = Number(values.deliveryDays || 45);
   const paymentTerms = String(values.paymentTerms || "30% deposit, 70% before shipment");
   const quoteNotes = String(values.quoteNotes || "").trim();
+  const sellerCompany = String(values.sellerCompany || "HIMA Global").trim();
+  const sellerContact = String(values.sellerContact || "").trim();
+  const quoteStatus = String(values.quoteStatus || "Draft");
   const vehicleTotal = price * qty;
   const localTotal = local * qty;
   const insurance = vehicleTotal * insuranceRate;
@@ -1717,6 +1782,9 @@ function renderQuote(values = {}) {
     deliveryDays,
     paymentTerms,
     quoteNotes,
+    sellerCompany,
+    sellerContact,
+    quoteStatus,
     createdAt: new Date().toLocaleString(),
     english: `CIF quotation for ${productProfiles[model]?.english || model}: ${money(total)} to ${destination}. Payment: ${paymentTerms}. Estimated delivery: ${deliveryDays} days. Destination import duty, VAT, registration and local delivery are excluded.`
   };
@@ -1734,6 +1802,7 @@ function renderQuote(values = {}) {
       <div class="wide"><span>目的港</span><strong>${escapeHtml(destination)}</strong></div>
       <div class="wide"><span>付款条款</span><strong>${escapeHtml(paymentTerms)}</strong></div>
       <div><span>预计交期</span><strong>${deliveryDays} 天</strong></div>
+      <div><span>报价状态</span><strong>${escapeHtml(quoteStatus)}</strong></div>
       <div class="wide"><span>有效期</span><strong>至 ${escapeHtml(validUntil)}</strong></div>
     </div>
     <div class="quote-cost-head">
@@ -1755,7 +1824,8 @@ function renderQuote(values = {}) {
 function quoteDocumentHtml(quote) {
   return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(quote.id)} Quotation</title>
   <style>body{font-family:Arial,sans-serif;color:#18222d;max-width:900px;margin:40px auto;padding:0 28px}h1{margin-bottom:4px}.meta{color:#66717c}.total{font-size:28px;font-weight:700;margin:24px 0}table{width:100%;border-collapse:collapse}td{padding:10px;border-bottom:1px solid #ddd}td:first-child{color:#66717c;width:35%}.note{margin-top:28px;padding:16px;background:#f5f7f9;line-height:1.6}</style>
-  </head><body><h1>Commercial Quotation</h1><p class="meta">Quotation No. ${escapeHtml(quote.id)} · ${escapeHtml(quote.createdAt)}</p>
+  </head><body><h1>Commercial Quotation</h1><p class="meta">${escapeHtml(quote.sellerCompany || "HIMA Global")}${quote.sellerContact ? ` · ${escapeHtml(quote.sellerContact)}` : ""}</p>
+  <p class="meta">Quotation No. ${escapeHtml(quote.id)} · ${escapeHtml(quote.createdAt)} · Status: ${escapeHtml(quote.quoteStatus || "Draft")}</p>
   <div class="total">${money(quote.total)} CIF ${escapeHtml(quote.destination)}</div><table>
   <tr><td>Customer</td><td>${escapeHtml(quote.customer)}</td></tr><tr><td>Model</td><td>${escapeHtml(productProfiles[quote.model]?.english || quote.model)}</td></tr>
   <tr><td>Configuration / Color</td><td>${escapeHtml(quote.configuration || "To be confirmed")}</td></tr><tr><td>Quantity</td><td>${escapeHtml(quote.qty)}</td></tr>
@@ -1808,10 +1878,20 @@ function renderFollowTasks() {
     .slice(0, 30);
   box.innerHTML = tasks.length ? tasks.map(({ lead, index }) => `
     <article class="${lead.nextFollowAt && lead.nextFollowAt < today ? "follow-overdue" : ""}">
-      <span>${escapeHtml(lead.stage || "待跟进")}${lead.score >= 75 ? " · A 级优先" : ""}</span>
+      <span>${escapeHtml(lead.stage || "待跟进")}${lead.score >= 80 ? " · A 级优先" : ""}</span>
       <h3>${escapeHtml(lead.company)}</h3>
       <p>建议动作：${escapeHtml(lead.next || `根据客户官网信息生成英文开发信，推荐${lead.model}。`)}</p>
       <small>计划跟进：${escapeHtml(lead.nextFollowAt || "今天")}${lead.lastContactAt ? ` · 最近联系：${escapeHtml(lead.lastContactAt)}` : ""}</small>
+      <div class="follow-context">
+        <label>负责人 <input data-follow-owner="${index}" value="${escapeHtml(lead.assignedTo || "管理员")}"></label>
+        <label>客户时区 <input data-follow-timezone="${index}" value="${escapeHtml(lead.customerTimezone || "")}" placeholder="例如 UTC+4"></label>
+        <label>渠道
+          <select data-follow-channel="${index}">
+            ${["WhatsApp", "Email", "Instagram DM", "LinkedIn"].map((channel) => `<option ${channel === lead.preferredChannel ? "selected" : ""}>${channel}</option>`).join("")}
+          </select>
+        </label>
+        <label>提醒时间 <input data-follow-time="${index}" type="time" value="${escapeHtml(lead.nextFollowTime || "10:00")}"></label>
+      </div>
       <div class="follow-entry">
         <select data-follow-outcome="${index}">
           <option value="已发送消息">已发送消息</option><option value="客户有回复">客户有回复</option>
@@ -1837,11 +1917,27 @@ function recordFollowUp(index) {
   if (!lead) return;
   const outcome = document.querySelector(`[data-follow-outcome="${index}"]`)?.value || "继续跟进";
   const nextDate = document.querySelector(`[data-follow-date="${index}"]`)?.value || "";
+  const nextTime = document.querySelector(`[data-follow-time="${index}"]`)?.value || "10:00";
+  const assignedTo = document.querySelector(`[data-follow-owner="${index}"]`)?.value.trim() || "管理员";
+  const customerTimezone = document.querySelector(`[data-follow-timezone="${index}"]`)?.value.trim() || "";
+  const preferredChannel = document.querySelector(`[data-follow-channel="${index}"]`)?.value || "WhatsApp";
   const note = document.querySelector(`[data-follow-note="${index}"]`)?.value.trim() || "";
   const today = new Date().toISOString().slice(0, 10);
-  lead.followUpHistory = [{ at: today, outcome, note, nextFollowAt: nextDate }, ...(lead.followUpHistory || [])].slice(0, 100);
+  lead.followUpHistory = [{
+    at: today,
+    outcome,
+    note,
+    nextFollowAt: nextDate,
+    nextFollowTime: nextTime,
+    assignedTo,
+    preferredChannel
+  }, ...(lead.followUpHistory || [])].slice(0, 100);
   lead.lastContactAt = today;
   lead.nextFollowAt = nextDate;
+  lead.nextFollowTime = nextTime;
+  lead.assignedTo = assignedTo;
+  lead.customerTimezone = customerTimezone;
+  lead.preferredChannel = preferredChannel;
   if (outcome === "客户有回复") lead.stage = "有回复";
   if (outcome === "需要报价") lead.stage = "报价中";
   if (outcome === "暂缓") lead.stage = "暂缓";
@@ -1864,11 +1960,14 @@ function renderKpis() {
   const approvalBase = reviewLeads.length + customers.length;
   const approvalRate = approvalBase ? Math.round(customers.length / approvalBase * 100) : 0;
   const replyRate = contacted ? Math.round(replied / contacted * 100) : 0;
-  const nextRecommendation = reviewLeads.some((lead) => !lead.researchAt)
+  const hasAnyData = reviewLeads.length || customers.length || quoteHistory.length;
+  const nextRecommendation = !hasAnyData
+    ? "当前还没有客户数据。请先运行自动获客，或从已完成任务导入线索。"
+    : reviewLeads.some((lead) => !lead.researchAt)
     ? `还有 ${reviewLeads.filter((lead) => !lead.researchAt).length} 条线索未完成全网核验。`
     : customers.some((lead) => lead.stage === "准备联系")
       ? `还有 ${customers.filter((lead) => lead.stage === "准备联系").length} 个客户尚未首次触达。`
-      : "当前没有阻塞项，继续新增高质量线索。";
+      : "当前客户均已处理，可继续新增高质量线索或查看到期跟进。";
   $("#kpiInsight").innerHTML = `
     <div><span>审核通过率</span><strong>${approvalRate}%</strong></div>
     <div><span>客户回复率</span><strong>${replyRate}%</strong></div>
@@ -1889,6 +1988,13 @@ function showSection(id) {
     history.replaceState(null, "", `#${id}`);
   }
   window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function showRequestedSection() {
+  const requestedSection = window.location.hash.slice(1);
+  if (requestedSection && document.getElementById(requestedSection)?.classList.contains("section")) {
+    showSection(requestedSection);
+  }
 }
 
 function discoverySourceLabel(value) {
@@ -1950,6 +2056,7 @@ function renderDiscoveryJobs() {
     const canImport = job.status === "completed" && !job.imported && count > 0;
     const canRetry = ["failed", "canceled"].includes(job.status);
     const canCancel = ["queued", "running"].includes(job.status);
+    const diagnostics = job.result?.diagnostics;
     const actionLabel = job.imported
       ? "已导入"
       : canImport
@@ -1983,6 +2090,13 @@ function renderDiscoveryJobs() {
             <span class="job-state ${escapeHtml(job.status)}">${escapeHtml(stateLabels[job.status] || job.status)}</span>
             <p>${escapeHtml(job.error || job.message || "等待云端处理")}</p>
           </div>
+          ${diagnostics ? `
+            <details class="job-diagnostics">
+              <summary>失败诊断：${escapeHtml(diagnostics.category || "执行异常")}</summary>
+              <p>${escapeHtml(diagnostics.suggestion || "")}</p>
+              <small>来源：${escapeHtml(discoverySourceLabel(diagnostics.sourceMode))} · ${escapeHtml(formatJobTime(diagnostics.failedAt))}</small>
+            </details>
+          ` : ""}
         </div>
         <div class="discovery-job-actions">
           <button class="discovery-job-action" type="button"
@@ -2472,6 +2586,9 @@ function bindForms() {
     $("#leadInsight").textContent = result.insight;
     $("#englishLetter").textContent = result.english;
     $("#chineseMeaning").textContent = result.chinese;
+    $("#followUpSequence").innerHTML = result.followUps.map((item) =>
+      `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
+    ).join("");
   });
 
   $("#fillLeadFromCrm").addEventListener("click", () => {
@@ -2483,6 +2600,9 @@ function bindForms() {
     $("#leadInsight").textContent = result.insight;
     $("#englishLetter").textContent = result.english;
     $("#chineseMeaning").textContent = result.chinese;
+    $("#followUpSequence").innerHTML = result.followUps.map((item) =>
+      `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
+    ).join("");
   });
 
   $("#leadForm").addEventListener("submit", (event) => {
@@ -2498,7 +2618,7 @@ function bindForms() {
       source: data.source || "Website",
       model: data.model,
       score,
-      stage: score >= 75 ? "准备联系" : "待审核",
+      stage: score >= 80 ? "准备联系" : "待审核",
       next: data.next || "发送首次开发信",
       website,
       reason: `${data.city} 的${data.type}，官网信息显示：${website.slice(0, 90)}。适合推荐${data.model}。`
@@ -2589,6 +2709,12 @@ function bindForms() {
     renderKpis();
   });
   $("#downloadQuote").addEventListener("click", () => {
+    if ($("#quoteCustomer").value === "") {
+      const button = $("#downloadQuote");
+      button.textContent = "请先选择客户";
+      setTimeout(() => { button.textContent = "导出英文报价单"; }, 1400);
+      return;
+    }
     renderQuote(Object.fromEntries(new FormData($("#quoteForm")).entries()));
     downloadQuoteDocument(lastQuote);
   });
@@ -2616,6 +2742,13 @@ function bindForms() {
     const index = Number(button.dataset.index);
     if (button.dataset.crmAction === "email") openCustomerInEmail(index);
     if (button.dataset.crmAction === "quote") openCustomerInQuote(index);
+    if (button.dataset.crmAction === "delete") {
+      const lead = customers[index];
+      if (!lead || !confirm(`确认删除客户 ${lead.company} 吗？此删除会同步到其他设备。`)) return;
+      rememberDeletedRecord(lead, "customers");
+      customers.splice(index, 1);
+      refreshAllLeadViews();
+    }
   });
 
   $("#followTasks").addEventListener("click", (event) => {
@@ -2643,6 +2776,7 @@ function bindForms() {
     const quote = quoteHistory[index];
     if (!quote) return;
     if (!confirm(`确认删除 ${quote.customer || "未选择客户"} 的 ${quote.model || ""} 报价版本吗？`)) return;
+    rememberDeletedRecord(quote, "quotes");
     quoteHistory.splice(index, 1);
     saveState();
     renderQuoteHistory();
@@ -2652,7 +2786,7 @@ function bindForms() {
   $("#exportCustomerTable").addEventListener("click", exportCustomersCsv);
 
   $("#exportData").addEventListener("click", () => {
-    const text = JSON.stringify({ reviewLeads, customers, rejectedLeads, quotes: quoteHistory }, null, 2);
+    const text = JSON.stringify({ reviewLeads, customers, rejectedLeads, quotes: quoteHistory, deletedRecords }, null, 2);
     downloadFile(
       text,
       `huawei-ev-leads-${new Date().toISOString().slice(0, 10)}.json`,
@@ -2662,7 +2796,10 @@ function bindForms() {
 
   $("#clearSavedData").addEventListener("click", () => {
     if (!confirm("确认清空待审核线索、客户池、拒绝记录和报价吗？")) return;
-    localStorage.removeItem(STORAGE_KEY);
+    reviewLeads.forEach((record) => rememberDeletedRecord(record, "reviewLeads"));
+    customers.forEach((record) => rememberDeletedRecord(record, "customers"));
+    rejectedLeads.forEach((record) => rememberDeletedRecord(record, "rejectedLeads"));
+    quoteHistory.forEach((record) => rememberDeletedRecord(record, "quotes"));
     reviewLeads = [];
     customers = [];
     rejectedLeads = [];
@@ -2676,6 +2813,7 @@ function renderDefaultLetter() {
   $("#leadInsight").textContent = "客户池有客户后，可以从下拉框选择客户并自动生成开发信。";
   $("#englishLetter").textContent = "";
   $("#chineseMeaning").textContent = "暂无客户。请先一键获客、审核通过，再生成开发信。";
+  if ($("#followUpSequence")) $("#followUpSequence").innerHTML = "";
 }
 
 function renderBeijingGreeting() {
@@ -2755,10 +2893,8 @@ async function init() {
   updateSocialProspectingQueries();
   importSocialCaptures();
   setInterval(importSocialCaptures, 4_000);
-  const requestedSection = window.location.hash.slice(1);
-  if (requestedSection && document.getElementById(requestedSection)?.classList.contains("section")) {
-    showSection(requestedSection);
-  }
+  showRequestedSection();
+  window.addEventListener("hashchange", showRequestedSection);
   const logoutButton = document.getElementById("logoutButton");
   if (logoutButton) {
     logoutButton.addEventListener("click", async () => {

@@ -632,6 +632,30 @@ button:disabled {
   margin: 12px 0;
 }
 
+.follow-context {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.follow-context label {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.follow-context input,
+.follow-context select {
+  width: 100%;
+  min-height: 34px;
+  margin-top: 4px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
 .follow-entry select,
 .follow-entry input,
 .follow-entry button {
@@ -1139,6 +1163,29 @@ textarea {
   margin: 0;
   color: #59636f;
   font-size: 12px;
+}
+
+.job-diagnostics {
+  margin-top: 9px;
+  padding: 8px 10px;
+  border: 1px solid #f0d8d3;
+  border-radius: 8px;
+  background: #fff9f8;
+}
+
+.job-diagnostics summary {
+  cursor: pointer;
+  color: #9d443b;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.job-diagnostics p,
+.job-diagnostics small {
+  display: block;
+  margin: 6px 0 0;
+  color: #765e5b;
+  font-size: 10px;
 }
 
 .job-state {
@@ -2301,6 +2348,29 @@ tbody tr:last-child td {
   font-family: inherit;
 }
 
+#followUpSequence {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+#followUpSequence p {
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fafbfc;
+  color: #3f4b57;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+#followUpSequence strong {
+  display: block;
+  margin-bottom: 3px;
+  color: #9a6f28;
+}
+
 .muted {
   background: #fff;
 }
@@ -2702,6 +2772,10 @@ tbody tr:last-child td {
     grid-template-columns: 1fr;
   }
 
+  .follow-context {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .sidebar {
     padding: 18px;
   }
@@ -2780,6 +2854,68 @@ tbody tr:last-child td {
     flex-direction: column;
   }
 
+}
+
+@media (max-width: 480px) {
+  html,
+  body {
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .sidebar {
+    padding: 10px;
+  }
+
+  .nav {
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    padding-bottom: 5px;
+    scrollbar-width: thin;
+  }
+
+  .nav button {
+    min-width: 132px;
+    flex: 0 0 132px;
+  }
+
+  .main,
+  .panel,
+  .quote-layout,
+  .quote-calculator,
+  .quote-result {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+  }
+
+  .main {
+    overflow: hidden;
+  }
+
+  .quote-form-grid,
+  .workflow,
+  .review-decision,
+  .score-breakdown .score-dimensions,
+  .follow-context {
+    grid-template-columns: 1fr;
+  }
+
+  .table-wrap,
+  .quote-history-wrap {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .quote-actions,
+  .split-actions,
+  .welcome-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 620px) {

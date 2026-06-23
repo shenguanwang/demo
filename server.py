@@ -135,6 +135,7 @@ def empty_workspace_state() -> dict:
         "customers": [],
         "rejectedLeads": [],
         "quotes": [],
+        "deletedRecords": [],
     }
 
 
@@ -142,7 +143,7 @@ def normalize_workspace_state(payload: dict) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("工作台数据格式无效")
     normalized = {}
-    for key in ("reviewLeads", "customers", "rejectedLeads", "quotes"):
+    for key in ("reviewLeads", "customers", "rejectedLeads", "quotes", "deletedRecords"):
         value = payload.get(key, [])
         if not isinstance(value, list):
             raise ValueError(f"{key} 必须是数组")
@@ -462,6 +463,38 @@ def update_discovery_job(
     return True
 
 
+def discovery_failure_diagnostics(exc: Exception, params: dict[str, list[str]]) -> dict:
+    error = str(exc)
+    lower = error.lower()
+    source_mode = (params.get("sourceMode") or ["combined"])[0]
+    if any(term in lower for term in ("timeout", "timed out")):
+        category = "来源响应超时"
+        suggestion = "缩小搜索范围、减少结果数量，或稍后重新执行。"
+    elif any(term in lower for term in ("429", "rate limit", "too many requests")):
+        category = "公开来源限流"
+        suggestion = "等待几分钟后重试，或改用单一来源搜索。"
+    elif any(term in lower for term in ("403", "forbidden", "blocked")):
+        category = "来源拒绝访问"
+        suggestion = "改用官网、地图或其他公开社媒来源。"
+    elif any(term in lower for term in ("dns", "connection", "network", "urlopen")):
+        category = "云端网络异常"
+        suggestion = "任务参数已保留，可直接重新执行。"
+    elif "google" in lower and "key" in lower:
+        category = "Google Maps 配置异常"
+        suggestion = "检查 GOOGLE_MAPS_API_KEY，或改用综合搜索/官网目录。"
+    else:
+        category = "来源解析失败"
+        suggestion = "重新执行；若持续失败，改用单一来源以定位问题。"
+    return {
+        "category": category,
+        "sourceMode": source_mode,
+        "error": error[:1000],
+        "suggestion": suggestion,
+        "retryable": True,
+        "failedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+
 def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
     try:
         with DISCOVERY_WORKER_SLOTS:
@@ -486,6 +519,7 @@ def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
                 result=result,
             )
     except Exception as exc:
+        diagnostics = discovery_failure_diagnostics(exc, params)
         update_discovery_job(
             job_id,
             skip_statuses=("canceled",),
@@ -494,6 +528,7 @@ def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
             progress=100,
             message="云端获客任务执行失败。",
             error=str(exc),
+            result={"diagnostics": diagnostics},
         )
     finally:
         with ACTIVE_DISCOVERY_WORKERS_LOCK:
@@ -3127,7 +3162,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "scoreDimensions": score_dimensions,
                 "scoreBreakdown": score_breakdown,
                 "scoreBasis": "100分机会模型：进出口资质30、客户匹配25、采购意向18、经营能力12、车型匹配10、可触达性5，另计风险扣分",
-                "stage": "准备联系" if score >= 75 else "待审核",
+                "stage": "准备联系" if score >= 80 else "待审核",
                 "next": "生成英文开发信并人工确认",
                 "website": combined[:1000],
                 "reason": reason,

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>华为系新能源汽车海外获客工作台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260622-priority67">
+  <link rel="stylesheet" href="./styles.css?v=20260623-auditfix">
 </head>
 <body>
   <aside class="sidebar">
@@ -481,6 +481,7 @@
               <option>WhatsApp</option>
               <option>Email</option>
               <option>Instagram DM</option>
+              <option>LinkedIn</option>
             </select>
           </label>
           <button class="primary" type="submit">自动生成开发信</button>
@@ -501,6 +502,10 @@
           <div class="letter-block muted">
             <span>中文意思</span>
             <p id="chineseMeaning"></p>
+          </div>
+          <div class="letter-block muted">
+            <span>后续跟进节奏</span>
+            <div id="followUpSequence"></div>
           </div>
         </div>
       </div>
@@ -600,6 +605,22 @@
             <label>报价备注
               <input name="quoteNotes" placeholder="例如：最终价格以库存和船期确认为准">
             </label>
+            <label>出口方公司
+              <input name="sellerCompany" value="HIMA Global">
+            </label>
+            <label>出口方联系人
+              <input name="sellerContact" placeholder="姓名 / WhatsApp / Email">
+            </label>
+            <label>报价状态
+              <select name="quoteStatus">
+                <option>Draft</option>
+                <option>Sent</option>
+                <option>Customer reviewing</option>
+                <option>Revised</option>
+                <option>Accepted</option>
+                <option>Expired</option>
+              </select>
+            </label>
           </div>
           <div class="quote-actions">
             <button class="primary" type="submit">计算CIF</button>
@@ -667,6 +688,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260622-priority67"></script>
+  <script src="./script.js?v=20260623-auditfix"></script>
 </body>
 </html>
