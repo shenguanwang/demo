@@ -972,7 +972,14 @@ def is_social_profile_url(url: str) -> bool:
     if "instagram.com" in domain:
         return len(parts) == 1 and parts[0].lower() not in {"p", "reel", "stories", "explore"}
     if "facebook.com" in domain:
-        return len(parts) == 1 and parts[0].lower() not in {"posts", "photos", "watch", "share"}
+        if parsed.path.lower() == "/profile.php":
+            return bool(urllib.parse.parse_qs(parsed.query).get("id"))
+        if len(parts) == 1:
+            return parts[0].lower() not in {
+                "posts", "photos", "watch", "share", "reel", "groups",
+                "tr", "plugins", "sharer", "dialog",
+            }
+        return len(parts) >= 3 and parts[0].lower() == "pages"
     if "linkedin.com" in domain:
         return len(parts) >= 2 and parts[0].lower() in {"company", "in"}
     if "youtube.com" in domain:
@@ -1071,7 +1078,8 @@ def analyze_social_business_profile(
 
     company_markers = (
         "official", "company", "group", "motors", "automotive", "trading",
-        "showroom", "dealer", "importer", "distributor",
+        "showroom", "dealer", "importer", "distributor", "cars", "autos",
+        "auto ", "vehicles", "luxury car", "supercar",
     )
     person_markers = (
         "owner", "founder", "manager", "director", "ceo", "entrepreneur",
@@ -1091,6 +1099,14 @@ def analyze_social_business_profile(
     if platform:
         confidence += 3
     confidence = min(confidence, 96)
+    has_company_marker = any(marker in lower for marker in company_markers)
+    has_automotive_marker = any(
+        marker in lower
+        for marker in (
+            "car", "cars", "auto", "automotive", "vehicle", "vehicles",
+            "motors", "showroom", "dealer", "importer", "fleet",
+        )
+    )
     return {
         "accountType": detected_type,
         "businessSignals": business_signals[:5],
@@ -1098,7 +1114,12 @@ def analyze_social_business_profile(
         "decisionRole": role,
         "contactSignals": contact_signals,
         "businessConfidence": confidence,
-        "isCommercial": bool(business_signals or intent_signals),
+        "isCommercial": bool(
+            business_signals
+            or intent_signals
+            or role
+            or (has_company_marker and has_automotive_marker)
+        ),
     }
 
 
@@ -1277,10 +1298,53 @@ def search_duckduckgo(query: str, limit: int = 8, freshness_days: int | None = N
 
 
 def search_web(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
-    results = search_duckduckgo(query, limit, freshness_days)
-    if len(results) >= min(3, limit):
-        return results
-    return results + search_bing(query, limit - len(results), freshness_days)
+    collected: list[dict] = []
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(search_duckduckgo, query, limit, freshness_days),
+            executor.submit(search_bing, query, limit, freshness_days),
+        ]
+        for future in as_completed(futures):
+            try:
+                collected.extend(future.result())
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                continue
+    results: list[dict] = []
+    seen: set[str] = set()
+    for item in collected:
+        identity = normalize_public_url(item.get("url", "")).lower().rstrip("/")
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        results.append(item)
+        if len(results) >= limit:
+            break
+    return results
+
+
+def social_search_variants(
+    platform: str,
+    site: str,
+    market: str,
+    target_type: str,
+    account_scope: str,
+) -> list[str]:
+    company_terms = {
+        "dealer": ("car dealer", "motors showroom", "automotive trading"),
+        "parallel": ("car importer", "auto trading", "imported cars"),
+        "importer": ("vehicle importer", "car distributor", "automotive trading"),
+        "fleet": ("fleet company", "car rental", "vehicle procurement"),
+        "corporate": ("fleet procurement", "corporate vehicles", "car supplier"),
+        "government": ("vehicle supplier", "fleet tender", "automotive company"),
+        "buying": ("car buyer", "vehicle procurement", "sourcing vehicles"),
+        "individual": ("car buyer", "luxury cars", "electric vehicles"),
+    }.get(target_type, ("car dealer", "motors showroom", "automotive trading"))
+    queries: list[str] = []
+    if account_scope in ("company", "both"):
+        queries.append(f"site:{site} {market} \"{company_terms[0]}\"")
+    if account_scope in ("person", "both") and platform == "linkedin":
+        queries.append(f"site:linkedin.com/in {market} \"dealership owner\"")
+    return list(dict.fromkeys(queries))
 
 
 def extract_published_at(text: str, url: str = "") -> str:
@@ -2617,6 +2681,75 @@ def infer_target_type(goal: str) -> str:
     return "dealer"
 
 
+def social_accounts_from_business_websites(
+    country: str,
+    target_type: str,
+    allowed_platforms: set[str],
+    seed_limit: int = 20,
+) -> list[dict]:
+    try:
+        seeds = [
+            item
+            for item in search_osm_dealers(country, limit=seed_limit, target_type=target_type)
+            if item.get("customer_website") or (
+                item.get("url") and "openstreetmap.org" not in item.get("url", "")
+            )
+        ]
+    except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+        return []
+
+    def inspect(seed: dict) -> list[dict]:
+        website = normalize_public_url(seed.get("customer_website") or seed.get("url") or "")
+        if not website:
+            return []
+        try:
+            page, final_url = fetch_document(website, timeout=12)
+        except (OSError, TimeoutError, UnicodeError, urllib.error.URLError):
+            return []
+        meta = extract_meta(page)
+        contacts = extract_public_contacts(page, seed.get("tags"))
+        company = clean_text(seed.get("title") or urllib.parse.urlparse(final_url).netloc)[:180]
+        results = []
+        for social_url in contacts.get("social_accounts") or []:
+            platform_name = social_platform(social_url)
+            platform_key = platform_name.lower()
+            if platform_key not in allowed_platforms or not is_social_profile_url(social_url):
+                continue
+            results.append(
+                {
+                    "title": f"{company} · {platform_name}",
+                    "url": social_url,
+                    "snippet": meta[:700] or f"{company} 官网公开链接的 {platform_name} 账号",
+                    "origin": platform_name,
+                    "source_type": "企业官网直接链接的社媒账号",
+                    "source_url": social_url,
+                    "customer_website": final_url,
+                    "account_type": "公司账号",
+                    "official_relationship": "公司官网直接链接",
+                    "skip_fetch": True,
+                }
+            )
+        return results
+
+    discovered: list[dict] = []
+    with ThreadPoolExecutor(max_workers=min(6, max(1, len(seeds)))) as executor:
+        futures = [executor.submit(inspect, seed) for seed in seeds]
+        for future in as_completed(futures):
+            try:
+                discovered.extend(future.result())
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                continue
+    unique: list[dict] = []
+    seen: set[str] = set()
+    for item in discovered:
+        identity = normalize_public_url(item.get("url", "")).lower().rstrip("/")
+        if not identity or identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(item)
+    return unique
+
+
 def discover(params: dict[str, list[str]]) -> dict:
     country = (params.get("country") or ["UAE"])[0]
     model = (params.get("model") or ["问界 M9"])[0]
@@ -2748,50 +2881,87 @@ def discover(params: dict[str, list[str]]) -> dict:
         if source_mode in ("all", "social")
         else [source_mode] if source_mode in platform_queries else []
     )
-    role_query = (
-        "dealership owner founder general manager import manager fleet manager sales director"
-        if account_scope in ("person", "both")
-        else ""
-    )
-    company_query = (
-        "automotive importer vehicle distributor car dealer showroom auto trading "
-        "brand partnership vehicle procurement"
-        if account_scope in ("company", "both") else ""
-    )
+    role_query = "dealership owner import manager sales director" if account_scope in ("person", "both") else ""
+    company_query = "car dealer importer automotive trading" if account_scope in ("company", "both") else ""
+    social_search_stats = {
+        "queries": 0,
+        "rawResults": 0,
+        "profileResults": 0,
+        "acceptedResults": 0,
+        "officialWebsiteProfiles": 0,
+    }
+    reverse_platforms = set(selected_platforms)
+    if source_mode in ("all", "social", "youtube"):
+        reverse_platforms.add("youtube")
+    if reverse_platforms:
+        website_social_results = social_accounts_from_business_websites(
+            country,
+            target_type,
+            reverse_platforms,
+            seed_limit=min(24, result_limit),
+        )
+        social_search_stats["officialWebsiteProfiles"] = len(website_social_results)
+        for item in website_social_results:
+            item["social_analysis"] = analyze_social_business_profile(
+                f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",
+                item.get("origin", ""),
+                item.get("account_type", "公司账号"),
+            )
+        raw_results.extend(website_social_results)
     for platform in selected_platforms:
         site, origin, source_type = platform_queries[platform]
-        try:
-            social_results = search_web(
-                f"site:{site} {keywords} {company_query} {role_query}{cutoff_query}",
-                limit=12,
-                freshness_days=freshness_days,
-            )
-            expected_domain = site.split("/")[0]
-            social_results = [
-                item
-                for item in social_results
-                if expected_domain in urllib.parse.urlparse(item["url"]).netloc.lower()
+        query_variants = social_search_variants(
+            platform,
+            site,
+            market,
+            target_type,
+            account_scope,
+        )
+        social_search_stats["queries"] += len(query_variants)
+        social_results: list[dict] = []
+        with ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants)))) as executor:
+            futures = [
+                executor.submit(search_web, search_query, 8, freshness_days)
+                for search_query in query_variants
             ]
-            for item in social_results:
-                item["origin"] = origin
-                item["source_type"] = source_type
-                item["source_url"] = item["url"]
-                item["customer_website"] = ""
-                path = urllib.parse.urlparse(item["url"]).path.lower()
-                is_person = (
-                    "/in/" in path
-                    or account_scope == "person"
-                    or bool(re.search(r"\b(owner|founder|manager|director)\b", f"{item['title']} {item['snippet']}", re.I))
-                )
-                item["account_type"] = "个人决策人" if is_person else "公司账号"
-                item["social_analysis"] = analyze_social_business_profile(
-                    f"{item['title']} {item['snippet']} {item['url']}",
-                    origin,
-                    item["account_type"],
-                )
-            raw_results += social_results
-        except (OSError, ValueError, TimeoutError):
-            pass
+            for future in as_completed(futures):
+                try:
+                    social_results.extend(future.result())
+                except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                    continue
+        social_search_stats["rawResults"] += len(social_results)
+        expected_domain = site.split("/")[0]
+        seen_platform_urls: set[str] = set()
+        for item in social_results:
+            item_url = normalize_public_url(item.get("url", ""))
+            identity = item_url.lower().rstrip("/")
+            if (
+                not item_url
+                or expected_domain not in urllib.parse.urlparse(item_url).netloc.lower()
+                or identity in seen_platform_urls
+                or not is_social_profile_url(item_url)
+            ):
+                continue
+            seen_platform_urls.add(identity)
+            social_search_stats["profileResults"] += 1
+            item["url"] = item_url
+            item["origin"] = origin
+            item["source_type"] = source_type
+            item["source_url"] = item_url
+            item["customer_website"] = ""
+            path = urllib.parse.urlparse(item_url).path.lower()
+            is_person = (
+                "/in/" in path
+                or account_scope == "person"
+                or bool(re.search(r"\b(owner|founder|manager|director)\b", f"{item['title']} {item['snippet']}", re.I))
+            )
+            item["account_type"] = "个人决策人" if is_person else "公司账号"
+            item["social_analysis"] = analyze_social_business_profile(
+                f"{item['title']} {item['snippet']} {item_url}",
+                origin,
+                item["account_type"],
+            )
+            raw_results.append(item)
     if source_mode in ("all", "youtube", "social"):
         youtube_searches = []
         if account_scope in ("company", "both"):
@@ -2823,18 +2993,19 @@ def discover(params: dict[str, list[str]]) -> dict:
                         for city in cities
                     ),
                 }
-                if not any(term and term in location_text for term in location_terms):
+                youtube_analysis = analyze_social_business_profile(
+                    f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",
+                    "YouTube",
+                    youtube_account_type,
+                )
+                if not any(term and term in location_text for term in location_terms) and not youtube_analysis.get("isCommercial"):
                     continue
                 item["origin"] = "YouTube"
                 item["source_type"] = "YouTube 公开频道"
                 item["source_url"] = item["url"]
                 item["customer_website"] = ""
                 item["account_type"] = youtube_account_type
-                item["social_analysis"] = analyze_social_business_profile(
-                    f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",
-                    "YouTube",
-                    youtube_account_type,
-                )
+                item["social_analysis"] = youtube_analysis
                 raw_results.append(item)
     leads = []
     seen_sources = set()
@@ -2897,6 +3068,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
             if not social_analysis.get("isCommercial"):
                 continue
+            social_search_stats["acceptedResults"] += 1
         if not is_google_places and item.get("origin") != "OpenStreetMap":
             business_match = re.search(
                 r"\b(dealer|dealership|showroom|importer|exporter|trading|distributor|"
@@ -3100,7 +3272,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                     {
                         "platform": social_platform(item["url"]),
                         "accountType": social_analysis.get("accountType") or item.get("account_type", "公司账号"),
-                        "relationship": f"{origin} 公开结果",
+                        "relationship": item.get("official_relationship") or f"{origin} 公开结果",
                         "title": source_title,
                         "description": source_excerpt[:700],
                         "url": item["url"],
@@ -3168,7 +3340,16 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "reason": reason,
             }
         )
-    if freshness_days and not leads:
+    if source_mode == "social" and not leads:
+        notice = (
+            f"五平台共执行 {social_search_stats['queries']} 组短词搜索，"
+            f"搜索引擎返回 {social_search_stats['rawResults']} 条，"
+            f"企业官网反向发现 {social_search_stats['officialWebsiteProfiles']} 个社媒账号，"
+            f"其中 {social_search_stats['profileResults']} 条为账号主页，"
+            f"{social_search_stats['acceptedResults']} 条通过商业账号初筛。"
+            "若仍为 0，通常是搜索引擎未收录当地账号；可改用单个平台搜索或本机 Chrome 登录态采集。"
+        )
+    if freshness_days and not leads and not notice:
         notice = f"没有找到可确认发布日期且在最近 {freshness_days} 天内的线索。可以放宽到 30 天，或更换 Instagram、Facebook、LinkedIn 来源。"
     if source_mode == "google" and not leads and not notice:
         notice = "Google Maps 没有返回符合条件的企业，请调整中文目标描述或目标国家。"

@@ -2556,29 +2556,6 @@ function bindForms() {
 
   $("#finderForm").addEventListener("input", updateSocialProspectingQueries);
   $("#finderForm").addEventListener("change", updateSocialProspectingQueries);
-  $("#runSocialDiscovery")?.addEventListener("click", () => {
-    const finderForm = $("#finderForm");
-    const submitButton = finderForm?.querySelector('button[type="submit"]');
-    const autoButton = $("#runSocialDiscovery");
-    if (!finderForm || !submitButton || submitButton.disabled) {
-      setFinderStatus("已有云端获客任务正在启动，请稍后查看任务中心。");
-      return;
-    }
-    finderForm.sourceMode.value = "social";
-    finderForm.accountScope.value = "both";
-    finderForm.freshness.value = "all";
-    updateSocialProspectingQueries();
-    autoButton.disabled = true;
-    autoButton.textContent = "正在启动云端搜索…";
-    finderForm.requestSubmit(submitButton);
-    const observer = new MutationObserver(() => {
-      if (submitButton.disabled) return;
-      observer.disconnect();
-      autoButton.disabled = false;
-      autoButton.textContent = "再次搜索五平台";
-    });
-    observer.observe(submitButton, { attributes: true, attributeFilter: ["disabled"] });
-  });
   $(".social-search-box").addEventListener("click", (event) => {
     const link = event.target.closest("[data-social-platform]");
     if (link) $("#socialLeadForm").platform.value = link.dataset.socialPlatform;

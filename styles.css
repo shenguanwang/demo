@@ -1287,33 +1287,6 @@ textarea {
   font-size: 12px;
 }
 
-.social-auto-run {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin-top: 15px;
-  padding: 16px 18px;
-  border: 1px solid #bfd6ff;
-  border-radius: 12px;
-  background: linear-gradient(135deg, #eef5ff 0%, #f8fbff 100%);
-}
-
-.social-auto-run div {
-  display: grid;
-  gap: 4px;
-}
-
-.social-auto-run span {
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.social-auto-run button {
-  flex: 0 0 auto;
-}
-
 .social-login-state {
   flex: 0 0 auto;
   padding: 6px 9px;
@@ -3006,8 +2979,4 @@ tbody tr:last-child td {
     flex-direction: column;
   }
 
-  .social-auto-run {
-    align-items: stretch;
-    flex-direction: column;
-  }
 }
