@@ -530,9 +530,30 @@ function setCloudSyncStatus(text, state = "syncing") {
   if (label) label.textContent = text;
 }
 
+class AuthenticationExpiredError extends Error {
+  constructor() {
+    super("登录状态已失效，正在跳转登录");
+    this.name = "AuthenticationExpiredError";
+  }
+}
+
+function redirectToLogin() {
+  const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  window.location.replace(`/login.html?next=${encodeURIComponent(returnTo)}`);
+}
+
+async function apiFetch(input, init) {
+  const response = await fetch(input, init);
+  if (response.status === 401) {
+    redirectToLogin();
+    throw new AuthenticationExpiredError();
+  }
+  return response;
+}
+
 async function pushCloudState(state = workspaceStateSnapshot(), mergeAttempts = 0) {
   setCloudSyncStatus("正在同步云端数据", "syncing");
-  const response = await fetch("/api/workspace-state", {
+  const response = await apiFetch("/api/workspace-state", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ state, expectedVersion: cloudStateVersion })
@@ -575,7 +596,7 @@ async function hydrateCloudState(render = false) {
   cloudHydrating = true;
   setCloudSyncStatus("正在读取云端数据", "syncing");
   try {
-    const response = await fetch("/api/workspace-state", { cache: "no-store" });
+    const response = await apiFetch("/api/workspace-state", { cache: "no-store" });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     cloudStateVersion = Number(result.version || 0);
@@ -1297,7 +1318,7 @@ async function researchLead(index) {
   lead.researching = true;
   renderReview();
   try {
-    const response = await fetch(`/api/research?${new URLSearchParams({
+    const response = await apiFetch(`/api/research?${new URLSearchParams({
       company: lead.company,
       country: [lead.city, lead.country].filter(Boolean).join(", "),
       website: lead.customerWebsite || "",
@@ -1305,8 +1326,8 @@ async function researchLead(index) {
       model: lead.model || "",
       type: lead.type || ""
     })}`);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const result = await response.json();
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
     if (!result.ok) throw new Error(result.error || "检索失败");
     const verifiedPriority = result.isCompetitor
       ? Math.min(45, Number(result.score || lead.baseScore || lead.score || 0))
@@ -1347,7 +1368,8 @@ async function researchLead(index) {
     refreshAllLeadViews();
   } catch (error) {
     lead.researching = false;
-    lead.researchSummary = `全网补全失败：${error.message}。请确认本地服务可联网后重试。`;
+    if (error instanceof AuthenticationExpiredError) return;
+    lead.researchSummary = `全网补全失败：${error.message}。请稍后重试；若持续失败，请检查云端服务状态。`;
     renderReview();
   }
 }
@@ -1661,7 +1683,7 @@ async function importSocialCaptures() {
   const status = $("#captureInboxStatus");
   if (!status) return;
   try {
-    const response = await fetch("/api/social-captures", { cache: "no-store" });
+    const response = await apiFetch("/api/social-captures", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const result = await response.json();
     const captures = Array.isArray(result.captures) ? result.captures : [];
@@ -2115,7 +2137,7 @@ function renderDiscoveryJobs() {
 }
 
 async function loadDiscoveryJobs() {
-  const response = await fetch("/api/discover/jobs", { cache: "no-store" });
+  const response = await apiFetch("/api/discover/jobs", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
   discoveryJobs = Array.isArray(result.jobs) ? result.jobs : [];
@@ -2136,7 +2158,7 @@ async function loadDiscoveryJobs() {
 
 async function markDiscoveryImported(jobId) {
   if (!jobId) return;
-  await fetch("/api/discover/mark-imported", {
+  await apiFetch("/api/discover/mark-imported", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ id: jobId })
@@ -2151,7 +2173,7 @@ async function retryDiscoveryJob(jobId) {
     button.textContent = "正在重试";
   }
   try {
-    const response = await fetch("/api/discover/retry", {
+    const response = await apiFetch("/api/discover/retry", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: jobId })
@@ -2186,7 +2208,7 @@ async function cancelDiscoveryJob(jobId) {
     button.textContent = "正在取消";
   }
   try {
-    const response = await fetch("/api/discover/cancel", {
+    const response = await apiFetch("/api/discover/cancel", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: jobId })
@@ -2221,7 +2243,7 @@ async function deleteDiscoveryJob(jobId) {
     button.textContent = "删除中";
   }
   try {
-    const response = await fetch("/api/discover/delete", {
+    const response = await apiFetch("/api/discover/delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: jobId })
@@ -2263,7 +2285,7 @@ async function importDiscoveryJob(jobId) {
     button.textContent = "正在导入";
   }
   try {
-    const response = await fetch(`/api/discover/status?${new URLSearchParams({ id: jobId })}`, {
+    const response = await apiFetch(`/api/discover/status?${new URLSearchParams({ id: jobId })}`, {
       cache: "no-store"
     });
     const result = await response.json().catch(() => ({}));
@@ -2292,7 +2314,7 @@ async function importDiscoveryJob(jobId) {
 }
 
 async function runCloudDiscovery(data, words, onProgress) {
-  const startResponse = await fetch("/api/discover/start", {
+  const startResponse = await apiFetch("/api/discover/start", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -2323,7 +2345,7 @@ async function runCloudDiscovery(data, words, onProgress) {
     let statusResponse;
     let statusResult;
     try {
-      statusResponse = await fetch(`/api/discover/status?${new URLSearchParams({
+      statusResponse = await apiFetch(`/api/discover/status?${new URLSearchParams({
         id: startResult.job.id
       })}`, { cache: "no-store" });
       statusResult = await statusResponse.json().catch(() => ({}));

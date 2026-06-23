@@ -83,9 +83,13 @@
     const button = document.getElementById("loginButton");
     const password = document.getElementById("password");
     const toggle = document.getElementById("passwordToggle");
+    const requestedNext = new URLSearchParams(location.search).get("next") || "/index.html";
+    const nextUrl = requestedNext.startsWith("/") && !requestedNext.startsWith("//")
+      ? requestedNext
+      : "/index.html";
 
     fetch("/api/session").then(response => response.json()).then(session => {
-      if (session.authenticated) location.replace("/index.html");
+      if (session.authenticated) location.replace(nextUrl);
     }).catch(() => {});
 
     toggle.addEventListener("click", () => {
@@ -112,7 +116,7 @@
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || "登录失败");
-        location.replace("/index.html");
+        location.replace(nextUrl);
       } catch (loginError) {
         error.textContent = loginError.message || "登录失败，请稍后重试";
         button.disabled = false;
