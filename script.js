@@ -143,6 +143,7 @@ let discoveryJobsExpanded = false;
 let reviewSelectedIds = new Set();
 let currentSession = null;
 let crmViewFilter = "all";
+let navigationBound = false;
 
 const productProfiles = {
   "问界 M9": {
@@ -1079,21 +1080,61 @@ function formatReviewLeadTime(lead) {
   return date ? `入池 ${date.toLocaleDateString("zh-CN")}` : "入池时间未知";
 }
 
+const reviewSourceOptions = [
+  ["combined", "综合搜索（地图 + 官网）"],
+  ["social", "社媒综合（Facebook + Instagram + TikTok + YouTube + LinkedIn）"],
+  ["google", "Google Maps 企业数据"],
+  ["osm", "OpenStreetMap 地图"],
+  ["dealer", "车商官网 / 汽车行业目录"],
+  ["instagram", "Instagram 公开账号"],
+  ["facebook", "Facebook 公开主页"],
+  ["tiktok", "TikTok 公开账号"],
+  ["youtube", "YouTube 公开频道"],
+  ["linkedin", "LinkedIn 公司 / 个人主页"]
+];
+
+function reviewSourceKey(lead) {
+  const value = [
+    lead.discoverySource,
+    lead.sourceMode,
+    lead.platform,
+    lead.origin,
+    lead.sourceType,
+    lead.sourceTitle,
+    lead.source,
+    lead.sourceUrl
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (!value) return "dealer";
+  if (/\bcombined\b|综合搜索/.test(value)) return "combined";
+  if (/\bsocial\b|社媒综合/.test(value)) return "social";
+  if (value.includes("google") || value.includes("maps/search") || value.includes("place_id")) return "google";
+  if (value.includes("openstreetmap") || value.includes("overpass") || value.includes("osm")) return "osm";
+  if (value.includes("instagram.com") || value.includes("instagram")) return "instagram";
+  if (value.includes("facebook.com") || value.includes("facebook")) return "facebook";
+  if (value.includes("tiktok.com") || value.includes("tiktok")) return "tiktok";
+  if (value.includes("youtube.com") || value.includes("youtu.be") || value.includes("youtube")) return "youtube";
+  if (value.includes("linkedin.com") || value.includes("linkedin")) return "linkedin";
+  return "dealer";
+}
+
 function renderReviewFilterOptions() {
   const sourceSelect = $("#reviewSourceFilter");
   if (!sourceSelect) return;
   const current = sourceSelect.value || "all";
-  const sources = [...new Set(reviewLeads.map((lead) => String(lead.source || lead.origin || "未知来源").trim()).filter(Boolean))]
-    .sort((a, b) => a.localeCompare(b, "zh-CN"));
-  sourceSelect.innerHTML = `<option value="all">全部来源</option>${sources.map((source) => `<option value="${escapeHtml(source)}">${escapeHtml(source)}</option>`).join("")}`;
-  sourceSelect.value = sources.includes(current) ? current : "all";
+  const available = new Set(reviewLeads.map(reviewSourceKey));
+  const options = reviewSourceOptions
+    .filter(([value]) => available.has(value) || value === current)
+    .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+    .join("");
+  sourceSelect.innerHTML = `<option value="all">全部来源</option>${options || reviewSourceOptions.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
+  sourceSelect.value = current === "all" || [...available].includes(current) ? current : "all";
 }
 
 function reviewLeadMatchesFilters(lead) {
   const timeFilter = $("#reviewTimeFilter")?.value || "all";
   const sourceFilter = $("#reviewSourceFilter")?.value || "all";
   const tierFilter = $("#reviewTierFilter")?.value || "all";
-  const source = String(lead.source || lead.origin || "未知来源").trim();
+  const source = reviewSourceKey(lead);
   if (sourceFilter !== "all" && source !== sourceFilter) return false;
   if (tierFilter !== "all" && lead.scoreTier !== tierFilter) return false;
   if (timeFilter === "all") return true;
@@ -1311,6 +1352,9 @@ function normalizeLead(raw) {
     city: raw.city || "",
     type: raw.type || "Auto business",
     source: raw.source || "Website",
+    sourceMode: raw.sourceMode || raw.discoverySource || "",
+    discoverySource: raw.discoverySource || raw.sourceMode || "",
+    platform: raw.platform || "",
     origin: raw.origin || "公开网页",
     sourceType: raw.sourceType || "公开商业网站",
     sourceTitle: raw.sourceTitle || raw.company || "未命名线索",
@@ -2172,6 +2216,8 @@ function renderKpis() {
 }
 
 function bindNavigation() {
+  if (navigationBound) return;
+  navigationBound = true;
   $$("[data-section]").forEach((button) => {
     button.addEventListener("click", () => showSection(button.dataset.section));
   });
@@ -2438,13 +2484,13 @@ async function deleteDiscoveryJob(jobId) {
   }
 }
 
-function mergeDiscoveryResult(result) {
+function mergeDiscoveryResult(result, sourceMode = "") {
   const found = Array.isArray(result?.leads) ? result.leads : [];
   const existing = new Set(
     [...reviewLeads, ...customers].map((lead) => `${lead.company}|${lead.source}`.toLowerCase())
   );
   const fresh = found
-    .map(normalizeLead)
+    .map((lead) => normalizeLead({ ...lead, sourceMode, discoverySource: sourceMode }))
     .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()));
   if (fresh.length) {
     reviewLeads = [...fresh, ...reviewLeads];
@@ -2465,7 +2511,7 @@ async function importDiscoveryJob(jobId) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    const merged = mergeDiscoveryResult(result.job?.result || {});
+    const merged = mergeDiscoveryResult(result.job?.result || {}, result.job?.payload?.sourceMode || "");
     await markDiscoveryImported(jobId);
     setFinderProgress({
       percent: 100,
@@ -2633,7 +2679,7 @@ function bindForms() {
     })
       .then(async (result) => {
         const elapsedSeconds = searchProgress.stop();
-        const { found, fresh } = mergeDiscoveryResult(result);
+        const { found, fresh } = mergeDiscoveryResult(result, data.sourceMode);
         if (!found.length) {
           await markDiscoveryImported(result.__jobId);
           setFinderProgress({
@@ -2746,6 +2792,7 @@ function bindForms() {
       city,
       type: data.accountType === "个人决策人" ? "公开个人决策人" : "社媒发现的汽车潜在客户",
       source: url,
+      platform: data.platform,
       origin: data.platform,
       sourceType: "Chrome 登录态人工发现",
       sourceTitle: `${data.company} · ${data.platform}`,
@@ -3229,9 +3276,17 @@ function renderBeijingGreeting() {
 }
 
 async function init() {
-  await loadSession();
-  await hydrateCloudState();
   window.__workbenchInitErrors = [];
+  bindNavigation();
+  showRequestedSection();
+  window.addEventListener("hashchange", showRequestedSection);
+  try {
+    await loadSession();
+  } catch (error) {
+    console.error("Session load failed:", error);
+    redirectToLogin();
+    return;
+  }
   const startupSteps = [
     ["北京时间", renderBeijingGreeting],
     ["市场", renderCountries],
@@ -3256,6 +3311,10 @@ async function init() {
       window.__workbenchInitErrors.push({ name, message: error.message });
       console.error(`Workbench module failed: ${name}`, error);
     }
+  });
+  hydrateCloudState(true).catch((error) => {
+    setCloudSyncStatus("云端不可用，当前使用本地副本", "error");
+    console.error("Cloud workspace load failed:", error);
   });
   loadUsers().catch((error) => {
     if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;

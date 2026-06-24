@@ -628,16 +628,17 @@ def list_discovery_jobs(owner_username: str, limit: int = 20) -> list[dict]:
     cleanup_discovery_jobs()
     query = (
         "SELECT job_id, payload, status, stage, progress, message, result, error, "
-        "imported, created_at, updated_at, owner_username FROM discovery_jobs WHERE owner_username = "
+        "imported, created_at, updated_at, owner_username FROM discovery_jobs "
+        "WHERE owner_username = "
     )
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(query + "%s", (owner_username, limit))
+                cursor.execute(query + "%s ORDER BY updated_at DESC LIMIT %s", (owner_username, limit))
                 rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            rows = connection.execute(query + "?", (owner_username, limit)).fetchall()
+            rows = connection.execute(query + "? ORDER BY updated_at DESC LIMIT ?", (owner_username, limit)).fetchall()
     return [discovery_job_public(row_to_discovery_job(row)) for row in rows]
 
 
@@ -2611,6 +2612,38 @@ def detect_competitor(text: str) -> bool:
     return any(term in lower for term in competitor_terms)
 
 
+def is_brand_bound_chinese_dealer(text: str) -> bool:
+    """Exclude single-brand Chinese OEM 4S/authorized outlets from channel leads.
+
+    They are useful market intelligence, but normally cannot introduce another
+    flagship brand without approval from their existing principal distributor.
+    Multi-brand importers remain eligible for human review.
+    """
+    lower = clean_text(text).lower()
+    chinese_oem_terms = (
+        "dongfeng", "dfsk", "changan", "geely", "byd", "chery", "jetour",
+        "omoda", "jaecoo", "great wall", "gwm", "haval", "tank", "saic",
+        "mg motor", "faw", "baic", "jac", "gac", "hongqi", "voyah",
+        "zeekr", "nio", "xpeng", "li auto", "东风", "长安", "吉利", "比亚迪",
+        "奇瑞", "长城", "红旗", "广汽", "北汽", "江淮",
+    )
+    binding_terms = (
+        "4s", "4 s", "authorized dealer", "official dealer", "exclusive dealer",
+        "authorized distributor", "official distributor", "brand showroom", "dealer of",
+        "官方授权", "授权经销商", "品牌专营", "4s店",
+    )
+    multi_brand_terms = (
+        "multi-brand", "multiple brands", "brand portfolio", "independent importer",
+        "parallel import", "import export", "auto trading", "automotive trading",
+        "多品牌", "平行进口", "汽车贸易", "进出口",
+    )
+    return (
+        any(term in lower for term in chinese_oem_terms)
+        and any(term in lower for term in binding_terms)
+        and not any(term in lower for term in multi_brand_terms)
+    )
+
+
 def recommend_models(text: str, requested_model: str) -> list[str]:
     lower = text.lower()
     models = [requested_model]
@@ -3274,6 +3307,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 raw_results.append(item)
     leads = []
     seen_sources = set()
+    excluded_brand_bound_dealers = 0
     for item in raw_results:
         if len(leads) >= result_limit:
             break
@@ -3325,6 +3359,9 @@ def discover(params: dict[str, list[str]]) -> dict:
                 pass
 
         combined = f"{item['title']} {item['snippet']} {page_text}"
+        if is_brand_bound_chinese_dealer(combined):
+            excluded_brand_bound_dealers += 1
+            continue
         if is_social_result:
             social_analysis = analyze_social_business_profile(
                 combined,
@@ -3614,6 +3651,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"{social_search_stats['acceptedResults']} 条通过商业账号初筛。"
             "若仍为 0，通常是搜索引擎未收录当地账号；可改用单个平台搜索或本机 Chrome 登录态采集。"
         )
+    if excluded_brand_bound_dealers:
+        notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定中国主机厂的单品牌 4S/授权店。"
     if freshness_days and not leads and not notice:
         notice = f"没有找到可确认发布日期且在最近 {freshness_days} 天内的线索。可以放宽到 30 天，或更换 Instagram、Facebook、LinkedIn 来源。"
     if source_mode == "google" and not leads and not notice:

@@ -3979,3 +3979,99 @@ td {
   background: #ffffff;
   color: #7a5a20;
 }
+
+/* Workflow layout fixes: source filters and social capture actions. */
+.review-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 18px;
+  padding: 18px;
+  border-radius: 18px;
+}
+
+.review-filter-group {
+  display: grid;
+  grid-template-columns: minmax(132px, 0.8fr) minmax(260px, 1.35fr) minmax(132px, 0.8fr) auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.review-filter-group label {
+  min-width: 0;
+  margin-top: 0;
+}
+
+.review-filter-group select {
+  width: 100%;
+  min-width: 0;
+}
+
+#reviewSourceFilter {
+  max-width: 420px;
+}
+
+#clearReviewFilters {
+  align-self: end;
+  white-space: nowrap;
+}
+
+.review-bulk-actions {
+  align-self: end;
+  gap: 10px;
+}
+
+.review-bulk-actions button {
+  white-space: nowrap;
+}
+
+.social-capture-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(220px, 320px);
+  align-items: center;
+  gap: 16px;
+}
+
+.social-capture-actions > span {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: normal;
+}
+
+.social-capture-actions button.primary {
+  width: 100%;
+  margin-top: 0;
+}
+
+.social-capture-form {
+  min-width: 0;
+}
+
+.social-form-grid label,
+.social-capture-form > label {
+  min-width: 0;
+}
+
+.social-form-grid input,
+.social-form-grid select,
+.social-capture-form textarea {
+  min-width: 0;
+}
+
+@media (max-width: 1120px) {
+  .review-toolbar,
+  .review-filter-group,
+  .social-capture-actions {
+    grid-template-columns: 1fr;
+  }
+
+  #reviewSourceFilter {
+    max-width: none;
+  }
+
+  .review-bulk-actions {
+    justify-content: flex-start;
+  }
+}
