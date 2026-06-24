@@ -141,6 +141,7 @@ let discoveryJobs = [];
 let discoveryJobsTimer = null;
 let discoveryJobsExpanded = false;
 let reviewSelectedIds = new Set();
+let currentSession = null;
 
 const productProfiles = {
   "问界 M9": {
@@ -389,6 +390,7 @@ function loadSavedState() {
     rejectedLeads: [],
     quotes: [],
     deletedRecords: [],
+    ownerUsername: "",
     _cloudVersion: 0,
     _cloudDirty: false
   };
@@ -402,6 +404,7 @@ function loadSavedState() {
       rejectedLeads: Array.isArray(parsed.rejectedLeads) ? parsed.rejectedLeads : [],
       quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
       deletedRecords: Array.isArray(parsed.deletedRecords) ? parsed.deletedRecords : [],
+      ownerUsername: String(parsed.ownerUsername || ""),
       _cloudVersion: Number(parsed._cloudVersion || 0),
       _cloudDirty: Boolean(parsed._cloudDirty)
     };
@@ -424,6 +427,7 @@ function persistLocalState(dirty = localStateDirty) {
   localStateDirty = dirty;
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     ...workspaceStateSnapshot(),
+    ownerUsername: currentSession?.username || "",
     _cloudVersion: cloudStateVersion,
     _cloudDirty: localStateDirty
   }));
@@ -2136,6 +2140,7 @@ function bindNavigation() {
 function showSection(id) {
   $$(".section").forEach((section) => section.classList.toggle("active", section.id === id));
   $$(".nav button").forEach((button) => button.classList.toggle("active", button.dataset.section === id));
+  $("#userManagementNav")?.classList.toggle("active", id === "user-management");
   if (window.location.hash !== `#${id}`) {
     history.replaceState(null, "", `#${id}`);
   }
@@ -2844,6 +2849,67 @@ function bindForms() {
 
   $("#deleteSelectedReviewLeads")?.addEventListener("click", () => deleteReviewLeads([...reviewSelectedIds]));
 
+  $("#userForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const status = $("#userFormStatus");
+    const data = Object.fromEntries(new FormData(form).entries());
+    status.className = "form-status";
+    if (data.password !== data.confirmPassword) {
+      status.textContent = "两次输入的密码不一致。";
+      status.classList.add("error");
+      return;
+    }
+    const submit = form.querySelector("button[type='submit']");
+    submit.disabled = true;
+    try {
+      const response = await apiFetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: data.username, password: data.password })
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+      form.reset();
+      status.textContent = `已添加用户：${result.user.username}`;
+      status.classList.add("success");
+      await loadUsers();
+    } catch (error) {
+      status.textContent = error.message || "添加用户失败，请稍后重试。";
+      status.classList.add("error");
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  $("#refreshUsers")?.addEventListener("click", () => loadUsers().catch((error) => {
+    $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
+  }));
+
+  $("#userRows")?.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-user-action]");
+    if (!button) return;
+    const username = button.dataset.username;
+    try {
+      if (button.dataset.userAction === "password") {
+        const password = window.prompt(`请输入 ${username} 的新密码（至少 6 位）：`);
+        if (password === null) return;
+        await updateUser(username, { password });
+      }
+      if (button.dataset.userAction === "status") {
+        const nextStatus = button.dataset.status === "enabled" ? "disabled" : "enabled";
+        if (!confirm(`确认${nextStatus === "disabled" ? "禁用" : "启用"}用户 ${username} 吗？`)) return;
+        await updateUser(username, { status: nextStatus });
+      }
+      if (button.dataset.userAction === "delete") {
+        if (!confirm(`确认永久删除用户 ${username} 吗？该用户的线索、客户、报价和获客任务也会一并删除。`)) return;
+        await updateUser(username, { action: "delete" });
+      }
+    } catch (error) {
+      window.alert(error.message || "操作失败，请稍后重试。");
+    }
+  });
+
   $("#copyEmail").addEventListener("click", async () => {
     const text = $("#englishLetter").textContent.trim();
     if (!text) return;
@@ -3005,6 +3071,67 @@ function renderDefaultLetter() {
   if ($("#followUpSequence")) $("#followUpSequence").innerHTML = "";
 }
 
+async function loadSession() {
+  const response = await fetch("/api/session", { cache: "no-store" });
+  const session = await response.json().catch(() => ({}));
+  if (!response.ok || !session.authenticated) throw new AuthenticationExpiredError();
+  currentSession = session;
+  if (savedState.ownerUsername !== session.username) {
+    reviewLeads = [];
+    customers = [];
+    rejectedLeads = [];
+    quoteHistory = [];
+    deletedRecords = [];
+    cloudStateVersion = 0;
+    localStateDirty = false;
+    persistLocalState(false);
+  }
+  const userManagementNav = $("#userManagementNav");
+  if (userManagementNav) userManagementNav.hidden = session.role !== "admin";
+  const userManagementSection = $("#user-management");
+  if (userManagementSection) userManagementSection.hidden = session.role !== "admin";
+  return session;
+}
+
+function renderUsers(users = []) {
+  const rows = $("#userRows");
+  if (!rows) return;
+  $("#userCount").textContent = `${users.length} 位用户`;
+  rows.innerHTML = users.length ? users.map((user, index) => `
+    <tr>
+      <td>${index + 1}</td>
+      <td><strong>${escapeHtml(user.username)}</strong>${user.builtIn ? `<br><small>系统内置</small>` : ""}</td>
+      <td>${user.role === "admin" ? "管理员" : "普通用户"}</td>
+      <td>${escapeHtml(user.createdAt || "-")}</td>
+      <td><span class="user-status ${user.status === "disabled" ? "disabled" : ""}">${user.status === "disabled" ? "已禁用" : "启用中"}</span></td>
+      <td><div class="user-actions">${user.builtIn ? `<span class="meta">受保护</span>` : `
+        <button type="button" data-user-action="password" data-username="${escapeHtml(user.username)}">改密码</button>
+        <button type="button" data-user-action="status" data-status="${user.status}" data-username="${escapeHtml(user.username)}">${user.status === "disabled" ? "启用" : "禁用"}</button>
+        <button class="danger" type="button" data-user-action="delete" data-username="${escapeHtml(user.username)}">删除</button>`}</div></td>
+    </tr>`).join("") : `<tr><td colspan="6">暂无普通用户。管理员可通过左侧表单添加。</td></tr>`;
+}
+
+async function loadUsers() {
+  if (currentSession?.role !== "admin") return;
+  const rows = $("#userRows");
+  if (rows) rows.innerHTML = `<tr><td colspan="6">正在读取用户列表…</td></tr>`;
+  const response = await apiFetch("/api/users", { cache: "no-store" });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  renderUsers(Array.isArray(result.users) ? result.users : []);
+}
+
+async function updateUser(username, payload) {
+  const response = await apiFetch(`/api/users/${encodeURIComponent(username)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  await loadUsers();
+}
+
 function renderBeijingGreeting() {
   const now = new Date();
   const parts = Object.fromEntries(
@@ -3035,6 +3162,7 @@ function renderBeijingGreeting() {
 }
 
 async function init() {
+  await loadSession();
   await hydrateCloudState();
   window.__workbenchInitErrors = [];
   const startupSteps = [
@@ -3061,6 +3189,9 @@ async function init() {
       window.__workbenchInitErrors.push({ name, message: error.message });
       console.error(`Workbench module failed: ${name}`, error);
     }
+  });
+  loadUsers().catch((error) => {
+    if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
   });
   setInterval(renderBeijingGreeting, 1_000);
   loadDiscoveryJobs().catch((error) => {

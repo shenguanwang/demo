@@ -42,12 +42,12 @@ DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 SQLITE_STATE_FILE = Path(os.environ.get("STATE_DATABASE_PATH") or (ROOT / "workbench-state.db"))
 STATE_LOCK = threading.RLock()
-STATE_KEY = "admin-default"
 AUTH_USERNAME = os.environ.get("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.environ.get("APP_PASSWORD", "admin123")
 AUTH_SECRET = os.environ.get("APP_AUTH_SECRET") or secrets.token_hex(32)
 AUTH_COOKIE = "hima_session"
 AUTH_MAX_AGE = 60 * 60 * 24 * 7
+PASSWORD_HASH_ITERATIONS = 210_000
 
 
 class WorkspaceVersionConflict(Exception):
@@ -82,6 +82,17 @@ def initialize_state_store() -> None:
                 )
                 cursor.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS app_users (
+                        username TEXT PRIMARY KEY,
+                        password_hash TEXT NOT NULL,
+                        role TEXT NOT NULL DEFAULT 'user',
+                        status TEXT NOT NULL DEFAULT 'enabled',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS discovery_jobs (
                         job_id TEXT PRIMARY KEY,
                         payload JSONB NOT NULL,
@@ -97,6 +108,7 @@ def initialize_state_store() -> None:
                     )
                     """
                 )
+                cursor.execute("ALTER TABLE discovery_jobs ADD COLUMN IF NOT EXISTS owner_username TEXT NOT NULL DEFAULT 'admin'")
         return
     SQLITE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(SQLITE_STATE_FILE) as connection:
@@ -107,6 +119,17 @@ def initialize_state_store() -> None:
                 state TEXT NOT NULL,
                 version INTEGER NOT NULL DEFAULT 1,
                 updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_users (
+                username TEXT PRIMARY KEY,
+                password_hash TEXT NOT NULL,
+                role TEXT NOT NULL DEFAULT 'user',
+                status TEXT NOT NULL DEFAULT 'enabled',
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -127,6 +150,9 @@ def initialize_state_store() -> None:
             )
             """
         )
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(discovery_jobs)").fetchall()}
+        if "owner_username" not in columns:
+            connection.execute("ALTER TABLE discovery_jobs ADD COLUMN owner_username TEXT NOT NULL DEFAULT 'admin'")
 
 
 def empty_workspace_state() -> dict:
@@ -137,6 +163,10 @@ def empty_workspace_state() -> dict:
         "quotes": [],
         "deletedRecords": [],
     }
+
+
+def workspace_storage_key(username: str) -> str:
+    return "admin-default" if username == AUTH_USERNAME else f"user:{username}"
 
 
 def normalize_workspace_state(payload: dict) -> dict:
@@ -154,7 +184,8 @@ def normalize_workspace_state(payload: dict) -> dict:
     return normalized
 
 
-def load_workspace_state() -> dict:
+def load_workspace_state(workspace_key: str) -> dict:
+    storage_key = workspace_storage_key(workspace_key)
     with STATE_LOCK:
         initialize_state_store()
         if DATABASE_URL:
@@ -162,14 +193,14 @@ def load_workspace_state() -> dict:
                 with connection.cursor() as cursor:
                     cursor.execute(
                         "SELECT state, version, updated_at FROM workspace_state WHERE workspace_key = %s",
-                        (STATE_KEY,),
+                        (storage_key,),
                     )
                     row = cursor.fetchone()
         else:
             with sqlite3.connect(SQLITE_STATE_FILE) as connection:
                 row = connection.execute(
                     "SELECT state, version, updated_at FROM workspace_state WHERE workspace_key = ?",
-                    (STATE_KEY,),
+                    (storage_key,),
                 ).fetchone()
         if not row:
             return {
@@ -191,13 +222,14 @@ def load_workspace_state() -> dict:
         }
 
 
-def save_workspace_state(payload: dict, expected_version: int | None = None) -> dict:
+def save_workspace_state(workspace_key: str, payload: dict, expected_version: int | None = None) -> dict:
+    storage_key = workspace_storage_key(workspace_key)
     state = normalize_workspace_state(payload)
     encoded = json.dumps(state, ensure_ascii=False)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with STATE_LOCK:
         initialize_state_store()
-        current = load_workspace_state()
+        current = load_workspace_state(workspace_key)
         current_version = int(current.get("version", 0))
         if expected_version is not None and int(expected_version) != current_version:
             raise WorkspaceVersionConflict(current)
@@ -214,7 +246,7 @@ def save_workspace_state(payload: dict, expected_version: int | None = None) -> 
                             updated_at = NOW()
                         RETURNING version, updated_at
                         """,
-                        (STATE_KEY, encoded),
+                        (storage_key, encoded),
                     )
                     version, updated_at = cursor.fetchone()
                     updated = updated_at.isoformat()
@@ -229,11 +261,11 @@ def save_workspace_state(payload: dict, expected_version: int | None = None) -> 
                         version = workspace_state.version + 1,
                         updated_at = excluded.updated_at
                     """,
-                    (STATE_KEY, encoded, now),
+                    (storage_key, encoded, now),
                 )
                 version = connection.execute(
                     "SELECT version FROM workspace_state WHERE workspace_key = ?",
-                    (STATE_KEY,),
+                    (storage_key,),
                 ).fetchone()[0]
                 updated = now
     return {
@@ -255,7 +287,163 @@ def create_session_token(username: str) -> str:
     return base64.urlsafe_b64encode(f"{payload}|{signature}".encode("utf-8")).decode("ascii")
 
 
-def verify_session_token(token: str) -> bool:
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_HASH_ITERATIONS)
+    return "pbkdf2_sha256${}${}${}".format(
+        PASSWORD_HASH_ITERATIONS,
+        base64.urlsafe_b64encode(salt).decode("ascii"),
+        base64.urlsafe_b64encode(digest).decode("ascii"),
+    )
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    try:
+        scheme, iterations, salt, expected = stored_hash.split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False
+        digest = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), base64.urlsafe_b64decode(salt.encode("ascii")), int(iterations)
+        )
+        return hmac.compare_digest(base64.urlsafe_b64encode(digest).decode("ascii"), expected)
+    except (ValueError, TypeError, binascii.Error):
+        return False
+
+
+def normalize_username(username: str) -> str:
+    value = str(username or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{3,32}", value):
+        raise ValueError("用户名需为 3-32 位字母、数字、下划线、点或短横线")
+    return value
+
+
+def list_users() -> list[dict]:
+    initialize_state_store()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT username, role, status, created_at FROM app_users ORDER BY created_at ASC")
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute("SELECT username, role, status, created_at FROM app_users ORDER BY created_at ASC").fetchall()
+    users = [{"username": AUTH_USERNAME, "role": "admin", "status": "enabled", "createdAt": "系统内置", "builtIn": True}]
+    for row in rows:
+        if row[0] == AUTH_USERNAME:
+            continue
+        created_at = row[3].isoformat() if hasattr(row[3], "isoformat") else str(row[3])
+        users.append({"username": row[0], "role": row[1], "status": row[2], "createdAt": created_at, "builtIn": False})
+    return users
+
+
+def get_user(username: str) -> dict | None:
+    if hmac.compare_digest(username, AUTH_USERNAME):
+        return {"username": AUTH_USERNAME, "role": "admin", "status": "enabled", "builtIn": True}
+    initialize_state_store()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT username, password_hash, role, status, created_at FROM app_users WHERE username = %s", (username,))
+                row = cursor.fetchone()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            row = connection.execute("SELECT username, password_hash, role, status, created_at FROM app_users WHERE username = ?", (username,)).fetchone()
+    if not row:
+        return None
+    return {"username": row[0], "passwordHash": row[1], "role": row[2], "status": row[3], "builtIn": False}
+
+
+def authenticate_user(username: str, password: str) -> dict | None:
+    user = get_user(str(username or "").strip())
+    if not user or user.get("status") != "enabled":
+        return None
+    valid = hmac.compare_digest(password, AUTH_PASSWORD) if user.get("builtIn") else verify_password(password, user.get("passwordHash", ""))
+    return user if valid else None
+
+
+def create_user(username: str, password: str) -> dict:
+    username = normalize_username(username)
+    if username == AUTH_USERNAME:
+        raise ValueError("管理员账户为系统内置账户，不能重复创建")
+    if len(password or "") < 6:
+        raise ValueError("密码至少需要 6 位")
+    if get_user(username):
+        raise ValueError("用户名已存在")
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    password_hash = hash_password(password)
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("INSERT INTO app_users (username, password_hash, role, status, created_at) VALUES (%s, %s, 'user', 'enabled', NOW())", (username, password_hash))
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            connection.execute("INSERT INTO app_users (username, password_hash, role, status, created_at) VALUES (?, ?, 'user', 'enabled', ?)", (username, password_hash, now))
+    return {"username": username, "role": "user", "status": "enabled", "createdAt": now, "builtIn": False}
+
+
+def update_user(username: str, *, password: str | None = None, status: str | None = None) -> dict:
+    username = normalize_username(username)
+    if username == AUTH_USERNAME:
+        raise ValueError("系统内置管理员不可修改或删除")
+    if not get_user(username):
+        raise ValueError("用户不存在")
+    updates, params = [], []
+    if password is not None:
+        if len(password) < 6:
+            raise ValueError("密码至少需要 6 位")
+        updates.append("password_hash = %s" if DATABASE_URL else "password_hash = ?")
+        params.append(hash_password(password))
+    if status is not None:
+        if status not in {"enabled", "disabled"}:
+            raise ValueError("用户状态无效")
+        updates.append("status = %s" if DATABASE_URL else "status = ?")
+        params.append(status)
+    if not updates:
+        raise ValueError("没有可更新的字段")
+    params.append(username)
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(f"UPDATE app_users SET {', '.join(updates)} WHERE username = %s", tuple(params))
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            connection.execute(f"UPDATE app_users SET {', '.join(updates)} WHERE username = ?", tuple(params))
+    return get_user(username)
+
+
+def delete_user(username: str) -> None:
+    username = normalize_username(username)
+    if username == AUTH_USERNAME:
+        raise ValueError("系统内置管理员不可修改或删除")
+    initialize_state_store()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM app_users WHERE username = %s", (username,))
+                if not cursor.rowcount:
+                    raise ValueError("用户不存在")
+                cursor.execute("DELETE FROM workspace_state WHERE workspace_key = %s", (workspace_storage_key(username),))
+                cursor.execute("DELETE FROM discovery_jobs WHERE owner_username = %s", (username,))
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            cursor = connection.execute("DELETE FROM app_users WHERE username = ?", (username,))
+            if not cursor.rowcount:
+                raise ValueError("用户不存在")
+            connection.execute("DELETE FROM workspace_state WHERE workspace_key = ?", (workspace_storage_key(username),))
+            connection.execute("DELETE FROM discovery_jobs WHERE owner_username = ?", (username,))
+    with SOCIAL_CAPTURE_LOCK:
+        try:
+            captures = json.loads(SOCIAL_CAPTURE_FILE.read_text(encoding="utf-8")) if SOCIAL_CAPTURE_FILE.exists() else []
+            if isinstance(captures, list):
+                SOCIAL_CAPTURE_FILE.write_text(
+                    json.dumps([item for item in captures if item.get("ownerUsername", "admin") != username], ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+        except (OSError, json.JSONDecodeError):
+            pass
+
+
+def session_user_from_token(token: str) -> dict | None:
     try:
         decoded = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
         username, expires_at, signature = decoded.rsplit("|", 2)
@@ -265,13 +453,16 @@ def verify_session_token(token: str) -> bool:
             payload.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-        return (
-            hmac.compare_digest(signature, expected)
-            and username == AUTH_USERNAME
-            and int(expires_at) > int(datetime.now(timezone.utc).timestamp())
-        )
+        if not hmac.compare_digest(signature, expected) or int(expires_at) <= int(datetime.now(timezone.utc).timestamp()):
+            return None
+        user = get_user(username)
+        return user if user and user.get("status") == "enabled" else None
     except (ValueError, TypeError, UnicodeDecodeError, binascii.Error):
-        return False
+        return None
+
+
+def verify_session_token(token: str) -> bool:
+    return bool(session_user_from_token(token))
 
 
 def cleanup_discovery_jobs() -> None:
@@ -327,9 +518,9 @@ def save_discovery_job(job: dict) -> None:
                         """
                         INSERT INTO discovery_jobs (
                             job_id, payload, status, stage, progress, message,
-                            result, error, imported, created_at, updated_at
+                            result, error, imported, created_at, updated_at, owner_username
                         )
-                        VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s)
+                        VALUES (%s, %s::jsonb, %s, %s, %s, %s, %s::jsonb, %s, %s, %s, %s, %s)
                         ON CONFLICT (job_id) DO UPDATE SET
                             payload = EXCLUDED.payload,
                             status = EXCLUDED.status,
@@ -339,6 +530,7 @@ def save_discovery_job(job: dict) -> None:
                             result = EXCLUDED.result,
                             error = EXCLUDED.error,
                             imported = EXCLUDED.imported,
+                            owner_username = EXCLUDED.owner_username,
                             updated_at = EXCLUDED.updated_at
                         """,
                         (
@@ -353,6 +545,7 @@ def save_discovery_job(job: dict) -> None:
                             bool(job.get("imported", False)),
                             job["createdAt"],
                             job["updatedAt"],
+                            job.get("ownerUsername", "admin"),
                         ),
                     )
         else:
@@ -361,9 +554,9 @@ def save_discovery_job(job: dict) -> None:
                     """
                     INSERT INTO discovery_jobs (
                         job_id, payload, status, stage, progress, message,
-                        result, error, imported, created_at, updated_at
+                        result, error, imported, created_at, updated_at, owner_username
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
                         payload = excluded.payload,
                         status = excluded.status,
@@ -373,6 +566,7 @@ def save_discovery_job(job: dict) -> None:
                         result = excluded.result,
                         error = excluded.error,
                         imported = excluded.imported,
+                        owner_username = excluded.owner_username,
                         updated_at = excluded.updated_at
                     """,
                     (
@@ -387,6 +581,7 @@ def save_discovery_job(job: dict) -> None:
                         1 if job.get("imported") else 0,
                         job["createdAt"],
                         job["updatedAt"],
+                        job.get("ownerUsername", "admin"),
                     ),
                 )
 
@@ -408,41 +603,41 @@ def row_to_discovery_job(row) -> dict:
         "imported": bool(row[8]),
         "createdAt": created_at,
         "updatedAt": updated_at,
+        "ownerUsername": row[11] if len(row) > 11 else "admin",
     }
 
 
-def load_discovery_job(job_id: str) -> dict | None:
+def load_discovery_job(job_id: str, owner_username: str | None = None) -> dict | None:
     initialize_state_store()
     query = (
         "SELECT job_id, payload, status, stage, progress, message, result, error, "
-        "imported, created_at, updated_at FROM discovery_jobs WHERE job_id = "
+        "imported, created_at, updated_at, owner_username FROM discovery_jobs WHERE job_id = "
     )
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(query + "%s", (job_id,))
+                cursor.execute(query + "%s" + (" AND owner_username = %s" if owner_username else ""), (job_id, owner_username) if owner_username else (job_id,))
                 row = cursor.fetchone()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            row = connection.execute(query + "?", (job_id,)).fetchone()
+            row = connection.execute(query + "?" + (" AND owner_username = ?" if owner_username else ""), (job_id, owner_username) if owner_username else (job_id,)).fetchone()
     return row_to_discovery_job(row) if row else None
 
 
-def list_discovery_jobs(limit: int = 20) -> list[dict]:
+def list_discovery_jobs(owner_username: str, limit: int = 20) -> list[dict]:
     cleanup_discovery_jobs()
     query = (
         "SELECT job_id, payload, status, stage, progress, message, result, error, "
-        "imported, created_at, updated_at FROM discovery_jobs "
-        "ORDER BY created_at DESC LIMIT "
+        "imported, created_at, updated_at, owner_username FROM discovery_jobs WHERE owner_username = "
     )
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(query + "%s", (limit,))
+                cursor.execute(query + "%s", (owner_username, limit))
                 rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            rows = connection.execute(query + "?", (limit,)).fetchall()
+            rows = connection.execute(query + "?", (owner_username, limit)).fetchall()
     return [discovery_job_public(row_to_discovery_job(row)) for row in rows]
 
 
@@ -587,22 +782,22 @@ def discovery_payload_signature(payload: dict) -> str:
     return json.dumps(normalized, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def find_matching_active_discovery_job(payload: dict) -> dict | None:
+def find_matching_active_discovery_job(payload: dict, owner_username: str) -> dict | None:
     target = discovery_payload_signature(payload)
     initialize_state_store()
     query = (
         "SELECT job_id, payload, status, stage, progress, message, result, error, "
-        "imported, created_at, updated_at FROM discovery_jobs "
-        "WHERE status IN ('queued', 'running') ORDER BY created_at DESC"
+        "imported, created_at, updated_at, owner_username FROM discovery_jobs "
+        "WHERE status IN ('queued', 'running') AND owner_username = "
     )
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(query)
+                cursor.execute(query + "%s ORDER BY created_at DESC", (owner_username,))
                 rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            rows = connection.execute(query).fetchall()
+            rows = connection.execute(query + "? ORDER BY created_at DESC", (owner_username,)).fetchall()
     for row in rows:
         job = row_to_discovery_job(row)
         if discovery_payload_signature(job.get("payload") or {}) == target:
@@ -610,13 +805,13 @@ def find_matching_active_discovery_job(payload: dict) -> dict | None:
     return None
 
 
-def create_discovery_job(payload: dict, *, force: bool = False) -> dict:
+def create_discovery_job(payload: dict, owner_username: str, *, force: bool = False) -> dict:
     cleanup_discovery_jobs()
     params = discovery_params(payload)
     normalized_payload = {key: value[0] for key, value in params.items()}
     with DISCOVERY_CREATE_LOCK:
         if not force:
-            existing = find_matching_active_discovery_job(normalized_payload)
+            existing = find_matching_active_discovery_job(normalized_payload, owner_username)
             if existing:
                 existing["reused"] = True
                 return discovery_job_public(existing)
@@ -634,20 +829,21 @@ def create_discovery_job(payload: dict, *, force: bool = False) -> dict:
             "result": None,
             "error": "",
             "imported": False,
+            "ownerUsername": owner_username,
         }
         save_discovery_job(job)
         launch_discovery_worker(job_id, params)
     return discovery_job_public(job)
 
 
-def get_discovery_job(job_id: str) -> dict | None:
+def get_discovery_job(job_id: str, owner_username: str | None = None) -> dict | None:
     cleanup_discovery_jobs()
-    job = load_discovery_job(job_id)
+    job = load_discovery_job(job_id, owner_username)
     return discovery_job_public(job) if job else None
 
 
-def mark_discovery_job_imported(job_id: str) -> dict | None:
-    job = load_discovery_job(job_id)
+def mark_discovery_job_imported(job_id: str, owner_username: str) -> dict | None:
+    job = load_discovery_job(job_id, owner_username)
     if not job:
         return None
     job["imported"] = True
@@ -656,8 +852,8 @@ def mark_discovery_job_imported(job_id: str) -> dict | None:
     return discovery_job_public(job)
 
 
-def cancel_discovery_job(job_id: str) -> dict | None:
-    job = load_discovery_job(job_id)
+def cancel_discovery_job(job_id: str, owner_username: str) -> dict | None:
+    job = load_discovery_job(job_id, owner_username)
     if not job:
         return None
     if job.get("status") in {"queued", "running"}:
@@ -669,11 +865,11 @@ def cancel_discovery_job(job_id: str) -> dict | None:
             message="任务已取消，后续搜索结果不会写入任务中心。",
             error="",
         )
-    return get_discovery_job(job_id)
+    return get_discovery_job(job_id, owner_username)
 
 
-def delete_discovery_job(job_id: str) -> bool:
-    job = load_discovery_job(job_id)
+def delete_discovery_job(job_id: str, owner_username: str) -> bool:
+    job = load_discovery_job(job_id, owner_username)
     if not job:
         return False
     if job.get("status") in {"queued", "running"}:
@@ -683,13 +879,13 @@ def delete_discovery_job(job_id: str) -> bool:
         if DATABASE_URL:
             with postgres_connection() as connection:
                 with connection.cursor() as cursor:
-                    cursor.execute("DELETE FROM discovery_jobs WHERE job_id = %s", (job_id,))
+                    cursor.execute("DELETE FROM discovery_jobs WHERE job_id = %s AND owner_username = %s", (job_id, owner_username))
                     deleted = cursor.rowcount > 0
         else:
             with sqlite3.connect(SQLITE_STATE_FILE) as connection:
                 cursor = connection.execute(
-                    "DELETE FROM discovery_jobs WHERE job_id = ?",
-                    (job_id,),
+                    "DELETE FROM discovery_jobs WHERE job_id = ? AND owner_username = ?",
+                    (job_id, owner_username),
                 )
                 deleted = cursor.rowcount > 0
     return deleted
@@ -699,7 +895,7 @@ def resume_interrupted_discovery_jobs() -> int:
     initialize_state_store()
     query = (
         "SELECT job_id, payload, status, stage, progress, message, result, error, "
-        "imported, created_at, updated_at FROM discovery_jobs "
+        "imported, created_at, updated_at, owner_username FROM discovery_jobs "
         "WHERE status IN ('queued', 'running') ORDER BY created_at"
     )
     if DATABASE_URL:
@@ -892,17 +1088,17 @@ def clean_text(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def load_social_captures() -> list[dict]:
+def load_social_captures(owner_username: str) -> list[dict]:
     if not SOCIAL_CAPTURE_FILE.exists():
         return []
     try:
         data = json.loads(SOCIAL_CAPTURE_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
+        return [item for item in data if isinstance(item, dict) and item.get("ownerUsername", "admin") == owner_username] if isinstance(data, list) else []
     except (OSError, json.JSONDecodeError):
         return []
 
 
-def save_social_capture(payload: dict) -> dict:
+def save_social_capture(payload: dict, owner_username: str) -> dict:
     SOCIAL_CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
     capture_id = uuid.uuid4().hex
     screenshot_data = str(payload.pop("screenshotData", "") or "")
@@ -919,6 +1115,7 @@ def save_social_capture(payload: dict) -> dict:
             screenshot_url = ""
     record = {
         "id": capture_id,
+        "ownerUsername": owner_username,
         "platform": clean_text(str(payload.get("platform", "")))[:40],
         "title": clean_text(str(payload.get("title", "")))[:200],
         "url": normalize_public_url(str(payload.get("url", ""))),
@@ -945,7 +1142,12 @@ def save_social_capture(payload: dict) -> dict:
         "capturedAt": clean_text(str(payload.get("capturedAt", ""))) or datetime.now().astimezone().isoformat(timespec="seconds"),
     }
     with SOCIAL_CAPTURE_LOCK:
-        captures = load_social_captures()
+        try:
+            captures = json.loads(SOCIAL_CAPTURE_FILE.read_text(encoding="utf-8")) if SOCIAL_CAPTURE_FILE.exists() else []
+        except (OSError, json.JSONDecodeError):
+            captures = []
+        if not isinstance(captures, list):
+            captures = []
         captures.insert(0, record)
         SOCIAL_CAPTURE_FILE.write_text(
             json.dumps(captures[:200], ensure_ascii=False, indent=2),
@@ -3375,10 +3577,20 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def is_authenticated(self):
+        return self.current_user() is not None
+
+    def current_user(self):
         cookie = SimpleCookie()
         cookie.load(self.headers.get("Cookie", ""))
         morsel = cookie.get(AUTH_COOKIE)
-        return bool(morsel and verify_session_token(morsel.value))
+        return session_user_from_token(morsel.value) if morsel else None
+
+    def require_admin(self):
+        user = self.current_user()
+        if user and user.get("role") == "admin":
+            return user
+        self.send_json(403, {"ok": False, "error": "仅管理员可以管理用户"})
+        return None
 
     def send_json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -3413,20 +3625,30 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         if parsed.path == "/api/session":
+            user = self.current_user()
             self.send_json(
                 200,
                 {
                     "ok": True,
-                    "authenticated": self.is_authenticated(),
-                    "username": AUTH_USERNAME if self.is_authenticated() else "",
+                    "authenticated": bool(user),
+                    "username": user.get("username", "") if user else "",
+                    "role": user.get("role", "") if user else "",
                 },
             )
+            return
+        if parsed.path == "/api/users":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                self.send_json(200, {"ok": True, "users": list_users()})
+            except (OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/workspace-state":
             if not self.require_auth(api=True):
                 return
             try:
-                state = load_workspace_state()
+                state = load_workspace_state(self.current_user()["username"])
                 self.send_json(200, {"ok": True, **state})
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
@@ -3435,7 +3657,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_auth(api=True):
                 return
             job_id = (urllib.parse.parse_qs(parsed.query).get("id") or [""])[0]
-            job = get_discovery_job(job_id)
+            job = get_discovery_job(job_id, self.current_user()["username"])
             if not job:
                 self.send_json(404, {"ok": False, "error": "获客任务不存在或已过期"})
                 return
@@ -3445,7 +3667,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_auth(api=True):
                 return
             try:
-                self.send_json(200, {"ok": True, "jobs": list_discovery_jobs()})
+                self.send_json(200, {"ok": True, "jobs": list_discovery_jobs(self.current_user()["username"])})
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
@@ -3455,7 +3677,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/social-captures":
             body = json.dumps(
-                {"ok": True, "captures": load_social_captures()},
+                {"ok": True, "captures": load_social_captures(self.current_user()["username"])},
                 ensure_ascii=False,
             ).encode("utf-8")
             self.send_response(200)
@@ -3500,14 +3722,12 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                 username = str(payload.get("username", ""))
                 password = str(payload.get("password", ""))
-                valid = hmac.compare_digest(username, AUTH_USERNAME) and hmac.compare_digest(
-                    password, AUTH_PASSWORD
-                )
-                if not valid:
+                user = authenticate_user(username, password)
+                if not user:
                     self.send_json(401, {"ok": False, "error": "账户名或密码错误"})
                     return
-                token = create_session_token(username)
-                body = json.dumps({"ok": True, "username": username}, ensure_ascii=False).encode("utf-8")
+                token = create_session_token(user["username"])
+                body = json.dumps({"ok": True, "username": user["username"], "role": user["role"]}, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""
                 self.send_header(
@@ -3535,6 +3755,33 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if not self.require_auth(api=True):
             return
+        if parsed.path == "/api/users":
+            if not self.require_admin():
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                user = create_user(str(payload.get("username", "")), str(payload.get("password", "")))
+                self.send_json(201, {"ok": True, "user": user})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path.startswith("/api/users/"):
+            if not self.require_admin():
+                return
+            username = urllib.parse.unquote(parsed.path.rsplit("/", 1)[-1])
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                if payload.get("action") == "delete":
+                    delete_user(username)
+                    self.send_json(200, {"ok": True})
+                else:
+                    user = update_user(username, password=payload.get("password"), status=payload.get("status"))
+                    self.send_json(200, {"ok": True, "user": {key: value for key, value in user.items() if key != "passwordHash"}})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
         if parsed.path == "/api/workspace-state":
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 20_500_000)
@@ -3543,7 +3790,7 @@ class Handler(SimpleHTTPRequestHandler):
                 if expected_version is not None:
                     expected_version = int(expected_version)
                 result = save_workspace_state(
-                    payload.get("state", payload),
+                    self.current_user()["username"], payload.get("state", payload),
                     expected_version=expected_version,
                 )
                 self.send_json(200, {"ok": True, **result})
@@ -3566,7 +3813,7 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                 if not isinstance(payload, dict):
                     raise ValueError("请求格式无效")
-                job = create_discovery_job(payload)
+                job = create_discovery_job(payload, self.current_user()["username"])
                 self.send_json(202, {"ok": True, "job": job})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
@@ -3575,7 +3822,7 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-                job = mark_discovery_job_imported(str(payload.get("id", "")))
+                job = mark_discovery_job_imported(str(payload.get("id", "")), self.current_user()["username"])
                 if not job:
                     self.send_json(404, {"ok": False, "error": "获客任务不存在"})
                     return
@@ -3587,14 +3834,14 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-                previous = load_discovery_job(str(payload.get("id", "")))
+                previous = load_discovery_job(str(payload.get("id", "")), self.current_user()["username"])
                 if not previous:
                     self.send_json(404, {"ok": False, "error": "获客任务不存在"})
                     return
                 if previous.get("status") not in {"failed", "completed", "canceled"}:
                     self.send_json(409, {"ok": False, "error": "任务仍在运行，无需重试"})
                     return
-                job = create_discovery_job(previous.get("payload") or {}, force=True)
+                job = create_discovery_job(previous.get("payload") or {}, self.current_user()["username"], force=True)
                 self.send_json(202, {"ok": True, "job": job})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
@@ -3603,7 +3850,7 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-                job = cancel_discovery_job(str(payload.get("id", "")))
+                job = cancel_discovery_job(str(payload.get("id", "")), self.current_user()["username"])
                 if not job:
                     self.send_json(404, {"ok": False, "error": "获客任务不存在"})
                     return
@@ -3616,7 +3863,7 @@ class Handler(SimpleHTTPRequestHandler):
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                 job_id = str(payload.get("id", ""))
-                if not delete_discovery_job(job_id):
+                if not delete_discovery_job(job_id, self.current_user()["username"]):
                     self.send_json(404, {"ok": False, "error": "获客任务不存在"})
                     return
                 self.send_json(200, {"ok": True, "id": job_id})
@@ -3633,7 +3880,7 @@ class Handler(SimpleHTTPRequestHandler):
         try:
             content_length = min(int(self.headers.get("Content-Length", "0")), 10_000_000)
             payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-            record = save_social_capture(payload)
+            record = save_social_capture(payload, self.current_user()["username"])
             body = json.dumps({"ok": True, "capture": record}, ensure_ascii=False).encode("utf-8")
             self.send_response(200)
         except Exception as exc:

@@ -214,6 +214,26 @@ button {
   font-size: 14px;
 }
 
+.user-management-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 11px 15px;
+  border: 1px solid rgba(215, 181, 109, 0.22);
+  border-radius: 10px;
+  background: rgba(215, 181, 109, 0.08);
+  color: #d9b870;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.user-management-button[hidden] { display: none; }
+.user-management-button:hover { background: rgba(215, 181, 109, 0.16); }
+.user-management-button.active { background: rgba(215, 181, 109, 0.2); box-shadow: inset 3px 0 #d9b870; }
+.user-management-button > span { font-size: 15px; }
+
 .main {
   margin-left: 260px;
   padding: 26px 38px 56px;
@@ -1460,6 +1480,63 @@ textarea {
 .review-grid {
   grid-template-columns: 1fr;
 }
+
+.user-management-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.62fr) minmax(0, 1.38fr);
+  gap: 16px;
+}
+
+.user-form {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+}
+
+.user-form label {
+  display: grid;
+  gap: 7px;
+  color: #4b5563;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.user-form input {
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+}
+
+.form-status {
+  min-height: 18px;
+  margin: -3px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.form-status.error { color: var(--red); }
+.form-status.success { color: var(--green); }
+
+.user-table-panel { min-width: 0; }
+.user-table-panel .panel-head > div { min-width: 0; }
+
+.user-status {
+  display: inline-flex;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #edf8f2;
+  color: #227251;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.user-status.disabled { background: #fff0ee; color: #a33c32; }
+
+.user-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.user-actions button { min-height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #394553; font-size: 11px; }
+.user-actions .danger { border-color: #f0d2ce; color: #a33c32; background: #fff8f7; }
 
 .review-toolbar {
   display: flex;
@@ -2925,6 +3002,7 @@ tbody tr:last-child td {
   .topbar,
   .overview-welcome,
   .two-col,
+  .user-management-layout,
   .quote-layout,
   .email-builder,
   .form-grid {
