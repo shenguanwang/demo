@@ -1418,7 +1418,7 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
             "part": "snippet",
             "type": "channel",
             "q": query,
-            "maxResults": str(max(1, min(limit, 10))),
+            "maxResults": str(max(1, min(limit, 50))),
             "key": api_key,
         }
         request = urllib.request.Request(
@@ -1427,6 +1427,34 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
         )
         with urllib.request.urlopen(request, timeout=20) as response:
             payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+        channel_ids = [
+            (item.get("id") or {}).get("channelId")
+            or (item.get("snippet") or {}).get("channelId")
+            for item in payload.get("items", [])
+        ]
+        channel_ids = [channel_id for channel_id in channel_ids if channel_id]
+        details_by_id = {}
+        if channel_ids:
+            detail_params = {
+                "part": "snippet,brandingSettings",
+                "id": ",".join(channel_ids),
+                "key": api_key,
+            }
+            detail_request = urllib.request.Request(
+                "https://www.googleapis.com/youtube/v3/channels?" + urllib.parse.urlencode(detail_params),
+                headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
+            )
+            try:
+                with urllib.request.urlopen(detail_request, timeout=20) as response:
+                    detail_payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+                details_by_id = {
+                    item.get("id", ""): item
+                    for item in detail_payload.get("items", [])
+                    if item.get("id")
+                }
+            except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
+                # Channel enrichment should not discard otherwise valid search results.
+                details_by_id = {}
         results = []
         for item in payload.get("items", []):
             snippet = item.get("snippet") or {}
@@ -1437,13 +1465,24 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
             )
             if not channel_id:
                 continue
+            detail = details_by_id.get(channel_id, {})
+            detail_snippet = detail.get("snippet") or {}
+            branding = detail.get("brandingSettings") or {}
+            branding_channel = branding.get("channel") or {}
+            custom_url = detail_snippet.get("customUrl", "")
+            channel_url = (
+                f"https://www.youtube.com/{custom_url}"
+                if custom_url.startswith("@")
+                else f"https://www.youtube.com/channel/{channel_id}"
+            )
             results.append(
                 {
-                    "title": snippet.get("channelTitle") or snippet.get("title") or "YouTube channel",
-                    "url": f"https://www.youtube.com/channel/{channel_id}",
-                    "snippet": snippet.get("description", ""),
+                    "title": detail_snippet.get("title") or snippet.get("channelTitle") or snippet.get("title") or "YouTube channel",
+                    "url": channel_url,
+                    "snippet": detail_snippet.get("description") or snippet.get("description", ""),
                     "handle": snippet.get("publishedAt", ""),
                     "channelId": channel_id,
+                    "country": branding_channel.get("country", ""),
                     "apiSource": "YouTube Data API v3",
                 }
             )
@@ -3323,7 +3362,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         youtube_searches = []
         if account_scope in ("company", "both"):
             youtube_searches.append(
-                (f"{keywords} {company_query} official channel".strip(), "公司账号")
+                (f"{keywords} {company_query}".strip(), "公司账号")
             )
         if account_scope in ("person", "both"):
             city = next(
@@ -3335,7 +3374,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
         for youtube_query, youtube_account_type in youtube_searches:
             try:
-                youtube_items = search_youtube_channels(youtube_query, limit=10)
+                youtube_items = search_youtube_channels(youtube_query, limit=50)
             except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
                 youtube_items = []
             for item in youtube_items:
