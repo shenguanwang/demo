@@ -3406,3 +3406,576 @@ tbody tr:last-child td {
     gap: 8px;
   }
 }
+
+/* Stage 3 premium white system: restrained B2B surface, low ornament. */
+:root {
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-soft: #fafbfc;
+  --text: #101820;
+  --muted: #68717d;
+  --line: #e8ebef;
+  --accent: #9f7428;
+  --accent-soft: #f7f3ea;
+  --shadow: 0 18px 48px rgba(16, 24, 32, 0.045);
+  --card-radius: 18px;
+  --soft-shadow: 0 1px 2px rgba(16, 24, 32, 0.035), 0 14px 34px rgba(16, 24, 32, 0.035);
+  --hover-shadow: 0 1px 2px rgba(16, 24, 32, 0.05), 0 18px 42px rgba(16, 24, 32, 0.06);
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+}
+
+.sidebar {
+  background: #ffffff;
+  border-right: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.brand strong,
+.nav button:hover,
+.nav button.active,
+.logout-button:hover {
+  color: #111820;
+}
+
+.brand > div:last-child span,
+.nav button,
+.logout-button,
+.side-note p {
+  color: #6d7682;
+}
+
+.nav-label {
+  color: #a3abb5;
+}
+
+.brand-mark {
+  border-color: #e9edf1;
+  background: #ffffff;
+  fill: #92691e;
+  box-shadow: none;
+}
+
+.brand-mark-accent {
+  fill: #b58b3b;
+}
+
+.nav button > span {
+  border-color: #edf0f3;
+  background: #fafbfc;
+  color: #9aa3ad;
+}
+
+.nav button:hover,
+.nav button.active,
+.logout-button:hover,
+.user-management-button,
+.user-management-button:hover,
+.user-management-button.active {
+  background: #f6f7f9;
+}
+
+.nav button.active,
+.user-management-button.active {
+  box-shadow: inset 2px 0 #9f7428;
+}
+
+.side-note {
+  background: #ffffff;
+  border-color: var(--line);
+}
+
+.overview-welcome,
+.daily-focus,
+.metric-strip > button,
+.overview-block,
+.cards article,
+.panel,
+.task-list article,
+.lead-card,
+.review-card,
+.discovery-job,
+.social-search-box,
+.extension-install-note,
+.table-wrap,
+.crm-workbench,
+.insight-box,
+.letter-block,
+.quote-result,
+.review-more,
+.evidence-section,
+.social-profile-section,
+.source-availability,
+.source-guide,
+.finder-source-details,
+.kpi-insight > div,
+.quote-summary-grid div,
+.follow-summary span,
+.follow-history,
+.review-decision > div,
+.score-dimensions span,
+#followUpSequence p {
+  background: #ffffff;
+  border: 1px solid var(--line);
+  border-radius: var(--card-radius);
+  box-shadow: none;
+}
+
+.overview-welcome {
+  gap: 24px;
+  overflow: visible;
+  box-shadow: var(--soft-shadow);
+}
+
+.welcome-copy {
+  padding: 56px 58px 52px;
+}
+
+.welcome-copy h2 {
+  max-width: 760px;
+  color: #111820;
+  letter-spacing: -1.2px;
+}
+
+.welcome-copy h2 em {
+  color: #9a6f28;
+}
+
+.status-pill {
+  background: #ffffff;
+  border-color: var(--line);
+  color: #5f6670;
+}
+
+.metric-strip > button,
+.overview-block,
+.panel,
+.review-card,
+.task-list article,
+.table-wrap,
+.quote-result {
+  box-shadow: var(--soft-shadow);
+}
+
+.daily-focus {
+  color: var(--text);
+  box-shadow: var(--soft-shadow);
+}
+
+.focus-head,
+.daily-focus button,
+.daily-focus button strong {
+  color: var(--text);
+}
+
+.focus-head strong {
+  color: #8f671f;
+}
+
+.daily-focus button {
+  border-color: var(--line);
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.daily-focus button:hover {
+  border-color: #dfe4ea;
+  background: #fafbfc;
+  transform: translateY(-1px);
+}
+
+.daily-focus button small,
+.daily-focus button b {
+  color: var(--muted);
+}
+
+.task-check,
+.workflow-icon,
+.metric-icon.amber,
+.tag,
+.quote-tax-note,
+.risk-timing,
+.job-state.running,
+.job-state.queued,
+.review-decision .decision-main {
+  background: #f8f4ec;
+  border-color: #eee5d5;
+  color: #84611f;
+}
+
+.metric-icon.blue,
+.review-decision .decision-score {
+  background: #f7f9fb;
+  border-color: #edf1f5;
+  color: #435366;
+}
+
+.metric-icon.green,
+.job-state.completed {
+  background: #f5faf7;
+  border-color: #e6f0eb;
+  color: #2c6b50;
+}
+
+.panel,
+.cards article,
+.review-card,
+.task-list article,
+.overview-block {
+  padding: 24px;
+}
+
+.review-card {
+  border-radius: 20px;
+}
+
+.country-card:hover,
+.metric-strip > button:hover,
+.review-card:hover,
+.crm-actions button:hover,
+.task-actions button:hover {
+  border-color: #dfe5eb;
+  box-shadow: var(--hover-shadow);
+  transform: translateY(-1px);
+}
+
+.section-gap,
+.overview-block,
+.metric-strip,
+.panel + .panel,
+.task-list,
+.quote-history-wrap {
+  margin-top: 22px;
+}
+
+.cards,
+.country-grid,
+.risk-grid,
+.kpi-grid,
+.two-col,
+.email-builder,
+.quote-layout,
+.review-grid,
+.task-list,
+.discovery-job-list,
+.social-prospecting-grid,
+.social-profile-grid,
+.kpi-insight,
+.quote-summary-grid {
+  gap: 20px;
+}
+
+.form-grid,
+.finder-field-grid,
+.finder-rule-grid,
+.quote-form-grid,
+.social-form-grid {
+  gap: 16px;
+}
+
+input,
+select,
+textarea,
+.crm-stage,
+.crm-next,
+.follow-entry select,
+.follow-entry input,
+.follow-context input,
+.follow-context select {
+  border-color: #e4e8ed;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #bda56f;
+  box-shadow: 0 0 0 3px rgba(159, 116, 40, 0.09);
+  outline: none;
+}
+
+.source-availability,
+.extension-install-note,
+.evidence-section,
+.social-profile-section,
+.review-more,
+.quote-summary-grid div,
+.kpi-insight > div,
+.follow-history,
+#followUpSequence p,
+.score-dimensions span,
+.review-decision > div {
+  box-shadow: none;
+}
+
+.source-availability,
+.extension-install-note,
+.evidence-section,
+.social-profile-section,
+.review-more,
+.quote-summary-grid div,
+.kpi-insight > div,
+.follow-history,
+#followUpSequence p,
+.score-dimensions span,
+.review-decision > div,
+.social-search-box,
+.discovery-job,
+.crm-workbench {
+  background: #fafbfc;
+}
+
+.source-guide,
+.finder-source-details {
+  background: #ffffff;
+}
+
+.quote-result {
+  background: #ffffff;
+}
+
+.quote-total-card strong {
+  letter-spacing: 0;
+}
+
+.table-wrap {
+  overflow: auto;
+}
+
+th {
+  background: #fbfcfd;
+}
+
+tbody tr:hover td {
+  background: #fbfcfd;
+}
+
+.review-more[open] .review-more-content {
+  background: #ffffff;
+  box-shadow: -12px 0 34px rgba(18, 26, 34, 0.12);
+}
+
+.review-drawer-head {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.section-head {
+  margin-bottom: 24px;
+  padding-top: 30px;
+}
+
+.section-head h2,
+.topbar h1,
+.block-head h3 {
+  color: #101820;
+  letter-spacing: -0.4px;
+}
+
+.section-head p,
+.welcome-copy > p,
+.workflow p,
+.cards p,
+.panel p,
+.task-list p,
+td {
+  color: #69727f;
+}
+
+.primary,
+.research-button,
+.discovery-job-action,
+.follow-entry button {
+  background: #101820;
+  box-shadow: none;
+}
+
+.primary:hover,
+.research-button:hover,
+.discovery-job-action:hover:not(:disabled),
+.follow-entry button:hover {
+  background: #25303b;
+}
+
+.ghost,
+.crm-actions button,
+.task-actions button,
+.quote-row-actions button,
+.user-actions button,
+.review-bulk-actions button,
+.score-calibration button {
+  background: #ffffff;
+  border-color: var(--line);
+}
+
+.workflow {
+  gap: 12px;
+}
+
+.workflow > button {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #ffffff;
+}
+
+.workflow > button:first-child {
+  padding-left: 22px;
+}
+
+.workflow > button:last-child {
+  border-right: 1px solid var(--line);
+}
+
+.workflow > button:hover {
+  border-color: #dfe4ea;
+  background: #fafbfc;
+}
+
+/* De-AI refinement: make the workspace feel operational, not promotional. */
+:root {
+  --shadow: 0 10px 28px rgba(16, 24, 32, 0.032);
+  --soft-shadow: 0 1px 2px rgba(16, 24, 32, 0.026), 0 10px 26px rgba(16, 24, 32, 0.026);
+  --hover-shadow: 0 1px 2px rgba(16, 24, 32, 0.04), 0 14px 32px rgba(16, 24, 32, 0.045);
+}
+
+.main {
+  padding-top: 30px;
+}
+
+.topbar {
+  margin-bottom: 22px;
+}
+
+.overview-welcome {
+  grid-template-columns: minmax(0, 1.55fr) minmax(360px, 0.8fr);
+  gap: 18px;
+}
+
+.welcome-copy {
+  padding: 38px 42px;
+}
+
+.welcome-copy h2 {
+  max-width: 640px;
+  margin: 18px 0 12px;
+  font-size: clamp(32px, 3vw, 44px);
+  line-height: 1.12;
+  letter-spacing: -0.8px;
+}
+
+.welcome-copy h2 em {
+  color: #101820;
+  font-style: normal;
+}
+
+.status-pill {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.welcome-actions {
+  margin-top: 22px;
+}
+
+.daily-focus {
+  padding: 28px 30px;
+}
+
+.daily-focus button {
+  padding: 13px 14px;
+}
+
+.task-check,
+.workflow-icon,
+.metric-icon.amber,
+.metric-icon.blue,
+.metric-icon.green {
+  background: #f8f9fa;
+  border-color: #edf0f3;
+  color: #6f7883;
+}
+
+.metric-strip {
+  margin-top: 20px;
+}
+
+.metric-strip > button {
+  min-height: 92px;
+  padding: 18px 20px;
+}
+
+.metric-strip strong {
+  font-size: 26px;
+}
+
+.overview-block {
+  padding: 26px;
+}
+
+.block-head {
+  margin-bottom: 18px;
+}
+
+.workflow {
+  gap: 10px;
+}
+
+.workflow > button {
+  padding: 20px;
+  border-color: #edf0f3;
+}
+
+.workflow-icon {
+  margin: 12px 0 16px;
+}
+
+.workflow > button h3 {
+  font-size: 13px;
+}
+
+.workflow > button p {
+  font-size: 11px;
+}
+
+.eyebrow,
+.panel-head span,
+.letter-block span,
+.insight-box span,
+.kpi-grid span {
+  color: #7d858f;
+  letter-spacing: 0.6px;
+}
+
+.section-head h2 {
+  font-size: clamp(28px, 2.6vw, 38px);
+}
+
+.tag,
+.quote-tax-note,
+.risk-timing,
+.job-state.running,
+.job-state.queued,
+.review-decision .decision-main {
+  background: #f8f9fa;
+  border-color: #edf0f3;
+  color: #5e6670;
+}
+
+.nav button.active,
+.user-management-button.active {
+  background: #f5f6f8;
+}
+
+.nav button.active > span,
+.user-management-button,
+.user-management-button:hover,
+.user-management-button.active {
+  border-color: #e8ebef;
+  background: #ffffff;
+  color: #7a5a20;
+}
