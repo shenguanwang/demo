@@ -1438,25 +1438,29 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
 
 
 def search_bing(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
-    params = {"q": query, "count": limit}
-    if freshness_days:
-        params["filters"] = 'ex1:"ez2"' if freshness_days <= 7 else 'ex1:"ez3"'
-    url = "https://www.bing.com/search?" + urllib.parse.urlencode(params)
-    page = fetch_text(url)
     items: list[dict] = []
-    for match in re.finditer(r'<li class="b_algo"[\s\S]*?</li>', page, flags=re.I):
-        block = match.group(0)
-        link = re.search(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)</a>', block, flags=re.I)
-        if not link:
-            continue
-        href = html.unescape(link.group(1))
-        title = clean_text(link.group(2))
-        snippet_match = re.search(r'<p[^>]*>([\s\S]*?)</p>', block, flags=re.I)
-        snippet = clean_text(snippet_match.group(1)) if snippet_match else ""
-        if href.startswith("http") and "bing.com" not in href:
-            items.append({"title": title, "url": href, "snippet": snippet})
-        if len(items) >= limit:
-            break
+    # Bing exposes result pages through the public `first` parameter. Reading a
+    # second page materially improves business-directory coverage while keeping
+    # each keyword within a small, polite request budget.
+    pages = min(2, max(1, (limit + 9) // 10))
+    for page_index in range(pages):
+        params = {"q": query, "count": 10, "first": 1 + page_index * 10}
+        if freshness_days:
+            params["filters"] = 'ex1:"ez2"' if freshness_days <= 7 else 'ex1:"ez3"'
+        page = fetch_text("https://www.bing.com/search?" + urllib.parse.urlencode(params))
+        for match in re.finditer(r'<li class="b_algo"[\s\S]*?</li>', page, flags=re.I):
+            block = match.group(0)
+            link = re.search(r'<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)</a>', block, flags=re.I)
+            if not link:
+                continue
+            href = html.unescape(link.group(1))
+            title = clean_text(link.group(2))
+            snippet_match = re.search(r'<p[^>]*>([\s\S]*?)</p>', block, flags=re.I)
+            snippet = clean_text(snippet_match.group(1)) if snippet_match else ""
+            if href.startswith("http") and "bing.com" not in href:
+                items.append({"title": title, "url": href, "snippet": snippet})
+            if len(items) >= limit:
+                return items
     return items
 
 
@@ -1499,12 +1503,36 @@ def search_duckduckgo(query: str, limit: int = 8, freshness_days: int | None = N
     return items
 
 
+def search_brave(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
+    params = {"q": query, "source": "web"}
+    if freshness_days:
+        params["tf"] = "pw" if freshness_days <= 7 else "pm"
+    page = fetch_text("https://search.brave.com/search?" + urllib.parse.urlencode(params))
+    items: list[dict] = []
+    blocks = re.split(r'<div class="snippet\s[^>]*data-type="web"[^>]*>', page, flags=re.I)[1:]
+    for block in blocks:
+        href_match = re.search(r'<a href="([^"]+)"', block, flags=re.I)
+        title_match = re.search(r'<div class="title search-snippet-title[^>]*title="([^"]+)"', block, flags=re.I)
+        snippet_match = re.search(r'<div class="generic-snippet[^>]*>[\s\S]{0,3000}?<div class="content[^>]*>([\s\S]*?)</div>', block, flags=re.I)
+        if not href_match or not title_match:
+            continue
+        href = html.unescape(href_match.group(1))
+        title = clean_text(html.unescape(title_match.group(1)))
+        snippet = clean_text(snippet_match.group(1)) if snippet_match else ""
+        if href.startswith("http") and "search.brave.com" not in href:
+            items.append({"title": title, "url": href, "snippet": snippet})
+        if len(items) >= limit:
+            break
+    return items
+
+
 def search_web(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
     collected: list[dict] = []
-    with ThreadPoolExecutor(max_workers=2) as executor:
+    with ThreadPoolExecutor(max_workers=3) as executor:
         futures = [
             executor.submit(search_duckduckgo, query, limit, freshness_days),
             executor.submit(search_bing, query, limit, freshness_days),
+            executor.submit(search_brave, query, limit, freshness_days),
         ]
         for future in as_completed(futures):
             try:
@@ -2965,7 +2993,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     customer_types = (params.get("customerTypes") or [""])[0].strip()
     exclusions = (params.get("exclusions") or [""])[0].strip()
     result_limit_value = (params.get("resultLimit") or ["40"])[0]
-    result_limit = max(10, min(60, int(result_limit_value) if result_limit_value.isdigit() else 40))
+    result_limit = max(10, min(90, int(result_limit_value) if result_limit_value.isdigit() else 40))
     verification_level = (params.get("verificationLevel") or ["strict"])[0]
     min_sources_value = (params.get("minSources") or ["2"])[0]
     min_sources = max(1, min(3, int(min_sources_value) if min_sources_value.isdigit() else 2))
@@ -2990,14 +3018,41 @@ def discover(params: dict[str, list[str]]) -> dict:
         f"{market} automotive importer vehicle distributor car dealer showroom "
         f"parallel import auto trading official website contact {exclude_query}{cutoff_query}"
     ).strip()
-    intent_query = (
-        f"{market} car dealer importer \"new brand\" OR \"brand partnership\" OR "
-        f"\"vehicle procurement\" OR RFQ OR \"dealer wanted\" {exclude_query}{cutoff_query}"
-    ).strip()
+    if target_type in {"fleet", "buying", "government"}:
+        intent_query = (
+            f"{market} vehicle procurement fleet buyer tender RFQ corporate vehicles official website "
+            f"{exclude_query}{cutoff_query}"
+        ).strip()
+    else:
+        intent_query = (
+            f"{market} car dealer importer \"new brand\" OR \"brand partnership\" OR "
+            f"\"authorized dealer\" OR \"dealer wanted\" {exclude_query}{cutoff_query}"
+        ).strip()
     china_ev_query = (
         f"{market} Chinese car importer electric vehicle distributor dealership "
         f"official website contact {exclude_query}{cutoff_query}"
     ).strip()
+    commercial_query_variants = [
+        broad_business_query,
+        intent_query,
+        china_ev_query,
+        query,
+        f"{market} \"auto trading\" OR \"automobile trading\" car showroom import export official website {exclude_query}{cutoff_query}",
+        f"{market} luxury car importer exporter \"new cars\" \"vehicle sourcing\" official website contact {exclude_query}{cutoff_query}",
+        f"{market} \"authorized dealer\" OR \"exclusive distributor\" OR \"dealer network\" automotive official website {exclude_query}{cutoff_query}",
+    ]
+    if target_type in {"fleet", "buying", "government"}:
+        commercial_query_variants.append(
+            f"{market} fleet procurement corporate vehicles rental limousine automotive dealer official website {exclude_query}{cutoff_query}"
+        )
+    if target_type in {"importer", "distributor"}:
+        commercial_query_variants.append(
+            f"{market} \"import export\" vehicles \"trading LLC\" OR \"trading FZE\" distributor official website {exclude_query}{cutoff_query}"
+        )
+    if city_focus:
+        commercial_query_variants.append(
+            f"{city_focus} car dealer showroom importer WhatsApp email official website {exclude_query}{cutoff_query}"
+        )
 
     raw_results = []
     notice = ""
@@ -3041,15 +3096,23 @@ def discover(params: dict[str, list[str]]) -> dict:
         except (OSError, ValueError, TimeoutError):
             pass
     if source_mode in ("all", "combined", "dealer"):
-        search_variants = [broad_business_query, intent_query, china_ev_query, query]
-        per_query_limit = 10 if source_mode in ("all", "combined") else 14
-        for search_query in search_variants:
+        search_variants = list(dict.fromkeys(commercial_query_variants))
+        if result_limit <= 50:
+            search_variants = search_variants[:6]
+        per_query_limit = 12 if source_mode in ("all", "combined") else 16
+        web_results_by_query: list[list[dict]] = []
+        with ThreadPoolExecutor(max_workers=min(4, len(search_variants))) as executor:
+            futures = [
+                executor.submit(search_web, search_query, per_query_limit, freshness_days)
+                for search_query in search_variants
+            ]
+            for future in as_completed(futures):
+                try:
+                    web_results_by_query.append(future.result())
+                except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                    continue
+        for web_results in web_results_by_query:
             try:
-                web_results = search_web(
-                    search_query,
-                    limit=per_query_limit,
-                    freshness_days=freshness_days,
-                )
                 for item in web_results:
                     origin, source_type = source_details(item["url"])
                     item["origin"] = origin
@@ -3057,7 +3120,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                     item["source_url"] = item["url"]
                     item["customer_website"] = item["url"]
                 raw_results += web_results
-            except (OSError, ValueError, TimeoutError):
+            except (OSError, ValueError, TimeoutError, KeyError):
                 pass
     if source_mode == "dealer":
         try:
@@ -3555,6 +3618,28 @@ def discover(params: dict[str, list[str]]) -> dict:
         notice = f"没有找到可确认发布日期且在最近 {freshness_days} 天内的线索。可以放宽到 30 天，或更换 Instagram、Facebook、LinkedIn 来源。"
     if source_mode == "google" and not leads and not notice:
         notice = "Google Maps 没有返回符合条件的企业，请调整中文目标描述或目标国家。"
+    merged_leads: dict[str, dict] = {}
+    for lead in leads:
+        company_key = re.sub(r"[^a-z0-9]+", "", str(lead.get("company", "")).lower())
+        if not company_key:
+            company_key = normalize_public_url(lead.get("sourceUrl", "")).lower().rstrip("/")
+        existing = merged_leads.get(company_key)
+        if not existing:
+            merged_leads[company_key] = lead
+            continue
+        existing_sources = existing.setdefault("evidenceSources", [])
+        for source in lead.get("evidenceSources", []):
+            if source.get("url") and not any(item.get("url") == source.get("url") for item in existing_sources):
+                existing_sources.append(source)
+        existing["sourceCoverage"]["total"] = len(existing_sources)
+        # Prefer the record with a public contact method or a higher opportunity score.
+        existing_contactable = bool(existing.get("email") or existing.get("phone") or existing.get("whatsapp"))
+        lead_contactable = bool(lead.get("email") or lead.get("phone") or lead.get("whatsapp"))
+        if (lead_contactable and not existing_contactable) or int(lead.get("score", 0)) > int(existing.get("score", 0)):
+            lead["evidenceSources"] = existing_sources
+            lead["sourceCoverage"]["total"] = len(existing_sources)
+            merged_leads[company_key] = lead
+    leads = list(merged_leads.values())
     leads.sort(key=lambda item: (-int(item.get("score", 0)), item.get("company", "")))
     return {"ok": True, "count": len(leads), "leads": leads, "notice": notice}
 
@@ -3635,6 +3720,24 @@ class Handler(SimpleHTTPRequestHandler):
                     "role": user.get("role", "") if user else "",
                 },
             )
+            return
+        if parsed.path == "/api/discovery-sources":
+            if not self.require_auth(api=True):
+                return
+            google_ready = bool(get_google_maps_api_key())
+            self.send_json(200, {
+                "ok": True,
+                "sources": {
+                    "googleMaps": {
+                        "available": google_ready,
+                        "label": "Google Maps Places API",
+                        "message": "已连接官方企业数据" if google_ready else "未配置 API Key，综合搜索将跳过 Google Maps"
+                    },
+                    "web": {"available": True, "label": "Bing + DuckDuckGo + Brave"},
+                    "maps": {"available": True, "label": "OpenStreetMap"},
+                    "social": {"available": True, "label": "公开社媒搜索"}
+                }
+            })
             return
         if parsed.path == "/api/users":
             if not self.require_auth(api=True) or not self.require_admin():

@@ -952,6 +952,29 @@ textarea {
   font-size: 13px;
 }
 
+.source-availability {
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #dce7f2;
+  border-radius: 9px;
+  background: #f6faff;
+  color: #3f6382;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.source-availability.ready {
+  border-color: #cde6d9;
+  background: #f3fbf6;
+  color: #286746;
+}
+
+.source-availability.warning {
+  border-color: #ead8b7;
+  background: #fffaf0;
+  color: #8a6421;
+}
+
 .finder-form-head {
   display: flex;
   align-items: flex-start;
@@ -2397,6 +2420,74 @@ textarea {
   font-size: 12px;
 }
 
+.crm-workbench {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 16px 0 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #fff;
+}
+
+.crm-view-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.crm-view-tabs button {
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #56616d;
+  font-size: 11px;
+}
+
+.crm-view-tabs button span {
+  display: inline-grid;
+  min-width: 18px;
+  place-items: center;
+  margin-left: 4px;
+  border-radius: 999px;
+  color: #77808d;
+  font-size: 10px;
+}
+
+.crm-view-tabs button.active {
+  border-color: #d7c08a;
+  background: #fbf6eb;
+  color: #8a641f;
+  font-weight: 750;
+}
+
+.crm-workbench > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
+.crm-follow-status {
+  display: inline-flex;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #eef3f8;
+  color: #53677a;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.crm-follow-status.due { background: #fff4df; color: #9a661f; }
+.crm-follow-status.overdue { background: #fff0ee; color: #a33c32; }
+.crm-follow-status.missing { background: #f3f4f6; color: #6b7280; }
+.crm-follow-status.complete { background: #edf8f2; color: #247251; }
+
 .crm-next {
   min-width: 220px;
 }
@@ -3066,9 +3157,14 @@ tbody tr:last-child td {
 
   .review-title-row,
   .evidence-heading,
+  .crm-workbench,
   .section-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .crm-workbench > p {
+    text-align: left;
   }
 
   .section-head > .primary {

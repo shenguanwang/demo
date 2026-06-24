@@ -142,6 +142,7 @@ let discoveryJobsTimer = null;
 let discoveryJobsExpanded = false;
 let reviewSelectedIds = new Set();
 let currentSession = null;
+let crmViewFilter = "all";
 
 const productProfiles = {
   "问界 M9": {
@@ -1121,7 +1122,37 @@ function deleteReviewLeads(ids) {
 }
 
 function renderCrm() {
-  $("#crmRows").innerHTML = customers.length ? customers.map((lead, index) => `
+  const today = new Date().toISOString().slice(0, 10);
+  const activeCustomers = customers.filter((lead) => !["已成交", "已流失"].includes(lead.stage));
+  const dueCustomers = activeCustomers.filter((lead) => !lead.nextFollowAt || lead.nextFollowAt <= today);
+  const overdueCustomers = activeCustomers.filter((lead) => lead.nextFollowAt && lead.nextFollowAt < today);
+  const missingCustomers = activeCustomers.filter((lead) => !lead.nextFollowAt);
+  const priorityCustomers = customers.filter((lead) => ["A", "B"].includes(lead.scoreTier));
+  const counts = { all: customers.length, due: dueCustomers.length, overdue: overdueCustomers.length, missing: missingCustomers.length, priority: priorityCustomers.length };
+  const tabs = $("#crmViewTabs");
+  if (tabs) {
+    Object.entries(counts).forEach(([key, count]) => {
+      const badge = $(`#crmCount${key[0].toUpperCase()}${key.slice(1)}`);
+      if (badge) badge.textContent = count;
+    });
+    Array.from(tabs.querySelectorAll("[data-crm-filter]")).forEach((button) => button.classList.toggle("active", button.dataset.crmFilter === crmViewFilter));
+  }
+  const filteredCustomers = customers.map((lead, index) => ({ lead, index })).filter(({ lead }) => {
+    if (crmViewFilter === "due") return !["已成交", "已流失"].includes(lead.stage) && (!lead.nextFollowAt || lead.nextFollowAt <= today);
+    if (crmViewFilter === "overdue") return !["已成交", "已流失"].includes(lead.stage) && lead.nextFollowAt && lead.nextFollowAt < today;
+    if (crmViewFilter === "missing") return !["已成交", "已流失"].includes(lead.stage) && !lead.nextFollowAt;
+    if (crmViewFilter === "priority") return ["A", "B"].includes(lead.scoreTier);
+    return true;
+  });
+  const viewHint = $("#crmViewHint");
+  if (viewHint) viewHint.textContent = {
+    all: `显示全部 ${customers.length} 位正式客户。`,
+    due: `优先处理今天需要推进的 ${dueCustomers.length} 位客户。`,
+    overdue: `共有 ${overdueCustomers.length} 位客户已超过计划跟进日期。`,
+    missing: `共有 ${missingCustomers.length} 位客户尚未设定下一次跟进日期。`,
+    priority: `显示评分为 A / B 的 ${priorityCustomers.length} 位高价值客户。`
+  }[crmViewFilter];
+  $("#crmRows").innerHTML = filteredCustomers.length ? filteredCustomers.map(({ lead, index }) => `
     <tr>
       <td><strong>${escapeHtml(lead.company)}</strong><br><span>${escapeHtml(lead.contactName || lead.email || lead.phone || "暂无联系人")}</span></td>
       <td>${escapeHtml(lead.country)}<br>${escapeHtml(lead.city)}</td>
@@ -1134,6 +1165,7 @@ function renderCrm() {
         </select>
       </td>
       <td><input class="crm-next" data-crm-next="${index}" value="${escapeHtml(lead.next || "")}" aria-label="下一步动作"></td>
+      <td>${renderCrmFollowStatus(lead, today)}</td>
       <td>
         <div class="crm-actions">
           <button type="button" data-crm-action="email" data-index="${index}">写开发信</button>
@@ -1142,11 +1174,19 @@ function renderCrm() {
         </div>
       </td>
     </tr>
-  `).join("") : `<tr><td colspan="8">暂无正式客户。请先完成全网核验，再在线索审核中点击“通过”。</td></tr>`;
+  `).join("") : `<tr><td colspan="9">当前视图没有符合条件的客户。</td></tr>`;
   $("#heroPending").textContent = reviewLeads.length;
   $("#heroCustomers").textContent = customers.length;
   $("#heroGradeA").textContent = customers.filter((lead) => lead.score >= 80).length;
   renderLeadSelect();
+}
+
+function renderCrmFollowStatus(lead, today) {
+  if (["已成交", "已流失"].includes(lead.stage)) return `<span class="crm-follow-status complete">${escapeHtml(lead.stage)}</span>`;
+  if (!lead.nextFollowAt) return `<span class="crm-follow-status missing">未设置</span>`;
+  if (lead.nextFollowAt < today) return `<span class="crm-follow-status overdue">已逾期 ${escapeHtml(lead.nextFollowAt)}</span>`;
+  if (lead.nextFollowAt === today) return `<span class="crm-follow-status due">今天 ${escapeHtml(lead.nextFollowTime || "")}</span>`;
+  return `<span class="crm-follow-status planned">${escapeHtml(lead.nextFollowAt)}</span>`;
 }
 
 function renderLeadSelect() {
@@ -2459,6 +2499,7 @@ async function runCloudDiscovery(data, words, onProgress) {
       sourceMode: data.sourceMode,
       accountScope: data.accountScope,
       freshness: data.freshness,
+      resultLimit: data.searchDepth === "deep" ? 80 : 50,
       keywords: words.join(" | ")
     })
   });
@@ -2520,6 +2561,25 @@ async function runCloudDiscovery(data, words, onProgress) {
   const timeoutError = new Error("页面等待已超过 12 分钟，任务仍在云端后台运行。");
   timeoutError.code = "JOB_WAIT_TIMEOUT";
   throw timeoutError;
+}
+
+async function loadDiscoverySourceStatus() {
+  const target = $("#sourceAvailability");
+  if (!target) return;
+  try {
+    const response = await apiFetch("/api/discovery-sources", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    const google = result.sources?.googleMaps;
+    target.classList.toggle("warning", !google?.available);
+    target.classList.toggle("ready", Boolean(google?.available));
+    target.textContent = google?.available
+      ? "数据源：Google Maps Places、Bing、DuckDuckGo、Brave、OpenStreetMap、官网/目录与公开社媒均可用。"
+      : "数据源：Bing、DuckDuckGo、Brave、OpenStreetMap、官网/目录与公开社媒可用；Google Maps 需配置官方 Places API Key。";
+  } catch {
+    target.classList.add("warning");
+    target.textContent = "暂时无法读取来源状态；自动获客仍会使用可访问的公开来源。";
+  }
 }
 
 function bindForms() {
@@ -3006,6 +3066,13 @@ function bindForms() {
     }
   });
 
+  $("#crmViewTabs")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-crm-filter]");
+    if (!button) return;
+    crmViewFilter = button.dataset.crmFilter || "all";
+    renderCrm();
+  });
+
   $("#followTasks").addEventListener("click", (event) => {
     const button = event.target.closest("[data-follow-action]");
     if (!button) return;
@@ -3211,6 +3278,7 @@ async function init() {
     }
   }, 30_000);
   updateSocialProspectingQueries();
+  loadDiscoverySourceStatus();
   importSocialCaptures();
   setInterval(importSocialCaptures, 4_000);
   showRequestedSection();

@@ -216,6 +216,14 @@
               <option value="30">最近 30 天</option>
             </select>
           </label>
+          <label>搜索强度
+            <select name="searchDepth">
+              <option value="standard">标准：覆盖核心商业词（更快）</option>
+              <option value="deep">深度：覆盖进口、贸易、授权经销、车队采购词组（更多结果）</option>
+            </select>
+          </label>
+          <p class="helper">深度搜索会并行检索更多公开商业词组，再从官网、地图和公开社媒结果中去重与提取联系方式；仅采集公开页面信息。</p>
+          <p class="source-availability" id="sourceAvailability" aria-live="polite">正在检查公开数据源状态…</p>
           <p class="helper">选择 3 天或 7 天时，只保留能确认发布日期的新消息。OpenStreetMap 是长期商业地点，不属于新闻或社媒消息，因此不适用时间筛选。</p>
           <p class="helper">地图适合找实体展厅；官网和目录适合找进口商、经销集团；社媒适合查看客户近期经营动态。社媒公开结果数量取决于平台是否允许搜索引擎收录。</p>
           <button class="primary" type="submit">一键获客到待审核</button>
@@ -486,6 +494,16 @@
         <button class="ghost" id="exportData" type="button">导出完整备份 JSON</button>
         <button class="ghost" id="clearSavedData" type="button">清空本机保存数据</button>
       </div>
+      <div class="crm-workbench" aria-label="客户池工作视图">
+        <div class="crm-view-tabs" id="crmViewTabs">
+          <button class="active" type="button" data-crm-filter="all">全部客户 <span id="crmCountAll">0</span></button>
+          <button type="button" data-crm-filter="due">今日待跟进 <span id="crmCountDue">0</span></button>
+          <button type="button" data-crm-filter="overdue">已逾期 <span id="crmCountOverdue">0</span></button>
+          <button type="button" data-crm-filter="missing">未设下次跟进 <span id="crmCountMissing">0</span></button>
+          <button type="button" data-crm-filter="priority">A / B 级优先 <span id="crmCountPriority">0</span></button>
+        </div>
+        <p id="crmViewHint">显示全部正式客户。</p>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -497,6 +515,7 @@
               <th>评分</th>
               <th>阶段</th>
               <th>下一步</th>
+              <th>跟进状态</th>
               <th>操作</th>
             </tr>
           </thead>
