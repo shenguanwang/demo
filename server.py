@@ -4,6 +4,7 @@ import html
 import binascii
 import hashlib
 import hmac
+import http.client
 import json
 import os
 import re
@@ -1414,57 +1415,69 @@ def read_social_profile(
 def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
     api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
     if api_key:
-        params = {
-            "part": "snippet",
-            "type": "channel",
-            "q": query,
-            "maxResults": str(max(1, min(limit, 50))),
-            "key": api_key,
-        }
-        request = urllib.request.Request(
-            "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode(params),
-            headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
-        )
-        with urllib.request.urlopen(request, timeout=20) as response:
-            payload = json.loads(response.read().decode("utf-8", errors="ignore"))
-        channel_ids = [
-            (item.get("id") or {}).get("channelId")
-            or (item.get("snippet") or {}).get("channelId")
-            for item in payload.get("items", [])
-        ]
-        channel_ids = [channel_id for channel_id in channel_ids if channel_id]
-        details_by_id = {}
-        if channel_ids:
-            detail_params = {
-                "part": "snippet,brandingSettings",
-                "id": ",".join(channel_ids),
+        per_type_limit = max(1, min(limit, 50))
+        search_items = []
+        for result_type in ("channel", "video"):
+            params = {
+                "part": "snippet",
+                "type": result_type,
+                "q": query,
+                "maxResults": str(per_type_limit),
+                "fields": "items(id/channelId,id/videoId,snippet(channelId,channelTitle,title,description,publishedAt))",
                 "key": api_key,
             }
-            detail_request = urllib.request.Request(
-                "https://www.googleapis.com/youtube/v3/channels?" + urllib.parse.urlencode(detail_params),
+            request = urllib.request.Request(
+                "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode(params),
                 headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
             )
             try:
-                with urllib.request.urlopen(detail_request, timeout=20) as response:
-                    detail_payload = json.loads(response.read().decode("utf-8", errors="ignore"))
-                details_by_id = {
-                    item.get("id", ""): item
-                    for item in detail_payload.get("items", [])
-                    if item.get("id")
+                with urllib.request.urlopen(request, timeout=20) as response:
+                    payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+                search_items.extend(payload.get("items", []))
+            except (OSError, ValueError, TimeoutError, http.client.HTTPException, json.JSONDecodeError):
+                continue
+        channel_ids = [
+            (item.get("id") or {}).get("channelId")
+            or (item.get("snippet") or {}).get("channelId")
+            for item in search_items
+        ]
+        channel_ids = list(dict.fromkeys(channel_id for channel_id in channel_ids if channel_id))
+        details_by_id = {}
+        if channel_ids:
+            for start in range(0, len(channel_ids), 50):
+                detail_params = {
+                    "part": "snippet,brandingSettings",
+                    "id": ",".join(channel_ids[start:start + 50]),
+                    "fields": "items(id,snippet(title,description,customUrl),brandingSettings(channel(country)))",
+                    "key": api_key,
                 }
-            except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
-                # Channel enrichment should not discard otherwise valid search results.
-                details_by_id = {}
+                detail_request = urllib.request.Request(
+                    "https://www.googleapis.com/youtube/v3/channels?" + urllib.parse.urlencode(detail_params),
+                    headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
+                )
+                try:
+                    with urllib.request.urlopen(detail_request, timeout=20) as response:
+                        detail_payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+                    details_by_id.update({
+                        item.get("id", ""): item
+                        for item in detail_payload.get("items", [])
+                        if item.get("id")
+                    })
+                except (OSError, ValueError, TimeoutError, http.client.HTTPException, json.JSONDecodeError):
+                    # Channel enrichment should not discard otherwise valid search results.
+                    continue
         results = []
-        for item in payload.get("items", []):
+        seen_channel_ids = set()
+        for item in search_items:
             snippet = item.get("snippet") or {}
             channel_id = (
                 (item.get("id") or {}).get("channelId")
                 or snippet.get("channelId")
                 or ""
             )
-            if not channel_id:
+            if not channel_id or channel_id in seen_channel_ids:
                 continue
+            seen_channel_ids.add(channel_id)
             detail = details_by_id.get(channel_id, {})
             detail_snippet = detail.get("snippet") or {}
             branding = detail.get("brandingSettings") or {}
@@ -1486,7 +1499,7 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
                     "apiSource": "YouTube Data API v3",
                 }
             )
-            if len(results) >= limit:
+            if len(results) >= per_type_limit * 2:
                 break
         return results
 
@@ -3360,17 +3373,17 @@ def discover(params: dict[str, list[str]]) -> dict:
             raw_results.append(item)
     if source_mode in ("all", "youtube", "social"):
         youtube_searches = []
+        city = next(
+            (cities[0] for key, cities in COUNTRY_HINTS.items() if key.lower() in country.lower()),
+            country.split(" ")[0],
+        )
         if account_scope in ("company", "both"):
             youtube_searches.append(
-                (f"{keywords} {company_query}".strip(), "公司账号")
+                (f"{city} car dealer", "公司账号")
             )
         if account_scope in ("person", "both"):
-            city = next(
-                (cities[0] for key, cities in COUNTRY_HINTS.items() if key.lower() in country.lower()),
-                country.split(" ")[0],
-            )
             youtube_searches.append(
-                (f"{city} car dealer owner manager channel", "个人/经营者账号（待核验）")
+                (f"{city} car dealer owner manager", "个人/经营者账号（待核验）")
             )
         for youtube_query, youtube_account_type in youtube_searches:
             try:
@@ -3378,7 +3391,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
                 youtube_items = []
             for item in youtube_items:
-                location_text = f"{item.get('title', '')} {item.get('snippet', '')}".lower()
+                location_text = f"{item.get('title', '')} {item.get('snippet', '')} {item.get('country', '')}".lower()
                 location_terms = {
                     country.split(" ")[0].lower(),
                     "emirates" if "UAE" in country else "",
@@ -3394,14 +3407,24 @@ def discover(params: dict[str, list[str]]) -> dict:
                     "YouTube",
                     youtube_account_type,
                 )
-                if not any(term and term in location_text for term in location_terms) and not youtube_analysis.get("isCommercial"):
+                youtube_discovery_candidate = bool(re.search(
+                    r"\b(car|cars|dealer|dealership|motors|automotive|vehicle|vehicles|showroom|auto)\b",
+                    f"{item.get('title', '')} {item.get('snippet', '')}",
+                    re.I,
+                ))
+                if (
+                    not any(term and term in location_text for term in location_terms)
+                    and not youtube_analysis.get("isCommercial")
+                    and not youtube_discovery_candidate
+                ):
                     continue
                 item["origin"] = "YouTube"
-                item["source_type"] = "YouTube 公开频道"
+                item["source_type"] = "YouTube 公开频道" if youtube_analysis.get("isCommercial") else "YouTube 公开频道（待核验）"
                 item["source_url"] = item["url"]
                 item["customer_website"] = ""
                 item["account_type"] = youtube_account_type
                 item["social_analysis"] = youtube_analysis
+                item["youtube_discovery_candidate"] = youtube_discovery_candidate
                 raw_results.append(item)
     leads = []
     seen_sources = set()
@@ -3466,7 +3489,11 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item.get("origin", ""),
                 item.get("account_type", ""),
             )
-            if not social_analysis.get("isCommercial"):
+            allow_youtube_discovery_candidate = (
+                item.get("origin") == "YouTube"
+                and bool(item.get("youtube_discovery_candidate"))
+            )
+            if not social_analysis.get("isCommercial") and not allow_youtube_discovery_candidate:
                 continue
             social_search_stats["acceptedResults"] += 1
         if not is_google_places and item.get("origin") != "OpenStreetMap":
