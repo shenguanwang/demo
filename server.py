@@ -23,10 +23,30 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 
 
+ROOT = Path(__file__).resolve().parent
+
+
+def load_local_env() -> None:
+    env_file = ROOT / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text(encoding="utf-8").splitlines():
+        value = line.strip()
+        if not value or value.startswith("#") or "=" not in value:
+            continue
+        key, raw = value.split("=", 1)
+        key = key.strip().lstrip("\ufeff")
+        raw = raw.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = raw
+
+
+load_local_env()
+
+
 PORT = int(os.environ.get("PORT") or os.environ.get("LEAD_TOOL_PORT", "8815"))
 HOST = os.environ.get("LEAD_TOOL_HOST", "127.0.0.1")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
-ROOT = Path(__file__).resolve().parent
 GOOGLE_MAPS_KEY_FILE = ROOT / "google_maps_api_key.txt"
 SOCIAL_CAPTURE_DIR = ROOT / "social-captures"
 SOCIAL_CAPTURE_FILE = SOCIAL_CAPTURE_DIR / "captures.json"
@@ -1392,6 +1412,45 @@ def read_social_profile(
 
 
 def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
+    api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
+    if api_key:
+        params = {
+            "part": "snippet",
+            "type": "channel",
+            "q": query,
+            "maxResults": str(max(1, min(limit, 10))),
+            "key": api_key,
+        }
+        request = urllib.request.Request(
+            "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode(params),
+            headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
+        )
+        with urllib.request.urlopen(request, timeout=20) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+        results = []
+        for item in payload.get("items", []):
+            snippet = item.get("snippet") or {}
+            channel_id = (
+                (item.get("id") or {}).get("channelId")
+                or snippet.get("channelId")
+                or ""
+            )
+            if not channel_id:
+                continue
+            results.append(
+                {
+                    "title": snippet.get("channelTitle") or snippet.get("title") or "YouTube channel",
+                    "url": f"https://www.youtube.com/channel/{channel_id}",
+                    "snippet": snippet.get("description", ""),
+                    "handle": snippet.get("publishedAt", ""),
+                    "channelId": channel_id,
+                    "apiSource": "YouTube Data API v3",
+                }
+            )
+            if len(results) >= limit:
+                break
+        return results
+
     url = "https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": query})
     page, _ = fetch_document(url, timeout=25)
     match = re.search(r"var ytInitialData = (\{.*?\});</script>", page, flags=re.S)
@@ -3764,6 +3823,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_auth(api=True):
                 return
             google_ready = bool(get_google_maps_api_key())
+            youtube_ready = bool(os.environ.get("YOUTUBE_API_KEY", "").strip())
             self.send_json(200, {
                 "ok": True,
                 "sources": {
@@ -3774,6 +3834,11 @@ class Handler(SimpleHTTPRequestHandler):
                     },
                     "web": {"available": True, "label": "Bing + DuckDuckGo + Brave"},
                     "maps": {"available": True, "label": "OpenStreetMap"},
+                    "youtube": {
+                        "available": youtube_ready,
+                        "label": "YouTube Data API v3",
+                        "message": "已连接 YouTube 官方搜索 API" if youtube_ready else "未配置 YOUTUBE_API_KEY，将使用公开页面兜底搜索"
+                    },
                     "social": {"available": True, "label": "公开社媒搜索"}
                 }
             })
