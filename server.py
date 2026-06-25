@@ -3343,8 +3343,8 @@ def discover(params: dict[str, list[str]]) -> dict:
     city_focus = (params.get("cityFocus") or [""])[0].strip()
     customer_types = (params.get("customerTypes") or [""])[0].strip()
     exclusions = (params.get("exclusions") or [""])[0].strip()
-    result_limit_value = (params.get("resultLimit") or ["90"])[0]
-    result_limit = max(10, min(90, int(result_limit_value) if result_limit_value.isdigit() else 90))
+    result_limit_value = (params.get("resultLimit") or ["40"])[0]
+    result_limit = max(10, min(40, int(result_limit_value) if result_limit_value.isdigit() else 40))
     deadline = discovery_deadline()
     query_budget = discovery_query_budget(source_mode)
     verification_level = (params.get("verificationLevel") or ["strict"])[0]
