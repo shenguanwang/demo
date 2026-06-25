@@ -3691,7 +3691,10 @@ def discover(params: dict[str, list[str]]) -> dict:
     excluded_brand_bound_dealers = 0
     processed_candidates = 0
     for item in raw_results:
-        if not has_discovery_budget(deadline, 6) and (leads or processed_candidates >= 20):
+        if (
+            not has_discovery_budget(deadline, 6)
+            and (len(leads) >= min(10, result_limit) or processed_candidates >= 35)
+        ):
             notice = (notice + " " if notice else "") + "本次云端搜索已达到稳定运行时间预算，已先返回当前可用线索；如需更多结果，请按单一来源继续补充。"
             break
         processed_candidates += 1
