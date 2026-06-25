@@ -2545,7 +2545,7 @@ async function runCloudDiscovery(data, words, onProgress) {
       sourceMode: data.sourceMode,
       accountScope: data.accountScope,
       freshness: data.freshness,
-      resultLimit: data.searchDepth === "deep" ? 80 : 50,
+      resultLimit: 70,
       keywords: words.join(" | ")
     })
   });

@@ -945,8 +945,12 @@ def resume_interrupted_discovery_jobs() -> int:
 
 
 COUNTRY_HINTS = {
-    "UAE": ("Dubai", "Jebel Ali", "Abu Dhabi", "Sharjah"),
-    "Saudi": ("Riyadh", "Jeddah", "Dammam"),
+    "UAE": (
+        "Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Ras Al Khaimah",
+        "Fujairah", "Umm Al Quwain", "Al Ain", "Jebel Ali", "Mussafah",
+        "Deira", "Al Quoz", "Dubai Investment Park", "Jumeirah",
+    ),
+    "Saudi": ("Riyadh", "Jeddah", "Dammam", "Khobar", "Mecca", "Medina"),
     "Kazakhstan": ("Almaty", "Astana", "Aktau"),
     "Russia": ("Moscow", "St. Petersburg"),
     "Qatar": ("Doha",),
@@ -954,6 +958,49 @@ COUNTRY_HINTS = {
     "Uzbekistan": ("Tashkent",),
     "Azerbaijan": ("Baku",),
 }
+
+DISCOVERY_KEYWORD_TERMS = (
+    "car dealer",
+    "auto dealer",
+    "automotive dealer",
+    "car showroom",
+    "auto showroom",
+    "motors",
+    "motor company",
+    "vehicle dealer",
+    "vehicle showroom",
+    "used cars",
+    "new cars",
+    "luxury cars",
+    "electric vehicles",
+    "EV dealer",
+    "Chinese cars",
+    "Chinese EV",
+    "SUV dealer",
+    "import cars",
+    "car importer",
+    "vehicle importer",
+    "auto trading",
+    "automotive trading",
+    "general trading cars",
+    "parallel import cars",
+    "car export",
+    "vehicle export",
+    "car distributor",
+    "vehicle distributor",
+    "authorized dealer",
+    "exclusive distributor",
+    "dealer network",
+    "fleet vehicles",
+    "fleet sales",
+    "corporate fleet",
+    "car rental fleet",
+    "chauffeur fleet",
+    "commercial vehicles",
+    "vehicle procurement",
+    "auto spare parts",
+    "car service center",
+)
 
 CITY_COORDS = {
     "UAE": ("Dubai", 25.2048, 55.2708),
@@ -965,6 +1012,37 @@ CITY_COORDS = {
     "Uzbekistan": ("Tashkent", 41.2995, 69.2401),
     "Azerbaijan": ("Baku", 40.4093, 49.8671),
 }
+
+
+def discovery_cities(country: str, city_focus: str = "") -> list[str]:
+    cities = [city_focus.strip()] if city_focus.strip() else []
+    for key, hints in COUNTRY_HINTS.items():
+        if key.lower() in country.lower():
+            cities.extend(hints)
+            break
+    cities.append(country.split(" ")[0])
+    return list(dict.fromkeys(city for city in cities if city))
+
+
+def city_keyword_queries(cities: list[str], terms: tuple[str, ...], suffix: str = "") -> list[str]:
+    queries = []
+    suffix = suffix.strip()
+    for index, term in enumerate(terms):
+        if not cities:
+            break
+        city = cities[index % len(cities)]
+        query = f"{city} {term}"
+        if suffix:
+            query = f"{query} {suffix}"
+        queries.append(query.strip())
+    for term in terms:
+        for city in cities:
+            query = f"{city} {term}"
+            if suffix:
+                query = f"{query} {suffix}"
+            queries.append(query.strip())
+    return list(dict.fromkeys(queries))
+
 
 TARGET_PROFILES = {
     "importer": {
@@ -2459,11 +2537,11 @@ def get_google_maps_api_key() -> str:
     return ""
 
 
-def search_google_places(country: str, query_terms: str, limit: int = 12) -> list[dict]:
+def search_google_places(country: str, query_terms: str, limit: int = 12, city: str = "") -> list[dict]:
     api_key = get_google_maps_api_key()
     if not api_key:
         raise RuntimeError("Google Maps API 密钥未配置")
-    city = next(
+    city = city or next(
         (value[0] for key, value in CITY_COORDS.items() if key.lower() in country.lower()),
         CITY_COORDS["UAE"][0],
     )
@@ -3136,8 +3214,8 @@ def discover(params: dict[str, list[str]]) -> dict:
     city_focus = (params.get("cityFocus") or [""])[0].strip()
     customer_types = (params.get("customerTypes") or [""])[0].strip()
     exclusions = (params.get("exclusions") or [""])[0].strip()
-    result_limit_value = (params.get("resultLimit") or ["40"])[0]
-    result_limit = max(10, min(90, int(result_limit_value) if result_limit_value.isdigit() else 40))
+    result_limit_value = (params.get("resultLimit") or ["70"])[0]
+    result_limit = max(10, min(90, int(result_limit_value) if result_limit_value.isdigit() else 70))
     verification_level = (params.get("verificationLevel") or ["strict"])[0]
     min_sources_value = (params.get("minSources") or ["2"])[0]
     min_sources = max(1, min(3, int(min_sources_value) if min_sources_value.isdigit() else 2))
@@ -3157,6 +3235,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         f"{city_focus} {keywords} {customer_types} {target_profile['query']} "
         f"official website contact email WhatsApp {exclude_query}{cutoff_query}"
     ).strip()
+    cities = discovery_cities(country, city_focus)
     market = city_focus or country.split(" ")[0]
     broad_business_query = (
         f"{market} automotive importer vehicle distributor car dealer showroom "
@@ -3197,6 +3276,9 @@ def discover(params: dict[str, list[str]]) -> dict:
         commercial_query_variants.append(
             f"{city_focus} car dealer showroom importer WhatsApp email official website {exclude_query}{cutoff_query}"
         )
+    commercial_query_variants.extend(
+        city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, f"official website contact {exclude_query}{cutoff_query}")
+    )
 
     raw_results = []
     notice = ""
@@ -3218,11 +3300,14 @@ def discover(params: dict[str, list[str]]) -> dict:
         not freshness_days or source_mode == "all"
     ):
         try:
-            raw_results += search_google_places(
-                country,
-                "car dealer automotive importer vehicle distributor electric vehicle showroom",
-                limit=min(result_limit, 20 if source_mode in ("all", "combined") else 30),
-            )
+            google_city_limit = min(12, max(4, result_limit // max(1, len(cities))))
+            for city in cities:
+                raw_results += search_google_places(
+                    country,
+                    "car dealer automotive importer vehicle distributor electric vehicle showroom",
+                    limit=google_city_limit,
+                    city=city,
+                )
         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
             if source_mode == "google":
                 notice = f"{exc}。请在本机配置密钥后重试。"
@@ -3241,8 +3326,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             pass
     if source_mode in ("all", "combined", "dealer"):
         search_variants = list(dict.fromkeys(commercial_query_variants))
-        if result_limit <= 50:
-            search_variants = search_variants[:6]
+        max_web_queries = 72 if source_mode in ("all", "combined") else 96
+        search_variants = search_variants[:max_web_queries]
         per_query_limit = 12 if source_mode in ("all", "combined") else 16
         web_results_by_query: list[list[dict]] = []
         with ThreadPoolExecutor(max_workers=min(4, len(search_variants))) as executor:
@@ -3300,7 +3385,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         "officialWebsiteProfiles": 0,
     }
     reverse_platforms = set(selected_platforms)
-    if source_mode in ("all", "social", "youtube"):
+    if source_mode in ("all", "combined", "social", "youtube"):
         reverse_platforms.add("youtube")
     if reverse_platforms:
         website_social_results = social_accounts_from_business_websites(
@@ -3371,7 +3456,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["account_type"],
             )
             raw_results.append(item)
-    if source_mode in ("all", "youtube", "social"):
+    if source_mode in ("all", "combined", "youtube", "social"):
         youtube_searches = []
         city = next(
             (cities[0] for key, cities in COUNTRY_HINTS.items() if key.lower() in country.lower()),
@@ -3385,9 +3470,22 @@ def discover(params: dict[str, list[str]]) -> dict:
             youtube_searches.append(
                 (f"{city} car dealer owner manager", "个人/经营者账号（待核验）")
             )
+        youtube_searches = []
+        if account_scope in ("company", "both"):
+            youtube_searches.extend(
+                (query, "company account")
+                for query in city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS)
+            )
+        if account_scope in ("person", "both"):
+            youtube_searches.extend(
+                (query, "owner or manager account")
+                for query in city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, "owner manager founder")
+            )
+        max_youtube_queries = 45 if source_mode == "youtube" else 32
+        youtube_searches = list(dict.fromkeys(youtube_searches))[:max_youtube_queries]
         for youtube_query, youtube_account_type in youtube_searches:
             try:
-                youtube_items = search_youtube_channels(youtube_query, limit=50)
+                youtube_items = search_youtube_channels(youtube_query, limit=25)
             except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
                 youtube_items = []
             for item in youtube_items:
@@ -3412,6 +3510,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                     f"{item.get('title', '')} {item.get('snippet', '')}",
                     re.I,
                 ))
+                youtube_discovery_candidate = True
                 if (
                     not any(term and term in location_text for term in location_terms)
                     and not youtube_analysis.get("isCommercial")
@@ -3452,11 +3551,11 @@ def discover(params: dict[str, list[str]]) -> dict:
         ):
             continue
         allow_recent_content = bool(freshness_days) or target_type in ("buying", "government", "individual")
-        if any(word in title_lower for word in BLOCKED_TITLE_WORDS) and not allow_recent_content:
+        if not is_social_result and any(word in title_lower for word in BLOCKED_TITLE_WORDS) and not allow_recent_content:
             continue
-        if any(part in path_lower for part in BLOCKED_PATH_PARTS) and not allow_recent_content:
+        if not is_social_result and any(part in path_lower for part in BLOCKED_PATH_PARTS) and not allow_recent_content:
             continue
-        if re.search(r"/20\d{2}/\d{1,2}/\d{1,2}/", path_lower) and not allow_recent_content:
+        if not is_social_result and re.search(r"/20\d{2}/\d{1,2}/\d{1,2}/", path_lower) and not allow_recent_content:
             continue
         source_identity = (
             item.get("customer_website")
@@ -3480,7 +3579,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 pass
 
         combined = f"{item['title']} {item['snippet']} {page_text}"
-        if is_brand_bound_chinese_dealer(combined):
+        if not is_social_result and is_brand_bound_chinese_dealer(combined):
             excluded_brand_bound_dealers += 1
             continue
         if is_social_result:
@@ -3493,10 +3592,8 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item.get("origin") == "YouTube"
                 and bool(item.get("youtube_discovery_candidate"))
             )
-            if not social_analysis.get("isCommercial") and not allow_youtube_discovery_candidate:
-                continue
             social_search_stats["acceptedResults"] += 1
-        if not is_google_places and item.get("origin") != "OpenStreetMap":
+        if not is_google_places and item.get("origin") != "OpenStreetMap" and not is_social_result:
             business_match = re.search(
                 r"\b(dealer|dealership|showroom|importer|exporter|trading|distributor|"
                 r"cars|motors|automotive|fleet|rental|procurement|tender|buyer|rfq|"
@@ -3512,7 +3609,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 re.I,
             ):
                 continue
-        if not re.search(
+        if not is_social_result and not re.search(
             r"\b(dealer|dealership|showroom|importer|exporter|trading|cars|motors|"
             r"vehicles?|automotive|ev|electric|fleet|rental|procurement|tender|buyer|rfq|wanted|"
             r"owner|founder|general manager|import manager|fleet manager|sales director)\b",
