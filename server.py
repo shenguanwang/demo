@@ -1008,6 +1008,11 @@ OBVIOUS_IRRELEVANT_LEAD_PATTERNS = (
     r"\b(tax free|duty free|excise tax|corporate tax|customs clearance|customs broker)\b",
     r"\b(company formation|business setup|free zone license|trade license|pro services|visa services)\b",
     r"\b(accounting|bookkeeping|audit firm|auditing|attestation|document clearing)\b",
+    r"\b(auto repair|car repair|vehicle repair|repair shop|repair workshop|auto workshop|car workshop)\b",
+    r"\b(service center|service centre|maintenance|mechanic|garage|body shop|paint shop|collision repair)\b",
+    r"\b(car wash|auto wash|detailing|car detailing|window tint|wrapping|car wrap|ceramic coating)\b",
+    r"\b(tyre|tyres|tire|tires|battery replacement|oil change|spare parts|auto parts|car parts)\b",
+    r"(维修|修理|保养|汽修|洗车|汽车美容|贴膜|轮胎|配件|钣金|喷漆)",
 )
 
 CITY_COORDS = {
@@ -1057,6 +1062,36 @@ def is_obviously_irrelevant_lead(text: str) -> bool:
         re.search(pattern, text, re.I)
         for pattern in OBVIOUS_IRRELEVANT_LEAD_PATTERNS
     )
+
+
+def discovery_source_bucket(item: dict) -> str:
+    origin = str(item.get("origin") or "").lower()
+    source_type = str(item.get("source_type") or "").lower()
+    url = str(item.get("url") or item.get("source_url") or "").lower()
+    value = f"{origin} {source_type} {url}"
+    if "google" in value:
+        return "google"
+    if "openstreetmap" in value or "osm" in value:
+        return "osm"
+    if any(name in value for name in (
+        "youtube", "youtu.be", "instagram", "facebook", "tiktok", "linkedin",
+        "telegram", "t.me", "twitter", "x.com", "threads", "pinterest", "reddit", "vk.com",
+    )):
+        return "social"
+    return "web"
+
+
+def balance_discovery_sources(items: list[dict]) -> list[dict]:
+    buckets: dict[str, list[dict]] = {"google": [], "osm": [], "web": [], "social": []}
+    for item in items:
+        buckets.setdefault(discovery_source_bucket(item), []).append(item)
+    order = ["google", "web", "social", "osm"]
+    balanced = []
+    while any(buckets.get(key) for key in order):
+        for key in order:
+            if buckets.get(key):
+                balanced.append(buckets[key].pop(0))
+    return balanced
 
 
 TARGET_PROFILES = {
@@ -3284,8 +3319,8 @@ def discover(params: dict[str, list[str]]) -> dict:
     city_focus = (params.get("cityFocus") or [""])[0].strip()
     customer_types = (params.get("customerTypes") or [""])[0].strip()
     exclusions = (params.get("exclusions") or [""])[0].strip()
-    result_limit_value = (params.get("resultLimit") or ["70"])[0]
-    result_limit = max(10, min(90, int(result_limit_value) if result_limit_value.isdigit() else 70))
+    result_limit_value = (params.get("resultLimit") or ["90"])[0]
+    result_limit = max(10, min(90, int(result_limit_value) if result_limit_value.isdigit() else 90))
     verification_level = (params.get("verificationLevel") or ["strict"])[0]
     min_sources_value = (params.get("minSources") or ["2"])[0]
     min_sources = max(1, min(3, int(min_sources_value) if min_sources_value.isdigit() else 2))
@@ -3370,7 +3405,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         not freshness_days or source_mode == "all"
     ):
         try:
-            google_city_limit = min(12, max(4, result_limit // max(1, len(cities))))
+            google_city_limit = min(6, max(3, result_limit // max(2, len(cities) * 2)))
             for city in cities:
                 raw_results += search_google_places(
                     country,
@@ -3448,7 +3483,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     }
     selected_platforms = (
         list(platform_queries)
-        if source_mode in ("all", "social")
+        if source_mode in ("all", "social", "combined")
         else [source_mode] if source_mode in platform_queries else []
     )
     role_query = "dealership owner import manager sales director" if account_scope in ("person", "both") else ""
@@ -3491,7 +3526,12 @@ def discover(params: dict[str, list[str]]) -> dict:
         social_results: list[dict] = []
         with ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants)))) as executor:
             futures = [
-                executor.submit(search_web, search_query, 8, freshness_days)
+                executor.submit(
+                    search_web,
+                    search_query,
+                    4 if source_mode == "combined" else 8,
+                    freshness_days,
+                )
                 for search_query in query_variants
             ]
             for future in as_completed(futures):
@@ -3601,6 +3641,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["social_analysis"] = youtube_analysis
                 item["youtube_discovery_candidate"] = youtube_discovery_candidate
                 raw_results.append(item)
+    raw_results = balance_discovery_sources(raw_results)
     leads = []
     seen_sources = set()
     excluded_brand_bound_dealers = 0
