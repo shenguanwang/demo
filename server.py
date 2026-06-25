@@ -1339,6 +1339,8 @@ def is_social_profile_url(url: str) -> bool:
     if "tiktok.com" in domain:
         return bool(parts) and parts[0].startswith("@")
     if domain in {"t.me", "telegram.me", "telegram.dog"}:
+        if len(parts) >= 2 and parts[0].lower() == "s":
+            return parts[1].lower() not in {"share", "iv"}
         return bool(parts) and parts[0].lower() not in {"s", "share", "iv"}
     if "x.com" in domain or "twitter.com" in domain:
         return len(parts) == 1 and parts[0].lower() not in {"search", "share", "intent", "home", "explore", "i"}
@@ -1351,6 +1353,16 @@ def is_social_profile_url(url: str) -> bool:
     if "vk.com" in domain:
         return bool(parts) and parts[0].lower() not in {"feed", "search", "share"}
     return False
+
+
+def normalize_social_profile_url(url: str) -> str:
+    normalized = normalize_public_url(url)
+    parsed = urllib.parse.urlparse(normalized)
+    domain = parsed.netloc.lower().removeprefix("www.")
+    parts = [part for part in parsed.path.split("/") if part]
+    if domain in {"t.me", "telegram.me", "telegram.dog"} and len(parts) >= 2 and parts[0].lower() == "s":
+        return f"https://t.me/{parts[1]}"
+    return normalized
 
 
 def text_from_runs(value) -> str:
@@ -1836,6 +1848,24 @@ def social_search_variants(
         "individual": ("car buyer", "luxury cars", "electric vehicles"),
     }.get(target_type, ("car dealer", "motors showroom", "automotive trading"))
     queries: list[str] = []
+    if platform == "telegram":
+        markets = [market]
+        if market.lower() in {"uae", "united arab emirates", "emirates"}:
+            markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
+        telegram_terms = (
+            "car dealer",
+            "used cars",
+            "cars for sale",
+            "motors",
+            "auto trading",
+            "car showroom",
+            "luxury cars",
+            "imported cars",
+        )
+        for place in dict.fromkeys(markets):
+            for term in telegram_terms:
+                queries.append(f"site:{site} {place} \"{term}\"")
+        return list(dict.fromkeys(queries))
     if account_scope in ("company", "both"):
         queries.append(f"site:{site} {market} \"{company_terms[0]}\"")
     if account_scope in ("person", "both") and platform == "linkedin":
@@ -3543,7 +3573,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         expected_domain = site.split("/")[0]
         seen_platform_urls: set[str] = set()
         for item in social_results:
-            item_url = normalize_public_url(item.get("url", ""))
+            item_url = normalize_social_profile_url(item.get("url", ""))
             identity = item_url.lower().rstrip("/")
             if (
                 not item_url
@@ -3559,6 +3589,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             item["source_type"] = source_type
             item["source_url"] = item_url
             item["customer_website"] = ""
+            if origin == "Telegram":
+                item["skip_fetch"] = True
             path = urllib.parse.urlparse(item_url).path.lower()
             is_person = (
                 "/in/" in path
@@ -3994,6 +4026,14 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"其中 {social_search_stats['profileResults']} 条为账号主页，"
             f"{social_search_stats['acceptedResults']} 条通过商业账号初筛。"
             "若仍为 0，通常是搜索引擎未收录当地账号；可改用单个平台搜索或本机 Chrome 登录态采集。"
+        )
+    if source_mode == "telegram" and not leads:
+        notice = (
+            f"Telegram 公开搜索已执行 {social_search_stats['queries']} 组 t.me 查询，"
+            f"搜索引擎返回 {social_search_stats['rawResults']} 条候选，"
+            f"其中 {social_search_stats['profileResults']} 条可识别为公开频道或群组。"
+            "如果仍为 0，通常是 Telegram 频道/群没有被 Google、Bing、DuckDuckGo 或 Brave 收录；"
+            "Telegram 没有免费的全网官方搜索 API，建议把 Telegram 作为补充来源，主来源继续使用 Google Maps、YouTube 和官网目录。"
         )
     if excluded_brand_bound_dealers:
         notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定中国主机厂的单品牌 4S/授权店。"
