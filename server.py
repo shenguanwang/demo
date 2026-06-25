@@ -1301,7 +1301,21 @@ def is_social_profile_url(url: str) -> bool:
         return len(parts) >= 2 and parts[0].lower() in {"company", "in"}
     if "youtube.com" in domain:
         return bool(parts) and (parts[0].startswith("@") or parts[0].lower() in {"user", "channel", "c"})
-    return "tiktok.com" in domain and bool(parts) and parts[0].startswith("@")
+    if "tiktok.com" in domain:
+        return bool(parts) and parts[0].startswith("@")
+    if domain in {"t.me", "telegram.me", "telegram.dog"}:
+        return bool(parts) and parts[0].lower() not in {"s", "share", "iv"}
+    if "x.com" in domain or "twitter.com" in domain:
+        return len(parts) == 1 and parts[0].lower() not in {"search", "share", "intent", "home", "explore", "i"}
+    if "threads.net" in domain:
+        return bool(parts) and parts[0].startswith("@")
+    if "pinterest." in domain:
+        return bool(parts) and parts[0].lower() not in {"pin", "search", "ideas"}
+    if "reddit.com" in domain:
+        return len(parts) >= 2 and parts[0].lower() in {"r", "user", "u"}
+    if "vk.com" in domain:
+        return bool(parts) and parts[0].lower() not in {"feed", "search", "share"}
+    return False
 
 
 def text_from_runs(value) -> str:
@@ -1338,6 +1352,18 @@ def social_platform(url: str) -> str:
         return "LinkedIn"
     if "tiktok.com" in domain:
         return "TikTok"
+    if domain.endswith("t.me") or "telegram." in domain:
+        return "Telegram"
+    if "x.com" in domain or "twitter.com" in domain:
+        return "X / Twitter"
+    if "threads.net" in domain:
+        return "Threads"
+    if "pinterest." in domain:
+        return "Pinterest"
+    if "reddit.com" in domain:
+        return "Reddit"
+    if "vk.com" in domain:
+        return "VK"
     return "社交媒体"
 
 
@@ -1842,6 +1868,18 @@ def source_details(url: str, fallback_origin: str = "公开网页搜索") -> tup
         return "YouTube", "视频与频道公开资料"
     if "tiktok.com" in domain:
         return "TikTok", "短视频公开账号"
+    if domain in {"t.me", "telegram.me", "telegram.dog"}:
+        return "Telegram", "Telegram 公开频道或群组"
+    if "x.com" in domain or "twitter.com" in domain:
+        return "X / Twitter", "X / Twitter 公开主页"
+    if "threads.net" in domain:
+        return "Threads", "Threads 公开主页"
+    if "pinterest." in domain:
+        return "Pinterest", "Pinterest 公开主页"
+    if "reddit.com" in domain:
+        return "Reddit", "Reddit 公开社区或用户"
+    if "vk.com" in domain:
+        return "VK", "VK 公开主页"
     if domain:
         return domain, "车商官网或汽车行业网站"
     return fallback_origin, "公开商业信息网站"
@@ -1864,6 +1902,18 @@ def source_category(url: str, title: str = "", snippet: str = "") -> tuple[str, 
         return "YouTube", "社交媒体"
     if "tiktok.com" in domain:
         return "TikTok", "社交媒体"
+    if domain in {"t.me", "telegram.me", "telegram.dog"}:
+        return "Telegram", "社交媒体"
+    if "x.com" in domain or "twitter.com" in domain:
+        return "X / Twitter", "社交媒体"
+    if "threads.net" in domain:
+        return "Threads", "社交媒体"
+    if "pinterest." in domain:
+        return "Pinterest", "社交媒体"
+    if "reddit.com" in domain:
+        return "Reddit", "社交媒体"
+    if "vk.com" in domain:
+        return "VK", "社交媒体"
     if any(word in value for word in ("exhibitor", "motor show", "auto show", "exhibition")):
         return domain or "展会网站", "展会参展信息"
     if any(word in value for word in ("chamber", "association", "council", "member directory")):
@@ -1915,7 +1965,10 @@ def source_reliability(source_type: str, source_name: str = "") -> tuple[str, in
         return "B", 82, "主流地图企业资料，可与官网交叉核验"
     if "公司或职业资料" in source_type or "linkedin" in value:
         return "B", 78, "公开职业或公司资料"
-    if "社交媒体" in source_type or any(name in value for name in ("facebook", "instagram", "tiktok", "youtube")):
+    if "社交媒体" in source_type or any(name in value for name in (
+        "facebook", "instagram", "tiktok", "youtube", "telegram",
+        "twitter", "threads", "pinterest", "reddit", "vk"
+    )):
         return "B", 72, "公开社媒账号，需确认与公司关联"
     if "协会" in source_type or "展会" in source_type:
         return "B", 74, "公开机构名单或参展信息"
@@ -2761,7 +2814,7 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
     )
     social_accounts = []
     for value in re.findall(
-        r'https?://(?:www\.)?(?:instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|youtube\.com)/[^"\'\s<]+',
+        r'https?://(?:www\.)?(?:instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|youtube\.com|youtu\.be|t\.me|telegram\.me|telegram\.dog|x\.com|twitter\.com|threads\.net|pinterest\.[a-z.]+|reddit\.com|vk\.com)/[^"\'\s<]+',
         page,
         flags=re.I,
     ):
@@ -3179,7 +3232,9 @@ def social_accounts_from_business_websites(
         results = []
         for social_url in contacts.get("social_accounts") or []:
             platform_name = social_platform(social_url)
-            platform_key = platform_name.lower()
+            platform_key = {
+                "X / Twitter": "twitter",
+            }.get(platform_name, platform_name.lower())
             if platform_key not in allowed_platforms or not is_social_profile_url(social_url):
                 continue
             results.append(
@@ -3384,6 +3439,12 @@ def discover(params: dict[str, list[str]]) -> dict:
         "facebook": ("facebook.com", "Facebook", "社交媒体公开主页"),
         "tiktok": ("tiktok.com", "TikTok", "短视频公开账号"),
         "linkedin": ("linkedin.com", "LinkedIn", "企业与职业社交平台"),
+        "telegram": ("t.me", "Telegram", "Telegram 公开频道或群组"),
+        "twitter": ("x.com", "X / Twitter", "X / Twitter 公开主页"),
+        "threads": ("threads.net", "Threads", "Threads 公开主页"),
+        "pinterest": ("pinterest.com", "Pinterest", "Pinterest 公开主页"),
+        "reddit": ("reddit.com", "Reddit", "Reddit 公开社区或用户"),
+        "vk": ("vk.com", "VK", "VK 公开主页"),
     }
     selected_platforms = (
         list(platform_queries)
@@ -3551,7 +3612,10 @@ def discover(params: dict[str, list[str]]) -> dict:
         path_lower = parsed.path.lower()
         title_lower = item["title"].lower()
         is_google_places = item.get("origin") == "Google Maps"
-        is_social_result = item.get("origin") in ("Facebook", "Instagram", "TikTok", "LinkedIn", "YouTube")
+        is_social_result = item.get("origin") in (
+            "Facebook", "Instagram", "TikTok", "LinkedIn", "YouTube",
+            "Telegram", "X / Twitter", "Threads", "Pinterest", "Reddit", "VK",
+        )
         social_analysis = item.get("social_analysis") or (
             analyze_social_business_profile(
                 f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",

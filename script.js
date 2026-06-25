@@ -1090,7 +1090,13 @@ const reviewSourceOptions = [
   ["facebook", "Facebook 公开主页"],
   ["tiktok", "TikTok 公开账号"],
   ["youtube", "YouTube 公开频道"],
-  ["linkedin", "LinkedIn 公司 / 个人主页"]
+  ["linkedin", "LinkedIn 公司 / 个人主页"],
+  ["telegram", "Telegram 公开频道 / 群组"],
+  ["twitter", "X / Twitter 公开主页"],
+  ["threads", "Threads 公开主页"],
+  ["pinterest", "Pinterest 公开主页"],
+  ["reddit", "Reddit 公开社区 / 用户"],
+  ["vk", "VK 公开主页"]
 ];
 
 function reviewSourceKey(lead) {
@@ -1105,7 +1111,41 @@ function reviewSourceKey(lead) {
     lead.sourceUrl
   ].filter(Boolean).join(" ").toLowerCase();
   if (!value) return "dealer";
-  if (/\bcombined\b|综合搜索/.test(value)) return "combined";
+  const concreteValue = [
+    lead.platform,
+    lead.origin,
+    lead.sourceType,
+    lead.sourceTitle,
+    lead.source,
+    lead.sourceUrl,
+    ...(lead.evidenceSources || []).flatMap((source) => [
+      source.sourceName,
+      source.sourceType,
+      source.url
+    ])
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (concreteValue.includes("google") || concreteValue.includes("maps/search") || concreteValue.includes("place_id")) return "google";
+  if (concreteValue.includes("openstreetmap") || concreteValue.includes("overpass") || concreteValue.includes("osm")) return "osm";
+  if (concreteValue.includes("instagram.com") || concreteValue.includes("instagram")) return "instagram";
+  if (concreteValue.includes("facebook.com") || concreteValue.includes("facebook")) return "facebook";
+  if (concreteValue.includes("tiktok.com") || concreteValue.includes("tiktok")) return "tiktok";
+  if (concreteValue.includes("youtube.com") || concreteValue.includes("youtu.be") || concreteValue.includes("youtube")) return "youtube";
+  if (concreteValue.includes("linkedin.com") || concreteValue.includes("linkedin")) return "linkedin";
+  if (concreteValue.includes("t.me") || concreteValue.includes("telegram")) return "telegram";
+  if (concreteValue.includes("x.com") || concreteValue.includes("twitter.com") || concreteValue.includes("twitter")) return "twitter";
+  if (concreteValue.includes("threads.net") || concreteValue.includes("threads")) return "threads";
+  if (concreteValue.includes("pinterest.")) return "pinterest";
+  if (concreteValue.includes("reddit.com") || concreteValue.includes("reddit")) return "reddit";
+  if (concreteValue.includes("vk.com")) return "vk";
+  if (
+    concreteValue.includes("官网")
+    || concreteValue.includes("official")
+    || concreteValue.includes("directory")
+    || concreteValue.includes("行业")
+    || concreteValue.includes("dealer")
+    || concreteValue.includes("showroom")
+  ) return "dealer";
+  if (/\bcombined\b|综合搜索/.test(value)) return "dealer";
   if (/\bsocial\b|社媒综合/.test(value)) return "social";
   if (value.includes("google") || value.includes("maps/search") || value.includes("place_id")) return "google";
   if (value.includes("openstreetmap") || value.includes("overpass") || value.includes("osm")) return "osm";
@@ -1114,6 +1154,12 @@ function reviewSourceKey(lead) {
   if (value.includes("tiktok.com") || value.includes("tiktok")) return "tiktok";
   if (value.includes("youtube.com") || value.includes("youtu.be") || value.includes("youtube")) return "youtube";
   if (value.includes("linkedin.com") || value.includes("linkedin")) return "linkedin";
+  if (value.includes("t.me") || value.includes("telegram")) return "telegram";
+  if (value.includes("x.com") || value.includes("twitter.com") || value.includes("twitter")) return "twitter";
+  if (value.includes("threads.net") || value.includes("threads")) return "threads";
+  if (value.includes("pinterest.")) return "pinterest";
+  if (value.includes("reddit.com") || value.includes("reddit")) return "reddit";
+  if (value.includes("vk.com")) return "vk";
   return "dealer";
 }
 
@@ -1681,6 +1727,16 @@ function updateSocialProspectingQueries() {
   ].map((query) =>
     `<a href="https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="LinkedIn">${escapeHtml(query)} ↗</a>`
   ).join("");
+  $("#extraSocialSearchLinks").innerHTML = [
+    ["Telegram", "https://www.google.com/search?q=", `site:t.me ${place} car dealer OR motors OR showroom`],
+    ["X", "https://www.google.com/search?q=", `site:x.com ${place} car dealer OR motors OR showroom`],
+    ["Threads", "https://www.google.com/search?q=", `site:threads.net ${place} car dealer OR motors OR showroom`],
+    ["Pinterest", "https://www.google.com/search?q=", `site:pinterest.com ${place} car dealer OR motors OR showroom`],
+    ["Reddit", "https://www.google.com/search?q=", `site:reddit.com ${place} car dealer OR motors OR showroom`],
+    ["VK", "https://www.google.com/search?q=", `site:vk.com ${place} car dealer OR motors OR showroom`]
+  ].map(([platform, baseUrl, query]) =>
+    `<a href="${baseUrl}${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="${escapeHtml(platform)}">${escapeHtml(platform)} ↗</a>`
+  ).join("");
 }
 
 function socialPlatformFromUrl(url) {
@@ -1692,8 +1748,12 @@ function socialPlatformFromUrl(url) {
   if (domain.includes("instagram")) return "Instagram";
   if (domain.includes("tiktok")) return "TikTok";
   if (domain.includes("linkedin")) return "LinkedIn";
+  if (domain === "t.me" || domain.includes("telegram")) return "Telegram";
+  if (domain.includes("x.com") || domain.includes("twitter")) return "X / Twitter";
   if (domain.includes("threads")) return "Threads";
   if (domain.includes("pinterest")) return "Pinterest";
+  if (domain.includes("reddit")) return "Reddit";
+  if (domain.includes("vk.com")) return "VK";
   return "官网";
 }
 
@@ -1782,7 +1842,11 @@ function captureToLead(capture) {
   const finderData = Object.fromEntries(new FormData($("#finderForm")).entries());
   const country = countries.find((item) => item.name === finderData.country);
   const city = country?.cities?.split(" / ")[0] || "";
-  const platformDomains = ["youtube.com", "youtu.be", "facebook.com", "instagram.com", "tiktok.com", "linkedin.com", "threads.net", "pinterest.com"];
+  const platformDomains = [
+    "youtube.com", "youtu.be", "facebook.com", "instagram.com", "tiktok.com", "linkedin.com",
+    "t.me", "telegram.me", "telegram.dog", "x.com", "twitter.com", "threads.net",
+    "pinterest.com", "reddit.com", "vk.com"
+  ];
   const links = (capture.links || []).filter((item) => safeHttpUrl(item.url));
   const externalWebsite = links.find((item) => {
     try {
@@ -2251,7 +2315,13 @@ function discoverySourceLabel(value) {
     facebook: "Facebook",
     tiktok: "TikTok",
     youtube: "YouTube",
-    linkedin: "LinkedIn"
+    linkedin: "LinkedIn",
+    telegram: "Telegram",
+    twitter: "X / Twitter",
+    threads: "Threads",
+    pinterest: "Pinterest",
+    reddit: "Reddit",
+    vk: "VK"
   }[value] || value || "综合搜索";
 }
 
@@ -2768,15 +2838,21 @@ function bindForms() {
     const url = safeHttpUrl(data.pageUrl);
     const domain = url ? new URL(url).hostname.toLowerCase() : "";
     const expectedDomains = {
-      Facebook: "facebook.com",
-      Instagram: "instagram.com",
-      TikTok: "tiktok.com",
-      YouTube: "youtube.com",
-      LinkedIn: "linkedin.com"
+      Facebook: ["facebook.com"],
+      Instagram: ["instagram.com"],
+      TikTok: ["tiktok.com"],
+      YouTube: ["youtube.com", "youtu.be"],
+      LinkedIn: ["linkedin.com"],
+      Telegram: ["t.me", "telegram.me", "telegram.dog"],
+      "X / Twitter": ["x.com", "twitter.com"],
+      Threads: ["threads.net"],
+      Pinterest: ["pinterest."],
+      Reddit: ["reddit.com"],
+      VK: ["vk.com"]
     };
-    const expectedDomain = expectedDomains[data.platform] || "";
+    const expectedDomain = expectedDomains[data.platform] || [];
     const status = $("#socialLeadStatus");
-    if (!url || !domain.includes(expectedDomain)) {
+    if (!url || !expectedDomain.some((item) => domain.includes(item))) {
       status.textContent = `网址必须是有效的 ${data.platform} 主页绝对地址。`;
       status.classList.add("error");
       return;

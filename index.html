@@ -190,7 +190,7 @@
           <label>客户来源
             <select name="sourceMode">
               <option value="combined">综合搜索（地图 + 官网）</option>
-              <option value="social">社媒综合（Facebook + Instagram + TikTok + YouTube + LinkedIn）</option>
+              <option value="social">社媒综合（Facebook + Instagram + TikTok + YouTube + LinkedIn + Telegram + X 等）</option>
               <option value="google">Google Maps 企业数据</option>
               <option value="osm">OpenStreetMap 地图</option>
               <option value="dealer">车商官网 / 汽车行业目录</option>
@@ -199,6 +199,12 @@
               <option value="tiktok">TikTok 公开账号</option>
               <option value="youtube">YouTube 公开频道</option>
               <option value="linkedin">LinkedIn 公司 / 个人主页</option>
+              <option value="telegram">Telegram 公开频道 / 群组</option>
+              <option value="twitter">X / Twitter 公开主页</option>
+              <option value="threads">Threads 公开主页</option>
+              <option value="pinterest">Pinterest 公开主页</option>
+              <option value="reddit">Reddit 公开社区 / 用户</option>
+              <option value="vk">VK 公开主页</option>
             </select>
           </label>
           <label>账号对象
@@ -242,6 +248,7 @@
             <div><strong>TikTok</strong><span>短视频公开账号，用于发现车商、展厅、经营者及其公开营销内容和主页链接。</span></div>
             <div><strong>YouTube</strong><span>公开频道与简介，用于核对公司品牌、联系方式、经营活动及公开人员频道。</span></div>
             <div><strong>LinkedIn</strong><span>企业与职业社交平台，用于确认公司信息和可能的采购、销售负责人。</span></div>
+            <div><strong>Telegram / X / Threads / Pinterest / Reddit / VK</strong><span>公开频道、群组、主页和社区页面，用作补充来源；结果取决于搜索引擎是否收录。</span></div>
           </div>
           <div class="insight-box">
             <div class="finder-progress-head">
@@ -322,6 +329,10 @@
               <div class="platform-search-title"><b>LinkedIn 公司/人员</b><small>确认企业及采购、进口、销售负责人</small></div>
               <div class="social-query-links" id="linkedinSearchLinks"></div>
             </div>
+            <div class="platform-search-group">
+              <div class="platform-search-title"><b>更多公开平台</b><small>Telegram、X、Threads、Pinterest、Reddit、VK 的公开主页和社区</small></div>
+              <div class="social-query-links" id="extraSocialSearchLinks"></div>
+            </div>
             <ol>
               <li>优先选择公开可访问的公司主页、频道或明确标注职位的经营者主页。</li>
               <li>确认简介或帖子包含进口、经销、展厅、采购、批发或品牌合作信号。</li>
@@ -338,6 +349,12 @@
                   <option value="TikTok">TikTok</option>
                   <option value="YouTube">YouTube</option>
                   <option value="LinkedIn">LinkedIn</option>
+                  <option value="Telegram">Telegram</option>
+                  <option value="X / Twitter">X / Twitter</option>
+                  <option value="Threads">Threads</option>
+                  <option value="Pinterest">Pinterest</option>
+                  <option value="Reddit">Reddit</option>
+                  <option value="VK">VK</option>
                 </select>
               </label>
               <label>账号类型
