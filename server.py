@@ -998,8 +998,16 @@ DISCOVERY_KEYWORD_TERMS = (
     "chauffeur fleet",
     "commercial vehicles",
     "vehicle procurement",
-    "auto spare parts",
-    "car service center",
+    "pre owned cars",
+    "automobile distributor",
+)
+
+OBVIOUS_IRRELEVANT_LEAD_PATTERNS = (
+    r"\b(towing|tow truck|roadside assistance|vehicle recovery|car recovery|breakdown service|wrecker)\b",
+    r"\b(tax consultant|tax consultancy|vat consultant|vat consultancy|tax agent|tax filing|tax refund)\b",
+    r"\b(tax free|duty free|excise tax|corporate tax|customs clearance|customs broker)\b",
+    r"\b(company formation|business setup|free zone license|trade license|pro services|visa services)\b",
+    r"\b(accounting|bookkeeping|audit firm|auditing|attestation|document clearing)\b",
 )
 
 CITY_COORDS = {
@@ -1042,6 +1050,13 @@ def city_keyword_queries(cities: list[str], terms: tuple[str, ...], suffix: str 
                 query = f"{query} {suffix}"
             queries.append(query.strip())
     return list(dict.fromkeys(queries))
+
+
+def is_obviously_irrelevant_lead(text: str) -> bool:
+    return any(
+        re.search(pattern, text, re.I)
+        for pattern in OBVIOUS_IRRELEVANT_LEAD_PATTERNS
+    )
 
 
 TARGET_PROFILES = {
@@ -3579,6 +3594,8 @@ def discover(params: dict[str, list[str]]) -> dict:
                 pass
 
         combined = f"{item['title']} {item['snippet']} {page_text}"
+        if is_obviously_irrelevant_lead(combined):
+            continue
         if not is_social_result and is_brand_bound_chinese_dealer(combined):
             excluded_brand_bound_dealers += 1
             continue
