@@ -3689,10 +3689,12 @@ def discover(params: dict[str, list[str]]) -> dict:
     leads = []
     seen_sources = set()
     excluded_brand_bound_dealers = 0
+    processed_candidates = 0
     for item in raw_results:
-        if not has_discovery_budget(deadline, 6):
+        if not has_discovery_budget(deadline, 6) and (leads or processed_candidates >= 20):
             notice = (notice + " " if notice else "") + "本次云端搜索已达到稳定运行时间预算，已先返回当前可用线索；如需更多结果，请按单一来源继续补充。"
             break
+        processed_candidates += 1
         if len(leads) >= result_limit:
             break
         parsed = urllib.parse.urlparse(item["url"])
