@@ -1343,6 +1343,8 @@ def is_social_profile_url(url: str) -> bool:
             return parts[1].lower() not in {"share", "iv"}
         return bool(parts) and parts[0].lower() not in {"s", "share", "iv"}
     if "x.com" in domain or "twitter.com" in domain:
+        if len(parts) >= 3 and parts[1].lower() == "status":
+            return parts[0].lower() not in {"i", "intent", "share", "search"}
         return len(parts) == 1 and parts[0].lower() not in {"search", "share", "intent", "home", "explore", "i"}
     if "threads.net" in domain:
         return bool(parts) and parts[0].startswith("@")
@@ -1865,6 +1867,27 @@ def social_search_variants(
         for place in dict.fromkeys(markets):
             for term in telegram_terms:
                 queries.append(f"site:{site} {place} \"{term}\"")
+        return list(dict.fromkeys(queries))
+    if platform == "twitter":
+        markets = [market]
+        if market.lower() in {"uae", "united arab emirates", "emirates"}:
+            markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
+        twitter_terms = (
+            "car dealer",
+            "used cars",
+            "cars for sale",
+            "motors",
+            "auto trading",
+            "car showroom",
+            "luxury cars",
+            "imported cars",
+            "vehicle importer",
+            "automotive trading",
+        )
+        for place in dict.fromkeys(markets):
+            for term in twitter_terms:
+                queries.append(f"site:x.com {place} \"{term}\"")
+                queries.append(f"site:twitter.com {place} \"{term}\"")
         return list(dict.fromkeys(queries))
     if account_scope in ("company", "both"):
         queries.append(f"site:{site} {market} \"{company_terms[0]}\"")
@@ -3505,7 +3528,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         "tiktok": ("tiktok.com", "TikTok", "短视频公开账号"),
         "linkedin": ("linkedin.com", "LinkedIn", "企业与职业社交平台"),
         "telegram": ("t.me", "Telegram", "Telegram 公开频道或群组"),
-        "twitter": ("x.com", "X / Twitter", "X / Twitter 公开主页"),
+        "twitter": ("x.com", "X / Twitter", "X / Twitter 公开主页或帖子"),
         "threads": ("threads.net", "Threads", "Threads 公开主页"),
         "pinterest": ("pinterest.com", "Pinterest", "Pinterest 公开主页"),
         "reddit": ("reddit.com", "Reddit", "Reddit 公开社区或用户"),
@@ -3570,14 +3593,17 @@ def discover(params: dict[str, list[str]]) -> dict:
                 except (OSError, ValueError, TimeoutError, urllib.error.URLError):
                     continue
         social_search_stats["rawResults"] += len(social_results)
-        expected_domain = site.split("/")[0]
+        expected_domains = {
+            "twitter": ("x.com", "twitter.com"),
+        }.get(platform, (site.split("/")[0],))
         seen_platform_urls: set[str] = set()
         for item in social_results:
             item_url = normalize_social_profile_url(item.get("url", ""))
+            item_domain = urllib.parse.urlparse(item_url).netloc.lower().removeprefix("www.")
             identity = item_url.lower().rstrip("/")
             if (
                 not item_url
-                or expected_domain not in urllib.parse.urlparse(item_url).netloc.lower()
+                or not any(expected_domain in item_domain for expected_domain in expected_domains)
                 or identity in seen_platform_urls
                 or not is_social_profile_url(item_url)
             ):
@@ -3589,7 +3615,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             item["source_type"] = source_type
             item["source_url"] = item_url
             item["customer_website"] = ""
-            if origin == "Telegram":
+            if origin in {"Telegram", "X / Twitter"}:
                 item["skip_fetch"] = True
             path = urllib.parse.urlparse(item_url).path.lower()
             is_person = (
