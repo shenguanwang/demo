@@ -58,7 +58,7 @@ DISCOVERY_JOBS_LOCK = threading.RLock()
 DISCOVERY_CREATE_LOCK = threading.Lock()
 ACTIVE_DISCOVERY_WORKERS: set[str] = set()
 ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
-DISCOVERY_MAX_CONCURRENCY = max(1, int(os.environ.get("DISCOVERY_MAX_CONCURRENCY", "2")))
+DISCOVERY_MAX_CONCURRENCY = max(1, int(os.environ.get("DISCOVERY_MAX_CONCURRENCY", "1")))
 DISCOVERY_WORKER_SLOTS = threading.BoundedSemaphore(DISCOVERY_MAX_CONCURRENCY)
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
@@ -1060,19 +1060,19 @@ def city_keyword_queries(cities: list[str], terms: tuple[str, ...], suffix: str 
 
 def discovery_query_budget(source_mode: str) -> dict[str, int]:
     if source_mode == "youtube":
-        return {"webQueries": 0, "socialQueries": 0, "youtubeQueries": 18, "youtubeLimit": 14}
+        return {"webQueries": 0, "socialQueries": 0, "youtubeQueries": 12, "youtubeLimit": 12}
     if source_mode == "social":
-        return {"webQueries": 0, "socialQueries": 18, "youtubeQueries": 8, "youtubeLimit": 8}
+        return {"webQueries": 0, "socialQueries": 12, "youtubeQueries": 4, "youtubeLimit": 6}
     if source_mode == "dealer":
-        return {"webQueries": 36, "socialQueries": 0, "youtubeQueries": 0, "youtubeLimit": 0}
+        return {"webQueries": 24, "socialQueries": 0, "youtubeQueries": 0, "youtubeLimit": 0}
     if source_mode == "all":
-        return {"webQueries": 42, "socialQueries": 16, "youtubeQueries": 10, "youtubeLimit": 8}
-    return {"webQueries": 32, "socialQueries": 12, "youtubeQueries": 8, "youtubeLimit": 8}
+        return {"webQueries": 20, "socialQueries": 8, "youtubeQueries": 5, "youtubeLimit": 6}
+    return {"webQueries": 16, "socialQueries": 6, "youtubeQueries": 4, "youtubeLimit": 6}
 
 
 def discovery_deadline() -> float:
     raw = os.environ.get("DISCOVERY_TIME_BUDGET_SECONDS", "").strip()
-    seconds = int(raw) if raw.isdigit() else 210
+    seconds = int(raw) if raw.isdigit() else 120
     return time.monotonic() + max(45, min(420, seconds))
 
 
@@ -2731,7 +2731,7 @@ def search_google_places(country: str, query_terms: str, limit: int = 12, city: 
                 "google_rating": rating or 0,
                 "google_reviews": ratings_count or 0,
                 "business_status": place.get("businessStatus", ""),
-                "skip_fetch": not bool(website),
+                "skip_fetch": True,
             }
         )
     return items
@@ -3595,6 +3595,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             item["source_type"] = source_type
             item["source_url"] = item_url
             item["customer_website"] = ""
+            item["skip_fetch"] = True
             path = urllib.parse.urlparse(item_url).path.lower()
             is_person = (
                 "/in/" in path
@@ -3682,6 +3683,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["account_type"] = youtube_account_type
                 item["social_analysis"] = youtube_analysis
                 item["youtube_discovery_candidate"] = youtube_discovery_candidate
+                item["skip_fetch"] = True
                 raw_results.append(item)
     raw_results = balance_discovery_sources(raw_results)
     leads = []
