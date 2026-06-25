@@ -1322,22 +1322,21 @@ def is_social_profile_url(url: str) -> bool:
     domain = parsed.netloc.lower().removeprefix("www.")
     parts = [part for part in parsed.path.split("/") if part]
     if "instagram.com" in domain:
-        return len(parts) == 1 and parts[0].lower() not in {"p", "reel", "stories", "explore"}
+        return bool(parts) and parts[0].lower() not in {"stories", "explore", "accounts", "about"}
     if "facebook.com" in domain:
         if parsed.path.lower() == "/profile.php":
             return bool(urllib.parse.parse_qs(parsed.query).get("id"))
         if len(parts) == 1:
             return parts[0].lower() not in {
-                "posts", "photos", "watch", "share", "reel", "groups",
-                "tr", "plugins", "sharer", "dialog",
+                "share", "tr", "plugins", "sharer", "dialog", "login", "marketplace",
             }
-        return len(parts) >= 3 and parts[0].lower() == "pages"
+        return parts[0].lower() not in {"tr", "plugins", "sharer", "dialog", "login"}
     if "linkedin.com" in domain:
-        return len(parts) >= 2 and parts[0].lower() in {"company", "in"}
+        return bool(parts) and parts[0].lower() in {"company", "in", "posts", "feed", "pulse"}
     if "youtube.com" in domain:
-        return bool(parts) and (parts[0].startswith("@") or parts[0].lower() in {"user", "channel", "c"})
+        return bool(parts) and (parts[0].startswith("@") or parts[0].lower() in {"user", "channel", "c", "watch", "shorts"})
     if "tiktok.com" in domain:
-        return bool(parts) and parts[0].startswith("@")
+        return bool(parts) and (parts[0].startswith("@") or parts[0].lower() in {"tag", "discover"})
     if domain in {"t.me", "telegram.me", "telegram.dog"}:
         if len(parts) >= 2 and parts[0].lower() == "s":
             return parts[1].lower() not in {"share", "iv"}
@@ -1349,11 +1348,11 @@ def is_social_profile_url(url: str) -> bool:
     if "threads.net" in domain:
         return bool(parts) and parts[0].startswith("@")
     if "pinterest." in domain:
-        return bool(parts) and parts[0].lower() not in {"pin", "search", "ideas"}
+        return bool(parts) and parts[0].lower() not in {"search", "ideas"}
     if "reddit.com" in domain:
         return len(parts) >= 2 and parts[0].lower() in {"r", "user", "u"}
     if "vk.com" in domain:
-        return bool(parts) and parts[0].lower() not in {"feed", "search", "share"}
+        return bool(parts) and parts[0].lower() not in {"feed", "search", "share", "login"}
     return False
 
 
@@ -1850,44 +1849,58 @@ def social_search_variants(
         "individual": ("car buyer", "luxury cars", "electric vehicles"),
     }.get(target_type, ("car dealer", "motors showroom", "automotive trading"))
     queries: list[str] = []
+    markets = [market]
+    if market.lower() in {"uae", "united arab emirates", "emirates"}:
+        markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
+    markets = list(dict.fromkeys(place for place in markets if place))
+    broad_terms = (
+        "car dealer",
+        "used cars",
+        "cars for sale",
+        "motors",
+        "auto trading",
+        "automotive trading",
+        "car showroom",
+        "luxury cars",
+        "imported cars",
+        "vehicle importer",
+    )
     if platform == "telegram":
-        markets = [market]
-        if market.lower() in {"uae", "united arab emirates", "emirates"}:
-            markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
-        telegram_terms = (
-            "car dealer",
-            "used cars",
-            "cars for sale",
-            "motors",
-            "auto trading",
-            "car showroom",
-            "luxury cars",
-            "imported cars",
-        )
-        for place in dict.fromkeys(markets):
-            for term in telegram_terms:
+        for place in markets:
+            for term in broad_terms:
                 queries.append(f"site:{site} {place} \"{term}\"")
         return list(dict.fromkeys(queries))
     if platform == "twitter":
-        markets = [market]
-        if market.lower() in {"uae", "united arab emirates", "emirates"}:
-            markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
-        twitter_terms = (
-            "car dealer",
-            "used cars",
-            "cars for sale",
-            "motors",
-            "auto trading",
-            "car showroom",
-            "luxury cars",
-            "imported cars",
-            "vehicle importer",
-            "automotive trading",
-        )
-        for place in dict.fromkeys(markets):
-            for term in twitter_terms:
+        for place in markets:
+            for term in broad_terms:
                 queries.append(f"site:x.com {place} \"{term}\"")
                 queries.append(f"site:twitter.com {place} \"{term}\"")
+        return list(dict.fromkeys(queries))
+    if platform in {"instagram", "facebook", "tiktok", "threads", "pinterest", "reddit", "vk"}:
+        site_variants = {
+            "instagram": ("instagram.com",),
+            "facebook": ("facebook.com",),
+            "tiktok": ("tiktok.com",),
+            "threads": ("threads.net",),
+            "pinterest": ("pinterest.com",),
+            "reddit": ("reddit.com/r", "reddit.com/user"),
+            "vk": ("vk.com",),
+        }.get(platform, (site,))
+        for place in markets:
+            for term in broad_terms:
+                for variant in site_variants:
+                    queries.append(f"site:{variant} {place} \"{term}\"")
+        return list(dict.fromkeys(queries))
+    if platform == "linkedin":
+        for place in markets:
+            for term in broad_terms:
+                queries.append(f"site:linkedin.com/company {place} \"{term}\"")
+                queries.append(f"site:linkedin.com/in {place} \"{term}\"")
+                queries.append(f"site:linkedin.com/posts {place} \"{term}\"")
+        if account_scope in ("person", "both"):
+            for place in markets:
+                queries.append(f"site:linkedin.com/in {place} \"dealership owner\"")
+                queries.append(f"site:linkedin.com/in {place} \"sales director\" automotive")
         return list(dict.fromkeys(queries))
     if account_scope in ("company", "both"):
         queries.append(f"site:{site} {market} \"{company_terms[0]}\"")
@@ -3434,6 +3447,13 @@ def discover(params: dict[str, list[str]]) -> dict:
         commercial_query_variants.append(
             f"{city_focus} car dealer showroom importer WhatsApp email official website {exclude_query}{cutoff_query}"
         )
+    for city in cities[:8]:
+        commercial_query_variants.extend([
+            f"{city} car dealers directory showroom motors contact website {exclude_query}{cutoff_query}",
+            f"{city} auto trading LLC motors showroom WhatsApp email {exclude_query}{cutoff_query}",
+            f"{city} used cars showroom dealer official website phone {exclude_query}{cutoff_query}",
+            f"{city} imported cars luxury motors dealership contact {exclude_query}{cutoff_query}",
+        ])
     commercial_query_variants.extend(
         city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, f"official website contact {exclude_query}{cutoff_query}")
     )
@@ -3539,6 +3559,18 @@ def discover(params: dict[str, list[str]]) -> dict:
         if source_mode in ("all", "social", "combined")
         else [source_mode] if source_mode in platform_queries else []
     )
+    platform_queries.update({
+        "instagram": ("instagram.com", "Instagram", "Instagram 公开主页或内容"),
+        "facebook": ("facebook.com", "Facebook", "Facebook 公开主页、群组或内容"),
+        "tiktok": ("tiktok.com", "TikTok", "TikTok 公开账号或视频"),
+        "linkedin": ("linkedin.com", "LinkedIn", "LinkedIn 公司、个人或动态"),
+        "telegram": ("t.me", "Telegram", "Telegram 公开频道或群组"),
+        "twitter": ("x.com", "X / Twitter", "X / Twitter 公开主页或帖子"),
+        "threads": ("threads.net", "Threads", "Threads 公开主页或内容"),
+        "pinterest": ("pinterest.com", "Pinterest", "Pinterest 公开主页、图板或内容"),
+        "reddit": ("reddit.com", "Reddit", "Reddit 公开社区、用户或帖子"),
+        "vk": ("vk.com", "VK", "VK 公开主页或内容"),
+    })
     role_query = "dealership owner import manager sales director" if account_scope in ("person", "both") else ""
     company_query = "car dealer importer automotive trading" if account_scope in ("company", "both") else ""
     social_search_stats = {
@@ -3575,6 +3607,10 @@ def discover(params: dict[str, list[str]]) -> dict:
             target_type,
             account_scope,
         )
+        if source_mode in ("combined", "all"):
+            query_variants = query_variants[:8]
+        elif source_mode == "social":
+            query_variants = query_variants[:12]
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
         with ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants)))) as executor:
@@ -3594,7 +3630,16 @@ def discover(params: dict[str, list[str]]) -> dict:
                     continue
         social_search_stats["rawResults"] += len(social_results)
         expected_domains = {
+            "instagram": ("instagram.com",),
+            "facebook": ("facebook.com", "fb.com"),
+            "tiktok": ("tiktok.com",),
+            "linkedin": ("linkedin.com",),
+            "telegram": ("t.me", "telegram.me", "telegram.dog"),
             "twitter": ("x.com", "twitter.com"),
+            "threads": ("threads.net",),
+            "pinterest": ("pinterest.",),
+            "reddit": ("reddit.com",),
+            "vk": ("vk.com",),
         }.get(platform, (site.split("/")[0],))
         seen_platform_urls: set[str] = set()
         for item in social_results:
@@ -3615,8 +3660,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             item["source_type"] = source_type
             item["source_url"] = item_url
             item["customer_website"] = ""
-            if origin in {"Telegram", "X / Twitter"}:
-                item["skip_fetch"] = True
+            item["skip_fetch"] = True
             path = urllib.parse.urlparse(item_url).path.lower()
             is_person = (
                 "/in/" in path
