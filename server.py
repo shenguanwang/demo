@@ -13,6 +13,7 @@ import socketserver
 import base64
 import sqlite3
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1057,6 +1058,28 @@ def city_keyword_queries(cities: list[str], terms: tuple[str, ...], suffix: str 
     return list(dict.fromkeys(queries))
 
 
+def discovery_query_budget(source_mode: str) -> dict[str, int]:
+    if source_mode == "youtube":
+        return {"webQueries": 0, "socialQueries": 0, "youtubeQueries": 18, "youtubeLimit": 14}
+    if source_mode == "social":
+        return {"webQueries": 0, "socialQueries": 18, "youtubeQueries": 8, "youtubeLimit": 8}
+    if source_mode == "dealer":
+        return {"webQueries": 36, "socialQueries": 0, "youtubeQueries": 0, "youtubeLimit": 0}
+    if source_mode == "all":
+        return {"webQueries": 42, "socialQueries": 16, "youtubeQueries": 10, "youtubeLimit": 8}
+    return {"webQueries": 32, "socialQueries": 12, "youtubeQueries": 8, "youtubeLimit": 8}
+
+
+def discovery_deadline() -> float:
+    raw = os.environ.get("DISCOVERY_TIME_BUDGET_SECONDS", "").strip()
+    seconds = int(raw) if raw.isdigit() else 210
+    return time.monotonic() + max(45, min(420, seconds))
+
+
+def has_discovery_budget(deadline: float, reserve_seconds: int = 0) -> bool:
+    return time.monotonic() + reserve_seconds < deadline
+
+
 def is_obviously_irrelevant_lead(text: str) -> bool:
     return any(
         re.search(pattern, text, re.I)
@@ -1566,12 +1589,13 @@ def read_social_profile(
     }
 
 
-def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
+def search_youtube_channels(query: str, limit: int = 5, include_videos: bool = True) -> list[dict]:
     api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
     if api_key:
         per_type_limit = max(1, min(limit, 50))
         search_items = []
-        for result_type in ("channel", "video"):
+        result_types = ("channel", "video") if include_videos else ("channel",)
+        for result_type in result_types:
             params = {
                 "part": "snippet",
                 "type": result_type,
@@ -1585,7 +1609,7 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
                 headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
             )
             try:
-                with urllib.request.urlopen(request, timeout=20) as response:
+                with urllib.request.urlopen(request, timeout=10) as response:
                     payload = json.loads(response.read().decode("utf-8", errors="ignore"))
                 search_items.extend(payload.get("items", []))
             except (OSError, ValueError, TimeoutError, http.client.HTTPException, json.JSONDecodeError):
@@ -1610,7 +1634,7 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
                     headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
                 )
                 try:
-                    with urllib.request.urlopen(detail_request, timeout=20) as response:
+                    with urllib.request.urlopen(detail_request, timeout=10) as response:
                         detail_payload = json.loads(response.read().decode("utf-8", errors="ignore"))
                     details_by_id.update({
                         item.get("id", ""): item
@@ -3321,6 +3345,8 @@ def discover(params: dict[str, list[str]]) -> dict:
     exclusions = (params.get("exclusions") or [""])[0].strip()
     result_limit_value = (params.get("resultLimit") or ["90"])[0]
     result_limit = max(10, min(90, int(result_limit_value) if result_limit_value.isdigit() else 90))
+    deadline = discovery_deadline()
+    query_budget = discovery_query_budget(source_mode)
     verification_level = (params.get("verificationLevel") or ["strict"])[0]
     min_sources_value = (params.get("minSources") or ["2"])[0]
     min_sources = max(1, min(3, int(min_sources_value) if min_sources_value.isdigit() else 2))
@@ -3341,6 +3367,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         f"official website contact email WhatsApp {exclude_query}{cutoff_query}"
     ).strip()
     cities = discovery_cities(country, city_focus)
+    search_cities = cities if source_mode in ("google", "osm") else cities[:8]
     market = city_focus or country.split(" ")[0]
     broad_business_query = (
         f"{market} automotive importer vehicle distributor car dealer showroom "
@@ -3382,7 +3409,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"{city_focus} car dealer showroom importer WhatsApp email official website {exclude_query}{cutoff_query}"
         )
     commercial_query_variants.extend(
-        city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, f"official website contact {exclude_query}{cutoff_query}")
+        city_keyword_queries(search_cities, DISCOVERY_KEYWORD_TERMS, f"official website contact {exclude_query}{cutoff_query}")
     )
 
     raw_results = []
@@ -3405,8 +3432,10 @@ def discover(params: dict[str, list[str]]) -> dict:
         not freshness_days or source_mode == "all"
     ):
         try:
-            google_city_limit = min(6, max(3, result_limit // max(2, len(cities) * 2)))
-            for city in cities:
+            google_city_limit = min(6, max(3, result_limit // max(2, len(search_cities) * 2)))
+            for city in search_cities:
+                if not has_discovery_budget(deadline, 18):
+                    break
                 raw_results += search_google_places(
                     country,
                     "car dealer automotive importer vehicle distributor electric vehicle showroom",
@@ -3431,9 +3460,9 @@ def discover(params: dict[str, list[str]]) -> dict:
             pass
     if source_mode in ("all", "combined", "dealer"):
         search_variants = list(dict.fromkeys(commercial_query_variants))
-        max_web_queries = 72 if source_mode in ("all", "combined") else 96
+        max_web_queries = query_budget["webQueries"]
         search_variants = search_variants[:max_web_queries]
-        per_query_limit = 12 if source_mode in ("all", "combined") else 16
+        per_query_limit = 8 if source_mode in ("all", "combined") else 12
         web_results_by_query: list[list[dict]] = []
         with ThreadPoolExecutor(max_workers=min(4, len(search_variants))) as executor:
             futures = [
@@ -3441,6 +3470,8 @@ def discover(params: dict[str, list[str]]) -> dict:
                 for search_query in search_variants
             ]
             for future in as_completed(futures):
+                if not has_discovery_budget(deadline, 35):
+                    break
                 try:
                     web_results_by_query.append(future.result())
                 except (OSError, ValueError, TimeoutError, urllib.error.URLError):
@@ -3503,7 +3534,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             country,
             target_type,
             reverse_platforms,
-            seed_limit=min(24, result_limit),
+            seed_limit=min(12 if source_mode in ("all", "combined") else 18, result_limit),
         )
         social_search_stats["officialWebsiteProfiles"] = len(website_social_results)
         for item in website_social_results:
@@ -3513,7 +3544,10 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item.get("account_type", "公司账号"),
             )
         raw_results.extend(website_social_results)
+    remaining_social_queries = query_budget["socialQueries"]
     for platform in selected_platforms:
+        if remaining_social_queries <= 0 or not has_discovery_budget(deadline, 30):
+            break
         site, origin, source_type = platform_queries[platform]
         query_variants = social_search_variants(
             platform,
@@ -3522,6 +3556,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             target_type,
             account_scope,
         )
+        query_variants = query_variants[:remaining_social_queries]
+        remaining_social_queries -= len(query_variants)
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
         with ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants)))) as executor:
@@ -3590,18 +3626,24 @@ def discover(params: dict[str, list[str]]) -> dict:
         if account_scope in ("company", "both"):
             youtube_searches.extend(
                 (query, "company account")
-                for query in city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS)
+                for query in city_keyword_queries(search_cities, DISCOVERY_KEYWORD_TERMS)
             )
         if account_scope in ("person", "both"):
             youtube_searches.extend(
                 (query, "owner or manager account")
-                for query in city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, "owner manager founder")
+                for query in city_keyword_queries(search_cities, DISCOVERY_KEYWORD_TERMS, "owner manager founder")
             )
-        max_youtube_queries = 45 if source_mode == "youtube" else 32
+        max_youtube_queries = query_budget["youtubeQueries"]
         youtube_searches = list(dict.fromkeys(youtube_searches))[:max_youtube_queries]
         for youtube_query, youtube_account_type in youtube_searches:
+            if not has_discovery_budget(deadline, 24):
+                break
             try:
-                youtube_items = search_youtube_channels(youtube_query, limit=25)
+                youtube_items = search_youtube_channels(
+                    youtube_query,
+                    limit=query_budget["youtubeLimit"],
+                    include_videos=source_mode == "youtube",
+                )
             except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
                 youtube_items = []
             for item in youtube_items:
@@ -3646,6 +3688,9 @@ def discover(params: dict[str, list[str]]) -> dict:
     seen_sources = set()
     excluded_brand_bound_dealers = 0
     for item in raw_results:
+        if not has_discovery_budget(deadline, 6):
+            notice = (notice + " " if notice else "") + "本次云端搜索已达到稳定运行时间预算，已先返回当前可用线索；如需更多结果，请按单一来源继续补充。"
+            break
         if len(leads) >= result_limit:
             break
         parsed = urllib.parse.urlparse(item["url"])
