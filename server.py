@@ -1062,17 +1062,17 @@ def discovery_query_budget(source_mode: str) -> dict[str, int]:
     if source_mode == "youtube":
         return {"webQueries": 0, "socialQueries": 0, "youtubeQueries": 12, "youtubeLimit": 12}
     if source_mode == "social":
-        return {"webQueries": 0, "socialQueries": 12, "youtubeQueries": 4, "youtubeLimit": 6}
+        return {"webQueries": 0, "socialQueries": 10, "youtubeQueries": 3, "youtubeLimit": 6}
     if source_mode == "dealer":
         return {"webQueries": 24, "socialQueries": 0, "youtubeQueries": 0, "youtubeLimit": 0}
     if source_mode == "all":
-        return {"webQueries": 20, "socialQueries": 8, "youtubeQueries": 5, "youtubeLimit": 6}
-    return {"webQueries": 16, "socialQueries": 6, "youtubeQueries": 4, "youtubeLimit": 6}
+        return {"webQueries": 12, "socialQueries": 6, "youtubeQueries": 3, "youtubeLimit": 6}
+    return {"webQueries": 8, "socialQueries": 4, "youtubeQueries": 2, "youtubeLimit": 6}
 
 
 def discovery_deadline() -> float:
     raw = os.environ.get("DISCOVERY_TIME_BUDGET_SECONDS", "").strip()
-    seconds = int(raw) if raw.isdigit() else 120
+    seconds = int(raw) if raw.isdigit() else 180
     return time.monotonic() + max(45, min(420, seconds))
 
 
@@ -3367,7 +3367,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         f"official website contact email WhatsApp {exclude_query}{cutoff_query}"
     ).strip()
     cities = discovery_cities(country, city_focus)
-    search_cities = cities if source_mode in ("google", "osm") else cities[:8]
+    search_cities = cities if source_mode in ("google", "osm") else cities[:6]
     market = city_focus or country.split(" ")[0]
     broad_business_query = (
         f"{market} automotive importer vehicle distributor car dealer showroom "
@@ -3432,7 +3432,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         not freshness_days or source_mode == "all"
     ):
         try:
-            google_city_limit = min(6, max(3, result_limit // max(2, len(search_cities) * 2)))
+            google_city_limit = min(8, max(4, result_limit // max(1, len(search_cities))))
             for city in search_cities:
                 if not has_discovery_budget(deadline, 18):
                     break
@@ -3693,7 +3693,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     for item in raw_results:
         if (
             not has_discovery_budget(deadline, 6)
-            and (len(leads) >= min(10, result_limit) or processed_candidates >= 35)
+            and (len(leads) >= min(16, result_limit) or processed_candidates >= 50)
         ):
             notice = (notice + " " if notice else "") + "本次云端搜索已达到稳定运行时间预算，已先返回当前可用线索；如需更多结果，请按单一来源继续补充。"
             break
