@@ -1402,7 +1402,11 @@ def social_platform(url: str) -> str:
         return "LinkedIn"
     if "tiktok.com" in domain:
         return "TikTok"
-    if domain.endswith("t.me") or "telegram." in domain:
+    if (
+        domain.endswith("t.me")
+        or "telegram." in domain
+        or any(name in domain for name in ("tgstat.", "telemetr.", "telegramchannels.", "tgram.", "tlgrm."))
+    ):
         return "Telegram"
     if "x.com" in domain or "twitter.com" in domain:
         return "X / Twitter"
@@ -1881,6 +1885,86 @@ def search_web(query: str, limit: int = 8, freshness_days: int | None = None) ->
         results.append(item)
         if len(results) >= limit:
             break
+    return results
+
+
+def telegram_directory_terms(market: str, target_type: str) -> list[str]:
+    markets = [market]
+    if market.lower() in {"uae", "united arab emirates", "emirates"}:
+        markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
+    markets = list(dict.fromkeys(place for place in markets if place))
+    intent_terms = {
+        "dealer": ("car dealer", "used cars", "cars for sale", "motors", "car showroom"),
+        "parallel": ("car importer", "imported cars", "auto trading", "cars for sale"),
+        "importer": ("vehicle importer", "car distributor", "auto trading", "imported cars"),
+        "fleet": ("car rental", "fleet company", "vehicle procurement"),
+        "corporate": ("fleet procurement", "corporate vehicles", "car supplier"),
+        "government": ("vehicle supplier", "fleet tender", "automotive company"),
+        "buying": ("car buyer", "used cars", "luxury cars", "cars for sale"),
+        "individual": ("car buyer", "luxury cars", "electric vehicles", "cars for sale"),
+    }.get(target_type, ("car dealer", "used cars", "cars for sale", "motors", "car showroom"))
+    terms: list[str] = []
+    for place in markets:
+        for term in intent_terms:
+            terms.append(f"{place} {term}")
+            terms.append(f"{place} {term} telegram")
+    return list(dict.fromkeys(terms))
+
+
+TELEGRAM_DIRECTORY_SEARCH_URLS = (
+    ("TGStat", "https://tgstat.com/search?query={query}"),
+    ("TGStat", "https://tgstat.com/channels/search?query={query}"),
+    ("Telemetr", "https://telemetr.io/en/channels?search={query}"),
+    ("Telemetr", "https://telemetr.io/en/channels/?q={query}"),
+    ("TelegramChannels", "https://telegramchannels.me/search?search={query}"),
+    ("TelegramChannels", "https://telegramchannels.me/search?q={query}"),
+    ("Tgram", "https://tgram.io/search?query={query}"),
+    ("Tlgrm", "https://tlgrm.eu/channels?search={query}"),
+)
+
+
+def search_telegram_directories(query: str, limit: int = 8) -> list[dict]:
+    results: list[dict] = []
+    seen: set[str] = set()
+    encoded = urllib.parse.quote_plus(query)
+    expected_domains = ("t.me", "telegram.me", "telegram.dog", "tgstat.", "telemetr.", "telegramchannels.", "tgram.", "tlgrm.")
+    for source_name, template in TELEGRAM_DIRECTORY_SEARCH_URLS:
+        if len(results) >= limit:
+            break
+        url = template.format(query=encoded)
+        try:
+            page, final_url = fetch_document(url, timeout=12)
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+            continue
+        base_url = final_url or url
+        for match in re.finditer(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]{0,500}?)</a>', page, flags=re.I):
+            href = html.unescape(match.group(1)).strip()
+            if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+                continue
+            candidate_url = urllib.parse.urljoin(base_url, href)
+            candidate_url = normalize_social_profile_url(candidate_url)
+            parsed = urllib.parse.urlparse(candidate_url)
+            domain = parsed.netloc.lower().removeprefix("www.")
+            identity = candidate_url.lower().rstrip("/")
+            if (
+                identity in seen
+                or not any(expected in domain for expected in expected_domains)
+                or not is_social_profile_url(candidate_url)
+            ):
+                continue
+            title = clean_text(match.group(2)) or parsed.path.strip("/") or domain
+            if not title or len(title) < 2:
+                title = candidate_url
+            seen.add(identity)
+            results.append(
+                {
+                    "title": title[:160],
+                    "url": candidate_url,
+                    "snippet": f"{source_name} public Telegram directory result for {query}",
+                }
+            )
+            if len(results) >= limit:
+                break
     return results
 
 
@@ -3727,6 +3811,20 @@ def discover(params: dict[str, list[str]]) -> dict:
             query_variants = query_variants[:80]
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
+        if platform == "telegram":
+            directory_terms = telegram_directory_terms(market, target_type)
+            directory_terms = directory_terms[:36 if source_mode == "telegram" else 8]
+            social_search_stats["queries"] += len(directory_terms)
+            with ThreadPoolExecutor(max_workers=min(3, max(1, len(directory_terms)))) as executor:
+                futures = [
+                    executor.submit(search_telegram_directories, directory_query, 6)
+                    for directory_query in directory_terms
+                ]
+                for future in as_completed(futures):
+                    try:
+                        social_results.extend(future.result())
+                    except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                        continue
         with ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants)))) as executor:
             futures = [
                 executor.submit(
