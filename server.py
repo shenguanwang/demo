@@ -1579,6 +1579,54 @@ def read_social_profile(
     }
 
 
+def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
+    url = "https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": query})
+    page, _ = fetch_document(url, timeout=25)
+    match = re.search(r"var ytInitialData = (\{.*?\});</script>", page, flags=re.S)
+    if not match:
+        return []
+    data = json.loads(match.group(1))
+    renderers = []
+
+    def walk(value):
+        if isinstance(value, dict):
+            if "channelRenderer" in value:
+                renderers.append(value["channelRenderer"])
+            for nested in value.values():
+                walk(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                walk(nested)
+
+    walk(data)
+    results = []
+    for channel in renderers:
+        channel_id = channel.get("channelId", "")
+        canonical = (
+            channel.get("navigationEndpoint", {})
+            .get("browseEndpoint", {})
+            .get("canonicalBaseUrl", "")
+        )
+        channel_url = urllib.parse.urljoin("https://www.youtube.com", canonical) if canonical else (
+            f"https://www.youtube.com/channel/{channel_id}" if channel_id else ""
+        )
+        if not channel_url:
+            continue
+        results.append(
+            {
+                "title": text_from_runs(channel.get("title")) or "YouTube channel",
+                "url": channel_url,
+                "snippet": text_from_runs(channel.get("descriptionSnippet")),
+                "handle": text_from_runs(channel.get("subscriberCountText")),
+                "channelId": channel_id,
+                "apiSource": "YouTube public page fallback",
+            }
+        )
+        if len(results) >= limit:
+            break
+    return results
+
+
 def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
     api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
     if api_key:
@@ -1668,52 +1716,23 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
             )
             if len(results) >= per_type_limit * 2:
                 break
+        if len(results) >= max(3, min(limit, 12)):
+            return results
+        try:
+            fallback_results = search_youtube_public_channels(query, limit=limit)
+        except (OSError, ValueError, TimeoutError, UnicodeError, json.JSONDecodeError):
+            fallback_results = []
+        seen_urls = {normalize_public_url(item.get("url", "")).lower().rstrip("/") for item in results}
+        for item in fallback_results:
+            identity = normalize_public_url(item.get("url", "")).lower().rstrip("/")
+            if identity and identity not in seen_urls:
+                results.append(item)
+                seen_urls.add(identity)
+            if len(results) >= limit:
+                break
         return results
 
-    url = "https://www.youtube.com/results?" + urllib.parse.urlencode({"search_query": query})
-    page, _ = fetch_document(url, timeout=25)
-    match = re.search(r"var ytInitialData = (\{.*?\});</script>", page, flags=re.S)
-    if not match:
-        return []
-    data = json.loads(match.group(1))
-    renderers = []
-
-    def walk(value):
-        if isinstance(value, dict):
-            if "channelRenderer" in value:
-                renderers.append(value["channelRenderer"])
-            for nested in value.values():
-                walk(nested)
-        elif isinstance(value, list):
-            for nested in value:
-                walk(nested)
-
-    walk(data)
-    results = []
-    for channel in renderers:
-        channel_id = channel.get("channelId", "")
-        canonical = (
-            channel.get("navigationEndpoint", {})
-            .get("browseEndpoint", {})
-            .get("canonicalBaseUrl", "")
-        )
-        channel_url = urllib.parse.urljoin("https://www.youtube.com", canonical) if canonical else (
-            f"https://www.youtube.com/channel/{channel_id}" if channel_id else ""
-        )
-        if not channel_url:
-            continue
-        results.append(
-            {
-                "title": text_from_runs(channel.get("title")) or "YouTube channel",
-                "url": channel_url,
-                "snippet": text_from_runs(channel.get("descriptionSnippet")),
-                "handle": text_from_runs(channel.get("subscriberCountText")),
-                "channelId": channel_id,
-            }
-        )
-        if len(results) >= limit:
-            break
-    return results
+    return search_youtube_public_channels(query, limit=limit)
 
 
 def search_bing(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
