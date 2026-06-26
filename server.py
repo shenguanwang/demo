@@ -1587,11 +1587,14 @@ def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
         return []
     data = json.loads(match.group(1))
     renderers = []
+    video_renderers = []
 
     def walk(value):
         if isinstance(value, dict):
             if "channelRenderer" in value:
                 renderers.append(value["channelRenderer"])
+            if "videoRenderer" in value:
+                video_renderers.append(value["videoRenderer"])
             for nested in value.values():
                 walk(nested)
         elif isinstance(value, list):
@@ -1622,6 +1625,37 @@ def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
                 "apiSource": "YouTube public page fallback",
             }
         )
+        if len(results) >= limit:
+            break
+    seen = {normalize_public_url(item.get("url", "")).lower().rstrip("/") for item in results}
+    for video in video_renderers:
+        owner = video.get("ownerText") or video.get("longBylineText") or {}
+        runs = owner.get("runs") or []
+        if not runs:
+            continue
+        run = runs[0]
+        endpoint = run.get("navigationEndpoint", {}).get("browseEndpoint", {})
+        canonical = endpoint.get("canonicalBaseUrl", "")
+        channel_id = endpoint.get("browseId", "")
+        channel_url = urllib.parse.urljoin("https://www.youtube.com", canonical) if canonical else (
+            f"https://www.youtube.com/channel/{channel_id}" if channel_id else ""
+        )
+        identity = normalize_public_url(channel_url).lower().rstrip("/")
+        if not channel_url or identity in seen:
+            continue
+        title = text_from_runs(video.get("title"))
+        snippet = text_from_runs(video.get("descriptionSnippet"))
+        results.append(
+            {
+                "title": text_from_runs(owner) or title or "YouTube channel",
+                "url": channel_url,
+                "snippet": snippet or title,
+                "handle": text_from_runs(video.get("publishedTimeText")),
+                "channelId": channel_id,
+                "apiSource": "YouTube public video fallback",
+            }
+        )
+        seen.add(identity)
         if len(results) >= limit:
             break
     return results
@@ -1716,8 +1750,6 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
             )
             if len(results) >= per_type_limit * 2:
                 break
-        if len(results) >= max(3, min(limit, 12)):
-            return results
         try:
             fallback_results = search_youtube_public_channels(query, limit=limit)
         except (OSError, ValueError, TimeoutError, UnicodeError, json.JSONDecodeError):
