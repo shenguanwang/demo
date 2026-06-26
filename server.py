@@ -2872,6 +2872,45 @@ def extract_contact(text: str) -> str:
     return phone.group(0).strip() if phone else ""
 
 
+def clean_phone_value(value: str) -> str:
+    value = html.unescape(str(value or "")).strip()
+    value = re.sub(r"^(?:tel|phone|call|mobile|whatsapp|wa)[:：\s]+", "", value, flags=re.I)
+    value = value.strip(" \t\r\n.,;:)]}'\"")
+    value = re.sub(r"\s+", " ", value)
+    digits = re.sub(r"\D", "", value)
+    if value.startswith("+971") and len(digits) > 12:
+        return "+" + digits[:12]
+    return value
+
+
+def valid_phone_candidate(value: str, context: str = "") -> bool:
+    value = clean_phone_value(value)
+    digits = re.sub(r"\D", "", value)
+    if not 8 <= len(digits) <= 15:
+        return False
+    if re.search(r"\b20\d{2}[./-]\d{1,2}[./-]\d{1,2}", value) or value.count(".") >= 2:
+        return False
+    if len(set(digits)) <= 2 and not value.strip().startswith("+"):
+        return False
+    lowered = context.lower()
+    has_contact_label = bool(re.search(r"\b(whatsapp|phone|mobile|tel|call|contact|wa)\b|电话|联系", lowered))
+    if not value.strip().startswith("+") and not has_contact_label:
+        return False
+    return True
+
+
+def add_phone_candidate(target: list[str], value: str, context: str = "") -> None:
+    value = clean_phone_value(value)
+    if not valid_phone_candidate(value, context):
+        return
+    digits = re.sub(r"\D", "", value)
+    if not any(re.sub(r"\D", "", item) == digits for item in target):
+        target.append(value)
+
+
+PHONE_CANDIDATE_PATTERN = r"\+?\d(?:[\s().-]?\d){7,14}"
+
+
 def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
     tags = tags or {}
     text = clean_text(page)
@@ -2894,15 +2933,22 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
         if value not in emails:
             emails.append(value)
     phones = []
-    for value in re.findall(r"\+?\d[\d\s().-]{7,}\d", text):
-        value = value.strip()
-        digits = re.sub(r"\D", "", value)
-        if not 8 <= len(digits) <= 15:
+    whatsapps = []
+    for match in re.finditer(
+        rf"(?:whatsapp|wa|phone|mobile|tel|call|contact|电话|联系)[:：\s\w/.-]{{0,40}}?({PHONE_CANDIDATE_PATTERN})",
+        text,
+        flags=re.I,
+    ):
+        context = text[max(0, match.start() - 80):match.end() + 80]
+        value = match.group(1)
+        if re.search(r"whatsapp|\bwa\b", context, re.I):
+            add_phone_candidate(whatsapps, value, context)
+        add_phone_candidate(phones, value, context)
+    for match in re.finditer(PHONE_CANDIDATE_PATTERN, text):
+        context = text[max(0, match.start() - 80):match.end() + 80]
+        if not clean_phone_value(match.group(0)).startswith("+"):
             continue
-        if re.search(r"\b20\d{2}[./-]\d{1,2}[./-]\d{1,2}", value) or value.count(".") >= 2:
-            continue
-        if value not in phones:
-            phones.append(value)
+        add_phone_candidate(phones, match.group(0), context)
     whatsapp_urls = list(
         dict.fromkeys(
             html.unescape(value).rstrip(".,;:)]}'\"")
@@ -2928,10 +2974,12 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
     tag_whatsapp = tags.get("contact:whatsapp") or tags.get("whatsapp") or ""
     if tag_email and tag_email not in emails:
         emails.insert(0, tag_email)
-    if tag_phone and tag_phone not in phones:
-        phones.insert(0, tag_phone)
-    if tag_whatsapp and tag_whatsapp not in whatsapp_urls:
-        whatsapp_urls.insert(0, tag_whatsapp)
+    if tag_phone:
+        add_phone_candidate(phones, tag_phone, "phone")
+    if tag_whatsapp:
+        add_phone_candidate(whatsapps, tag_whatsapp, "whatsapp")
+        if tag_whatsapp not in whatsapp_urls:
+            whatsapp_urls.insert(0, tag_whatsapp)
 
     role_words = (
         "owner|founder|director|general manager|sales manager|purchasing manager|"
@@ -2949,8 +2997,8 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
         "emails": emails[:20],
         "phone": phones[0] if phones else "",
         "phones": phones[:20],
-        "whatsapp": whatsapp_urls[0] if whatsapp_urls else "",
-        "whatsapps": whatsapp_urls[:20],
+        "whatsapp": (whatsapps[0] if whatsapps else whatsapp_urls[0] if whatsapp_urls else ""),
+        "whatsapps": list(dict.fromkeys([*whatsapps, *whatsapp_urls]))[:20],
         "social_accounts": social_accounts,
         "contact_name": contact_name,
         "contact_role": contact_role,
@@ -3792,7 +3840,12 @@ def discover(params: dict[str, list[str]]) -> dict:
         page_text = f"{item['title']} {item['snippet']}"
         page = ""
         contact = item.get("contact", "")
-        if not item.get("skip_fetch"):
+        origin_name = item.get("origin", "")
+        is_raw_social_or_video_source = origin_name in (
+            "Facebook", "Instagram", "TikTok", "LinkedIn", "YouTube",
+            "Telegram", "X / Twitter", "Threads", "Pinterest", "Reddit", "VK",
+        )
+        if not item.get("skip_fetch") and not is_raw_social_or_video_source:
             try:
                 page = fetch_text(item["url"], timeout=8)
                 page_text = extract_meta(page)
@@ -3876,7 +3929,10 @@ def discover(params: dict[str, list[str]]) -> dict:
         customer_website = item.get("customer_website") or (
             item["url"] if source_type == "车商官网或汽车行业网站" else ""
         )
-        contacts = extract_public_contacts(page or page_text, item.get("tags"))
+        source_contact_text = f"{item.get('snippet', '')} {item.get('title', '')}"
+        contacts = extract_public_contacts(source_contact_text, item.get("tags"))
+        if not any(contacts.get(key) for key in ("email", "phone", "whatsapp")) and page:
+            contacts = extract_public_contacts(page_text, item.get("tags"))
         if is_social_profile_url(item["url"]) and item["url"] not in contacts["social_accounts"]:
             contacts["social_accounts"].insert(0, item["url"])
         if item.get("account_type") == "个人决策人":
@@ -3902,7 +3958,13 @@ def discover(params: dict[str, list[str]]) -> dict:
             contacts["email"] = contact
             contacts["emails"] = list(dict.fromkeys([contact.lower(), *(contacts.get("emails") or [])]))
         elif target_type != "individual" and contact and not contacts["phone"]:
-            contacts["phone"] = contact
+            contact_contacts = extract_public_contacts(contact)
+            if contact_contacts.get("whatsapp"):
+                contacts["whatsapp"] = contacts.get("whatsapp") or contact_contacts["whatsapp"]
+                contacts["whatsapps"] = list(dict.fromkeys([*(contacts.get("whatsapps") or []), *(contact_contacts.get("whatsapps") or [])]))
+            if contact_contacts.get("phone"):
+                contacts["phone"] = contact_contacts["phone"]
+                contacts["phones"] = list(dict.fromkeys([*(contacts.get("phones") or []), *(contact_contacts.get("phones") or [])]))
         email_sources = [
             {
                 "email": email,
@@ -3924,11 +3986,11 @@ def discover(params: dict[str, list[str]]) -> dict:
         ]
         contacts["email"] = verified_email_sources[0]["email"] if verified_email_sources else ""
         phone_sources = [
-            {"value": phone, "sources": [{"url": source_url, "name": origin}]}
+            {"value": phone, "sources": [{"url": source_url, "name": origin, "excerpt": source_excerpt[:260]}]}
             for phone in contacts.get("phones") or ([contacts["phone"]] if contacts["phone"] else [])
         ]
         whatsapp_sources = [
-            {"value": value, "sources": [{"url": source_url, "name": origin}]}
+            {"value": value, "sources": [{"url": source_url, "name": origin, "excerpt": source_excerpt[:260]}]}
             for value in contacts.get("whatsapps") or ([contacts["whatsapp"]] if contacts["whatsapp"] else [])
         ]
         recommended_models = recommend_models(combined, model)
