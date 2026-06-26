@@ -1341,6 +1341,8 @@ def is_social_profile_url(url: str) -> bool:
         if len(parts) >= 2 and parts[0].lower() == "s":
             return parts[1].lower() not in {"share", "iv"}
         return bool(parts) and parts[0].lower() not in {"s", "share", "iv"}
+    if any(name in domain for name in ("tgstat.", "telemetr.", "telegramchannels.", "tgram.", "tlgrm.")):
+        return bool(parts) and not any(part.lower() in {"login", "search"} for part in parts[:2])
     if "x.com" in domain or "twitter.com" in domain:
         if len(parts) >= 3 and parts[1].lower() == "status":
             return parts[0].lower() not in {"i", "intent", "share", "search"}
@@ -1917,9 +1919,20 @@ def social_search_variants(
         "vehicle importer",
     )
     if platform == "telegram":
+        telegram_sites = (
+            "t.me",
+            "tgstat.com",
+            "telemetr.io",
+            "telegramchannels.me",
+            "tgram.io",
+            "tlgrm.eu",
+        )
         for place in markets:
             for term in broad_terms:
-                queries.append(f"site:{site} {place} \"{term}\"")
+                for telegram_site in telegram_sites:
+                    queries.append(f"site:{telegram_site} {place} \"{term}\"")
+                queries.append(f"{place} {term} Telegram channel")
+                queries.append(f"{place} {term} Telegram group")
         return list(dict.fromkeys(queries))
     if platform == "twitter":
         for place in markets:
@@ -3710,6 +3723,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             query_variants = query_variants[:8]
         elif source_mode == "social":
             query_variants = query_variants[:12]
+        elif source_mode == "telegram":
+            query_variants = query_variants[:80]
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
         with ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants)))) as executor:
@@ -3733,7 +3748,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             "facebook": ("facebook.com", "fb.com"),
             "tiktok": ("tiktok.com",),
             "linkedin": ("linkedin.com",),
-            "telegram": ("t.me", "telegram.me", "telegram.dog"),
+            "telegram": ("t.me", "telegram.me", "telegram.dog", "tgstat.", "telemetr.", "telegramchannels.", "tgram.", "tlgrm."),
             "twitter": ("x.com", "twitter.com"),
             "threads": ("threads.net",),
             "pinterest": ("pinterest.",),
@@ -4217,6 +4232,15 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"其中 {social_search_stats['profileResults']} 条可识别为公开频道或群组。"
             "如果仍为 0，通常是 Telegram 频道/群没有被 Google、Bing、DuckDuckGo 或 Brave 收录；"
             "Telegram 没有免费的全网官方搜索 API，建议把 Telegram 作为补充来源，主来源继续使用 Google Maps、YouTube 和官网目录。"
+        )
+    if source_mode == "telegram" and not leads:
+        notice = (
+            f"Telegram 公开搜索已执行 {social_search_stats['queries']} 组查询，"
+            f"覆盖 t.me、TGStat、Telemetr、TelegramChannels、Tgram、Tlgrm 等公开索引；"
+            f"搜索引擎返回 {social_search_stats['rawResults']} 条候选，"
+            f"其中 {social_search_stats['profileResults']} 条可识别为频道、群组或目录页。"
+            "如果仍为 0，说明这些关键词在公开搜索索引里没有可用记录；"
+            "要拿 Telegram 私域/未收录数据，需要登录态采集或 Telegram 客户端 API。"
         )
     if excluded_brand_bound_dealers:
         notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定中国主机厂的单品牌 4S/授权店。"
