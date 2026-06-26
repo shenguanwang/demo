@@ -1339,10 +1339,23 @@ def is_social_profile_url(url: str) -> bool:
         return bool(parts) and (parts[0].startswith("@") or parts[0].lower() in {"tag", "discover"})
     if domain in {"t.me", "telegram.me", "telegram.dog"}:
         if len(parts) >= 2 and parts[0].lower() == "s":
-            return parts[1].lower() not in {"share", "iv"}
-        return bool(parts) and parts[0].lower() not in {"s", "share", "iv"}
-    if any(name in domain for name in ("tgstat.", "telemetr.", "telegramchannels.", "tgram.", "tlgrm.")):
-        return bool(parts) and not any(part.lower() in {"login", "search"} for part in parts[:2])
+            return parts[1].lower() not in {"share", "iv", "username"}
+        return bool(parts) and parts[0].lower() not in {"s", "share", "iv", "username"}
+    if "tgstat." in domain:
+        return len(parts) >= 2 and parts[0].lower() in {"channel", "chat"}
+    if "telemetr." in domain:
+        lower_parts = [part.lower() for part in parts]
+        return "channels" in lower_parts and lower_parts.index("channels") < len(parts) - 1
+    if "telegramchannels." in domain:
+        return len(parts) >= 2 and parts[0].lower() in {"channels", "groups"}
+    if "tgram." in domain:
+        return len(parts) >= 2 and parts[0].lower() in {"channel", "channels", "chat", "joinchat"}
+    if "tlgrm." in domain:
+        return (
+            domain in {"tlgrm.eu", "www.tlgrm.eu"}
+            and len(parts) >= 2
+            and parts[0].lower() in {"channels", "chat"}
+        )
     if "x.com" in domain or "twitter.com" in domain:
         if len(parts) >= 3 and parts[1].lower() == "status":
             return parts[0].lower() not in {"i", "intent", "share", "search"}
@@ -1928,6 +1941,10 @@ def search_telegram_directories(query: str, limit: int = 8) -> list[dict]:
     seen: set[str] = set()
     encoded = urllib.parse.quote_plus(query)
     expected_domains = ("t.me", "telegram.me", "telegram.dog", "tgstat.", "telemetr.", "telegramchannels.", "tgram.", "tlgrm.")
+    generic_titles = {
+        "channel", "channels", "group", "groups", "feedback", "stickers", "support",
+        "search", "this form", "username", "https://t.me/username",
+    }
     for source_name, template in TELEGRAM_DIRECTORY_SEARCH_URLS:
         if len(results) >= limit:
             break
@@ -1955,6 +1972,9 @@ def search_telegram_directories(query: str, limit: int = 8) -> list[dict]:
             title = clean_text(match.group(2)) or parsed.path.strip("/") or domain
             if not title or len(title) < 2:
                 title = candidate_url
+            title_key = title.lower().strip()
+            if title_key in generic_titles or "/username" in candidate_url.lower():
+                continue
             seen.add(identity)
             results.append(
                 {
