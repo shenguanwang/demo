@@ -1064,6 +1064,44 @@ def is_obviously_irrelevant_lead(text: str) -> bool:
     )
 
 
+def is_youtube_automotive_lead(title: str, snippet: str, url: str = "") -> bool:
+    text = clean_text(f"{title} {snippet} {url}").lower()
+    if not text:
+        return False
+    if re.search(
+        r"\b(motion capture|mocap|robotics?|humanoid|sensor|sensors|software|"
+        r"gaming|game studio|animation|biomechanics|wearable technology|"
+        r"industrial automation|simulation|developer platform)\b",
+        text,
+        re.I,
+    ) and not re.search(
+        r"\b(car dealer|dealership|auto trading|automotive trading|car showroom|"
+        r"used cars|cars for sale|new cars|luxury cars|car importer|vehicle importer|"
+        r"vehicle distributor|whatsapp|available for sale|car deals)\b",
+        text,
+        re.I,
+    ):
+        return False
+    strong_sales_terms = (
+        "car dealer", "cars dealer", "dealership", "car showroom", "motors showroom",
+        "auto trading", "automotive trading", "used cars", "cars for sale",
+        "new cars", "pre owned cars", "pre-owned cars", "luxury cars",
+        "car importer", "vehicle importer", "car distributor", "vehicle distributor",
+        "car export", "vehicle export", "car deals", "available for sale",
+        "brand-new cars", "brand new cars",
+    )
+    if any(term in text for term in strong_sales_terms):
+        return True
+    has_auto_subject = re.search(r"\b(car|cars|vehicle|vehicles|auto|automotive|motors)\b", text, re.I)
+    has_trade_context = re.search(
+        r"\b(showroom|dealer|dealers|importer|distributor|trading|sales|sell|buy|"
+        r"offer|offers|price|prices|available|whatsapp|contact)\b",
+        text,
+        re.I,
+    )
+    return bool(has_auto_subject and has_trade_context)
+
+
 def discovery_source_bucket(item: dict) -> str:
     origin = str(item.get("origin") or "").lower()
     source_type = str(item.get("source_type") or "").lower()
@@ -3950,12 +3988,13 @@ def discover(params: dict[str, list[str]]) -> dict:
                     "YouTube",
                     youtube_account_type,
                 )
-                youtube_discovery_candidate = bool(re.search(
-                    r"\b(car|cars|dealer|dealership|motors|automotive|vehicle|vehicles|showroom|auto)\b",
-                    f"{item.get('title', '')} {item.get('snippet', '')}",
-                    re.I,
-                ))
-                youtube_discovery_candidate = True
+                youtube_discovery_candidate = is_youtube_automotive_lead(
+                    item.get("title", ""),
+                    item.get("snippet", ""),
+                    item.get("url", ""),
+                )
+                if not youtube_discovery_candidate:
+                    continue
                 if (
                     not any(term and term in location_text for term in location_terms)
                     and not youtube_analysis.get("isCommercial")
