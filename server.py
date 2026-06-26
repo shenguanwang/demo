@@ -1926,11 +1926,8 @@ def telegram_directory_terms(market: str, target_type: str) -> list[str]:
 
 TELEGRAM_DIRECTORY_SEARCH_URLS = (
     ("TGStat", "https://tgstat.com/search?query={query}"),
-    ("TGStat", "https://tgstat.com/channels/search?query={query}"),
     ("Telemetr", "https://telemetr.io/en/channels?search={query}"),
-    ("Telemetr", "https://telemetr.io/en/channels/?q={query}"),
     ("TelegramChannels", "https://telegramchannels.me/search?search={query}"),
-    ("TelegramChannels", "https://telegramchannels.me/search?q={query}"),
     ("Tgram", "https://tgram.io/search?query={query}"),
     ("Tlgrm", "https://tlgrm.eu/channels?search={query}"),
 )
@@ -1950,7 +1947,7 @@ def search_telegram_directories(query: str, limit: int = 8) -> list[dict]:
             break
         url = template.format(query=encoded)
         try:
-            page, final_url = fetch_document(url, timeout=12)
+            page, final_url = fetch_document(url, timeout=7)
         except (OSError, ValueError, TimeoutError, urllib.error.URLError):
             continue
         base_url = final_url or url
@@ -3828,12 +3825,12 @@ def discover(params: dict[str, list[str]]) -> dict:
         elif source_mode == "social":
             query_variants = query_variants[:12]
         elif source_mode == "telegram":
-            query_variants = query_variants[:80]
+            query_variants = query_variants[:24]
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
         if platform == "telegram":
             directory_terms = telegram_directory_terms(market, target_type)
-            directory_terms = directory_terms[:36 if source_mode == "telegram" else 8]
+            directory_terms = directory_terms[:12 if source_mode == "telegram" else 4]
             social_search_stats["queries"] += len(directory_terms)
             with ThreadPoolExecutor(max_workers=min(3, max(1, len(directory_terms)))) as executor:
                 futures = [
