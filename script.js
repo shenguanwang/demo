@@ -140,6 +140,7 @@ let cloudSaveChain = Promise.resolve();
 let discoveryJobs = [];
 let discoveryJobsTimer = null;
 let discoveryJobsExpanded = false;
+let discoverySchedules = [];
 let reviewSelectedIds = new Set();
 let lastReviewDetailOpenedAt = 0;
 let currentSession = null;
@@ -2517,6 +2518,138 @@ function renderDiscoveryJobs() {
   }).join("") : `<p class="empty">暂无云端获客任务。</p>`;
 }
 
+function scheduleIntervalLabel(minutes) {
+  const value = Number(minutes || 0);
+  if (value === 60) return "每 1 小时";
+  if (value === 360) return "每 6 小时";
+  if (value === 720) return "每 12 小时";
+  if (value === 1440) return "每天";
+  if (value === 10080) return "每周";
+  if (value % 1440 === 0) return `每 ${value / 1440} 天`;
+  if (value % 60 === 0) return `每 ${value / 60} 小时`;
+  return `每 ${value} 分钟`;
+}
+
+function renderDiscoverySchedules() {
+  const box = $("#scheduleList");
+  if (!box) return;
+  const status = $("#scheduleStatus");
+  const enabledCount = discoverySchedules.filter((schedule) => schedule.enabled).length;
+  if (status) status.textContent = discoverySchedules.length
+    ? `${enabledCount} 个计划启用`
+    : "未设置计划";
+  box.innerHTML = discoverySchedules.length ? discoverySchedules.map((schedule) => `
+    <article class="schedule-item">
+      <div>
+        <div class="schedule-title">
+          <strong>${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(schedule.model || "未指定车型")}</strong>
+          <span class="${schedule.enabled ? "enabled" : "paused"}">${schedule.enabled ? "已启用" : "已暂停"}</span>
+        </div>
+        <p>${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleIntervalLabel(schedule.intervalMinutes))}</p>
+        <small>下次执行：${escapeHtml(formatJobTime(schedule.nextRunAt))}${schedule.lastRunAt ? ` · 上次执行：${escapeHtml(formatJobTime(schedule.lastRunAt))}` : ""}</small>
+      </div>
+      <div class="schedule-actions">
+        <button class="ghost compact" type="button" data-toggle-schedule="${escapeHtml(schedule.id)}">
+          ${schedule.enabled ? "暂停" : "启用"}
+        </button>
+        <button class="danger-button compact" type="button" data-delete-schedule="${escapeHtml(schedule.id)}">删除</button>
+      </div>
+    </article>
+  `).join("") : `<p class="empty">暂无定时计划。设置左侧找客户条件后，点击“保存定时抓取计划”。</p>`;
+}
+
+function currentDiscoveryPayload() {
+  const form = $("#finderForm");
+  const data = Object.fromEntries(new FormData(form).entries());
+  const words = generateKeywords(data.goal, data.country, data.model);
+  return {
+    goal: data.goal,
+    country: data.country,
+    model: data.model,
+    sourceMode: data.sourceMode,
+    accountScope: data.accountScope,
+    freshness: data.freshness,
+    resultLimit: 90,
+    keywords: words.join(" | ")
+  };
+}
+
+async function loadDiscoverySchedules() {
+  const response = await apiFetch("/api/discover/schedules", { cache: "no-store" });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  discoverySchedules = Array.isArray(result.schedules) ? result.schedules : [];
+  renderDiscoverySchedules();
+  return discoverySchedules;
+}
+
+async function saveDiscoverySchedule(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "正在保存计划";
+  }
+  try {
+    const formData = Object.fromEntries(new FormData(form).entries());
+    const response = await apiFetch("/api/discover/schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        payload: currentDiscoveryPayload(),
+        intervalMinutes: formData.intervalMinutes,
+        startMode: formData.startMode,
+        enabled: Boolean(formData.enabled)
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    await loadDiscoverySchedules();
+    await loadDiscoveryJobs().catch(() => undefined);
+    const status = $("#scheduleStatus");
+    if (status) status.textContent = "计划已保存";
+  } catch (error) {
+    const status = $("#scheduleStatus");
+    if (status) status.textContent = `保存失败：${error.message}`;
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false;
+      submitButton.textContent = "保存定时抓取计划";
+    }
+  }
+}
+
+async function toggleDiscoverySchedule(scheduleId) {
+  const schedule = discoverySchedules.find((item) => item.id === scheduleId);
+  if (!schedule) return;
+  const response = await apiFetch("/api/discover/schedules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: schedule.id,
+      payload: schedule.payload,
+      intervalMinutes: schedule.intervalMinutes,
+      startMode: "delay",
+      enabled: !schedule.enabled
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  await loadDiscoverySchedules();
+}
+
+async function deleteDiscoverySchedule(scheduleId) {
+  const response = await apiFetch("/api/discover/schedules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action: "delete", id: scheduleId })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  await loadDiscoverySchedules();
+}
+
 async function loadDiscoveryJobs() {
   const response = await apiFetch("/api/discover/jobs", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
@@ -2809,6 +2942,30 @@ function bindForms() {
     if (cancelButton && !cancelButton.disabled) cancelDiscoveryJob(cancelButton.dataset.cancelJob);
     const deleteButton = event.target.closest("[data-delete-job]");
     if (deleteButton && !deleteButton.disabled) deleteDiscoveryJob(deleteButton.dataset.deleteJob);
+  });
+
+  $("#scheduleForm")?.addEventListener("submit", saveDiscoverySchedule);
+
+  $("#scheduleList")?.addEventListener("click", (event) => {
+    const toggleButton = event.target.closest("[data-toggle-schedule]");
+    if (toggleButton) {
+      toggleButton.disabled = true;
+      toggleDiscoverySchedule(toggleButton.dataset.toggleSchedule).catch((error) => {
+        const status = $("#scheduleStatus");
+        if (status) status.textContent = `操作失败：${error.message}`;
+        toggleButton.disabled = false;
+      });
+      return;
+    }
+    const deleteButton = event.target.closest("[data-delete-schedule]");
+    if (deleteButton) {
+      deleteButton.disabled = true;
+      deleteDiscoverySchedule(deleteButton.dataset.deleteSchedule).catch((error) => {
+        const status = $("#scheduleStatus");
+        if (status) status.textContent = `删除失败：${error.message}`;
+        deleteButton.disabled = false;
+      });
+    }
   });
 
   $("#countryGrid").addEventListener("click", (event) => {
@@ -3515,8 +3672,14 @@ async function init() {
       $("#discoveryJobList").innerHTML = `<p class="empty">任务读取失败：${escapeHtml(error.message)}</p>`;
     }
   });
+  loadDiscoverySchedules().catch((error) => {
+    if ($("#scheduleList")) {
+      $("#scheduleList").innerHTML = `<p class="empty">定时计划读取失败：${escapeHtml(error.message)}</p>`;
+    }
+  });
   discoveryJobsTimer = window.setInterval(() => {
     loadDiscoveryJobs().catch(() => undefined);
+    loadDiscoverySchedules().catch(() => undefined);
   }, 5_000);
   window.addEventListener("online", () => {
     hydrateCloudState(true).catch(() => undefined);

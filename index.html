@@ -274,6 +274,40 @@
           </div>
         </div>
       </div>
+      <div class="panel section-gap scheduled-discovery">
+        <div class="panel-head">
+          <div>
+            <h3>定时自动抓取</h3>
+            <p>把左侧当前找客户条件保存为计划，到时间后后台自动创建获客任务，结果会出现在下方云端获客任务里。</p>
+          </div>
+          <span class="schedule-status" id="scheduleStatus">等待设置</span>
+        </div>
+        <form class="schedule-form" id="scheduleForm">
+          <label>执行频率
+            <select name="intervalMinutes" id="scheduleInterval">
+              <option value="60">每 1 小时</option>
+              <option value="360">每 6 小时</option>
+              <option value="720">每 12 小时</option>
+              <option value="1440" selected>每天</option>
+              <option value="10080">每周</option>
+            </select>
+          </label>
+          <label>首次执行
+            <select name="startMode" id="scheduleStartMode">
+              <option value="delay">按频率等待后执行</option>
+              <option value="now">保存后立即执行一次</option>
+            </select>
+          </label>
+          <label class="toggle-line">
+            <input type="checkbox" name="enabled" id="scheduleEnabled" checked>
+            <span>启用计划</span>
+          </label>
+          <button class="primary" type="submit">保存定时抓取计划</button>
+        </form>
+        <div class="schedule-list" id="scheduleList">
+          <p class="empty">正在读取定时计划…</p>
+        </div>
+      </div>
       <div class="panel section-gap discovery-task-center">
         <div class="panel-head">
           <div>

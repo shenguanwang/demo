@@ -55,11 +55,15 @@ SOCIAL_CAPTURE_LOCK = threading.Lock()
 DISCOVERY_JOBS: dict[str, dict] = {}
 DISCOVERY_JOBS_LOCK = threading.RLock()
 DISCOVERY_CREATE_LOCK = threading.Lock()
+DISCOVERY_SCHEDULE_LOCK = threading.RLock()
 ACTIVE_DISCOVERY_WORKERS: set[str] = set()
 ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
 DISCOVERY_MAX_CONCURRENCY = max(1, int(os.environ.get("DISCOVERY_MAX_CONCURRENCY", "2")))
 DISCOVERY_WORKER_SLOTS = threading.BoundedSemaphore(DISCOVERY_MAX_CONCURRENCY)
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
+DISCOVERY_SCHEDULER_STOP = threading.Event()
+DISCOVERY_SCHEDULER_STARTED = False
+DISCOVERY_SCHEDULER_STARTED_LOCK = threading.Lock()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 SQLITE_STATE_FILE = Path(os.environ.get("STATE_DATABASE_PATH") or (ROOT / "workbench-state.db"))
 STATE_LOCK = threading.RLock()
@@ -130,6 +134,22 @@ def initialize_state_store() -> None:
                     """
                 )
                 cursor.execute("ALTER TABLE discovery_jobs ADD COLUMN IF NOT EXISTS owner_username TEXT NOT NULL DEFAULT 'admin'")
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS discovery_schedules (
+                        schedule_id TEXT PRIMARY KEY,
+                        owner_username TEXT NOT NULL,
+                        payload JSONB NOT NULL,
+                        interval_minutes INTEGER NOT NULL,
+                        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+                        next_run_at TIMESTAMPTZ NOT NULL,
+                        last_run_at TIMESTAMPTZ,
+                        last_job_id TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL
+                    )
+                    """
+                )
         return
     SQLITE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(SQLITE_STATE_FILE) as connection:
@@ -174,6 +194,22 @@ def initialize_state_store() -> None:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(discovery_jobs)").fetchall()}
         if "owner_username" not in columns:
             connection.execute("ALTER TABLE discovery_jobs ADD COLUMN owner_username TEXT NOT NULL DEFAULT 'admin'")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS discovery_schedules (
+                schedule_id TEXT PRIMARY KEY,
+                owner_username TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                interval_minutes INTEGER NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                next_run_at TEXT NOT NULL,
+                last_run_at TEXT,
+                last_job_id TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
 
 
 def empty_workspace_state() -> dict:
@@ -521,6 +557,287 @@ def discovery_job_public(job: dict) -> dict:
         "goal": str(payload.get("goal", "")),
         "reused": bool(job.get("reused", False)),
     }
+
+
+def parse_iso_datetime(value: str | datetime | None) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
+def schedule_public(schedule: dict) -> dict:
+    payload = schedule.get("payload") or {}
+    return {
+        "id": schedule.get("id", ""),
+        "enabled": bool(schedule.get("enabled", True)),
+        "intervalMinutes": int(schedule.get("intervalMinutes", 1440)),
+        "nextRunAt": schedule.get("nextRunAt", ""),
+        "lastRunAt": schedule.get("lastRunAt", ""),
+        "lastJobId": schedule.get("lastJobId", ""),
+        "createdAt": schedule.get("createdAt", ""),
+        "updatedAt": schedule.get("updatedAt", ""),
+        "country": str(payload.get("country", "")),
+        "model": str(payload.get("model", "")),
+        "sourceMode": str(payload.get("sourceMode", "")),
+        "goal": str(payload.get("goal", "")),
+        "payload": payload,
+    }
+
+
+def normalize_schedule_payload(payload: dict) -> dict:
+    params = discovery_params(payload)
+    normalized = {key: value[0] for key, value in params.items()}
+    if not normalized.get("country"):
+        raise ValueError("请先选择目标国家")
+    if not normalized.get("model"):
+        raise ValueError("请先选择主推车型")
+    normalized.setdefault("sourceMode", "combined")
+    normalized.setdefault("accountScope", "both")
+    normalized.setdefault("freshness", "all")
+    normalized.setdefault("resultLimit", "90")
+    return normalized
+
+
+def schedule_interval_minutes(value) -> int:
+    try:
+        minutes = int(value)
+    except (TypeError, ValueError):
+        minutes = 1440
+    if minutes < 15:
+        raise ValueError("定时抓取间隔不能少于 15 分钟")
+    return min(minutes, 60 * 24 * 30)
+
+
+def next_schedule_time(interval_minutes: int, start_mode: str = "delay") -> datetime:
+    now = datetime.now(timezone.utc)
+    if start_mode == "now":
+        return now
+    return now + timedelta(minutes=interval_minutes)
+
+
+def row_to_discovery_schedule(row) -> dict:
+    payload = row[2] if isinstance(row[2], dict) else json.loads(row[2] or "{}")
+    next_run_at = row[5].isoformat() if hasattr(row[5], "isoformat") else str(row[5])
+    last_run_at = row[6].isoformat() if hasattr(row[6], "isoformat") else str(row[6] or "")
+    created_at = row[8].isoformat() if hasattr(row[8], "isoformat") else str(row[8])
+    updated_at = row[9].isoformat() if hasattr(row[9], "isoformat") else str(row[9])
+    return {
+        "id": row[0],
+        "ownerUsername": row[1],
+        "payload": payload,
+        "intervalMinutes": int(row[3]),
+        "enabled": bool(row[4]),
+        "nextRunAt": next_run_at,
+        "lastRunAt": last_run_at,
+        "lastJobId": row[7] or "",
+        "createdAt": created_at,
+        "updatedAt": updated_at,
+    }
+
+
+def save_discovery_schedule(schedule: dict) -> None:
+    initialize_state_store()
+    payload_json = json.dumps(schedule.get("payload") or {}, ensure_ascii=False)
+    with DISCOVERY_SCHEDULE_LOCK:
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO discovery_schedules (
+                            schedule_id, owner_username, payload, interval_minutes, enabled,
+                            next_run_at, last_run_at, last_job_id, created_at, updated_at
+                        )
+                        VALUES (%s, %s, %s::jsonb, %s, %s, %s, %s, %s, %s, %s)
+                        ON CONFLICT (schedule_id) DO UPDATE SET
+                            owner_username = EXCLUDED.owner_username,
+                            payload = EXCLUDED.payload,
+                            interval_minutes = EXCLUDED.interval_minutes,
+                            enabled = EXCLUDED.enabled,
+                            next_run_at = EXCLUDED.next_run_at,
+                            last_run_at = EXCLUDED.last_run_at,
+                            last_job_id = EXCLUDED.last_job_id,
+                            updated_at = EXCLUDED.updated_at
+                        """,
+                        (
+                            schedule["id"],
+                            schedule["ownerUsername"],
+                            payload_json,
+                            int(schedule["intervalMinutes"]),
+                            bool(schedule["enabled"]),
+                            schedule["nextRunAt"],
+                            schedule.get("lastRunAt") or None,
+                            schedule.get("lastJobId", ""),
+                            schedule["createdAt"],
+                            schedule["updatedAt"],
+                        ),
+                    )
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO discovery_schedules (
+                        schedule_id, owner_username, payload, interval_minutes, enabled,
+                        next_run_at, last_run_at, last_job_id, created_at, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(schedule_id) DO UPDATE SET
+                        owner_username = excluded.owner_username,
+                        payload = excluded.payload,
+                        interval_minutes = excluded.interval_minutes,
+                        enabled = excluded.enabled,
+                        next_run_at = excluded.next_run_at,
+                        last_run_at = excluded.last_run_at,
+                        last_job_id = excluded.last_job_id,
+                        updated_at = excluded.updated_at
+                    """,
+                    (
+                        schedule["id"],
+                        schedule["ownerUsername"],
+                        payload_json,
+                        int(schedule["intervalMinutes"]),
+                        1 if schedule["enabled"] else 0,
+                        schedule["nextRunAt"],
+                        schedule.get("lastRunAt") or None,
+                        schedule.get("lastJobId", ""),
+                        schedule["createdAt"],
+                        schedule["updatedAt"],
+                    ),
+                )
+
+
+def list_discovery_schedules(owner_username: str | None = None, limit: int = 50) -> list[dict]:
+    initialize_state_store()
+    query = (
+        "SELECT schedule_id, owner_username, payload, interval_minutes, enabled, "
+        "next_run_at, last_run_at, last_job_id, created_at, updated_at FROM discovery_schedules"
+    )
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                if owner_username:
+                    cursor.execute(query + " WHERE owner_username = %s ORDER BY created_at DESC LIMIT %s", (owner_username, limit))
+                else:
+                    cursor.execute(query + " ORDER BY next_run_at ASC LIMIT %s", (limit,))
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            if owner_username:
+                rows = connection.execute(query + " WHERE owner_username = ? ORDER BY created_at DESC LIMIT ?", (owner_username, limit)).fetchall()
+            else:
+                rows = connection.execute(query + " ORDER BY next_run_at ASC LIMIT ?", (limit,)).fetchall()
+    return [row_to_discovery_schedule(row) for row in rows]
+
+
+def load_discovery_schedule(schedule_id: str, owner_username: str | None = None) -> dict | None:
+    initialize_state_store()
+    query = (
+        "SELECT schedule_id, owner_username, payload, interval_minutes, enabled, "
+        "next_run_at, last_run_at, last_job_id, created_at, updated_at FROM discovery_schedules "
+        "WHERE schedule_id = "
+    )
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query + "%s" + (" AND owner_username = %s" if owner_username else ""), (schedule_id, owner_username) if owner_username else (schedule_id,))
+                row = cursor.fetchone()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            row = connection.execute(query + "?" + (" AND owner_username = ?" if owner_username else ""), (schedule_id, owner_username) if owner_username else (schedule_id,)).fetchone()
+    return row_to_discovery_schedule(row) if row else None
+
+
+def create_or_update_discovery_schedule(payload: dict, owner_username: str) -> dict:
+    schedule_id = str(payload.get("id") or "").strip()
+    now = datetime.now(timezone.utc)
+    existing = load_discovery_schedule(schedule_id, owner_username) if schedule_id else None
+    interval_minutes = schedule_interval_minutes(payload.get("intervalMinutes"))
+    schedule_payload = normalize_schedule_payload(payload.get("payload") or payload)
+    enabled = bool(payload.get("enabled", True))
+    start_mode = str(payload.get("startMode") or "delay")
+    schedule = existing or {
+        "id": uuid.uuid4().hex,
+        "ownerUsername": owner_username,
+        "createdAt": now.isoformat(timespec="seconds"),
+        "lastRunAt": "",
+        "lastJobId": "",
+    }
+    schedule.update({
+        "payload": schedule_payload,
+        "intervalMinutes": interval_minutes,
+        "enabled": enabled,
+        "nextRunAt": next_schedule_time(interval_minutes, start_mode).isoformat(timespec="seconds"),
+        "updatedAt": now.isoformat(timespec="seconds"),
+    })
+    save_discovery_schedule(schedule)
+    return schedule_public(schedule)
+
+
+def delete_discovery_schedule(schedule_id: str, owner_username: str) -> bool:
+    if not load_discovery_schedule(schedule_id, owner_username):
+        return False
+    initialize_state_store()
+    with DISCOVERY_SCHEDULE_LOCK:
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("DELETE FROM discovery_schedules WHERE schedule_id = %s AND owner_username = %s", (schedule_id, owner_username))
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                connection.execute("DELETE FROM discovery_schedules WHERE schedule_id = ? AND owner_username = ?", (schedule_id, owner_username))
+    return True
+
+
+def run_due_discovery_schedules() -> int:
+    now = datetime.now(timezone.utc)
+    ran = 0
+    for schedule in list_discovery_schedules(None, limit=200):
+        if not schedule.get("enabled"):
+            continue
+        next_run = parse_iso_datetime(schedule.get("nextRunAt"))
+        if not next_run or next_run > now:
+            continue
+        try:
+            job = create_discovery_job(schedule.get("payload") or {}, schedule["ownerUsername"])
+            schedule["lastJobId"] = job.get("id", "")
+            schedule["lastRunAt"] = now.isoformat(timespec="seconds")
+            schedule["nextRunAt"] = (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
+            schedule["updatedAt"] = now.isoformat(timespec="seconds")
+            save_discovery_schedule(schedule)
+            ran += 1
+        except Exception as exc:
+            schedule["lastRunAt"] = now.isoformat(timespec="seconds")
+            schedule["nextRunAt"] = (now + timedelta(minutes=max(15, int(schedule.get("intervalMinutes", 1440))))).isoformat(timespec="seconds")
+            schedule["updatedAt"] = now.isoformat(timespec="seconds")
+            save_discovery_schedule(schedule)
+            print(f"scheduled discovery failed for {schedule.get('id')}: {exc}")
+    return ran
+
+
+def discovery_schedule_loop() -> None:
+    while not DISCOVERY_SCHEDULER_STOP.wait(30):
+        try:
+            run_due_discovery_schedules()
+        except Exception as exc:
+            print(f"discovery scheduler tick failed: {exc}")
+
+
+def start_discovery_scheduler() -> None:
+    global DISCOVERY_SCHEDULER_STARTED
+    with DISCOVERY_SCHEDULER_STARTED_LOCK:
+        if DISCOVERY_SCHEDULER_STARTED:
+            return
+        DISCOVERY_SCHEDULER_STARTED = True
+    threading.Thread(target=discovery_schedule_loop, name="discovery-scheduler", daemon=True).start()
 
 
 def save_discovery_job(job: dict) -> None:
@@ -4648,6 +4965,15 @@ class Handler(SimpleHTTPRequestHandler):
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if parsed.path == "/api/discover/schedules":
+            if not self.require_auth(api=True):
+                return
+            try:
+                schedules = [schedule_public(schedule) for schedule in list_discovery_schedules(self.current_user()["username"])]
+                self.send_json(200, {"ok": True, "schedules": schedules})
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if parsed.path in ("/", "/index.html") and not self.require_auth():
             return
         if parsed.path.startswith("/api/") and not self.require_auth(api=True):
@@ -4795,6 +5121,25 @@ class Handler(SimpleHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
+        if parsed.path == "/api/discover/schedules":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
+                if not isinstance(payload, dict):
+                    raise ValueError("请求格式无效")
+                action = str(payload.get("action") or "save")
+                if action == "delete":
+                    schedule_id = str(payload.get("id", ""))
+                    if not delete_discovery_schedule(schedule_id, self.current_user()["username"]):
+                        self.send_json(404, {"ok": False, "error": "定时计划不存在"})
+                        return
+                    self.send_json(200, {"ok": True, "id": schedule_id})
+                    return
+                schedule = create_or_update_discovery_schedule(payload, self.current_user()["username"])
+                self.send_json(200, {"ok": True, "schedule": schedule})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
         if parsed.path == "/api/discover/mark-imported":
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
@@ -4876,6 +5221,7 @@ class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
 
 if __name__ == "__main__":
     initialize_state_store()
+    start_discovery_scheduler()
     resumed_jobs = resume_interrupted_discovery_jobs()
     with ReusableThreadingTCPServer((HOST, PORT), Handler) as httpd:
         display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
