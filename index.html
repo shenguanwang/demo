@@ -802,6 +802,55 @@
       </div>
       <div class="cards risk-grid" id="riskGrid"></div>
       <p class="risk-disclaimer">以上为成交前核验清单，不构成清关或法律结论。正式报价前应让当地清关代理、认证机构和保险方书面确认。</p>
+      <div class="panel section-gap aftersales-panel">
+        <div class="panel-head">
+          <div>
+            <h3>已完成订单售后</h3>
+            <p>成交后把订单、车辆、质保和服务记录放在这里，方便持续跟踪交付后的客户问题。</p>
+          </div>
+          <span id="afterSalesSummary">0 个售后订单</span>
+        </div>
+        <form class="aftersales-form" id="afterSalesForm">
+          <label>客户 / 订单
+            <select name="source" id="afterSalesSource">
+              <option value="">手工录入</option>
+            </select>
+          </label>
+          <label>客户名称 <input name="customer" required placeholder="例如：Dubai Premium Motors"></label>
+          <label>订单号 <input name="orderNo" placeholder="例如：SO-2026-001"></label>
+          <label>车型 <input name="model" placeholder="问界 M9 / AITO M9"></label>
+          <label>数量 <input name="qty" type="number" min="1" value="1"></label>
+          <label>VIN / 车架号 <input name="vin" placeholder="可先填待确认"></label>
+          <label>目的港 / 国家 <input name="destination" placeholder="Jebel Ali, UAE"></label>
+          <label>交付日期 <input name="deliveryDate" type="date"></label>
+          <label>质保截止 <input name="warrantyUntil" type="date"></label>
+          <label>售后状态
+            <select name="status">
+              <option>待交付</option>
+              <option>质保期内</option>
+              <option>处理中</option>
+              <option>已解决</option>
+              <option>需升级处理</option>
+              <option>已关闭</option>
+            </select>
+          </label>
+          <label>服务事项
+            <select name="serviceType">
+              <option>交付回访</option>
+              <option>质保咨询</option>
+              <option>备件需求</option>
+              <option>软件/车机问题</option>
+              <option>维修协调</option>
+              <option>客户投诉</option>
+            </select>
+          </label>
+          <label class="wide">处理记录 / 下一步
+            <textarea name="note" rows="3" placeholder="记录客户反馈、处理人、备件、预计完成时间等"></textarea>
+          </label>
+          <button class="primary" type="submit">保存售后订单</button>
+        </form>
+        <div class="aftersales-board" id="afterSalesBoard"></div>
+      </div>
     </section>
 
     <section class="section" id="kpi">

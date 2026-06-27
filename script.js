@@ -129,6 +129,7 @@ let reviewLeads = savedState.reviewLeads;
 let customers = savedState.customers;
 let rejectedLeads = savedState.rejectedLeads;
 let quoteHistory = savedState.quotes;
+let afterSalesOrders = savedState.afterSalesOrders;
 let deletedRecords = savedState.deletedRecords;
 let lastQuote = null;
 let cloudStateReady = false;
@@ -393,6 +394,7 @@ function loadSavedState() {
     customers: [],
     rejectedLeads: [],
     quotes: [],
+    afterSalesOrders: [],
     deletedRecords: [],
     ownerUsername: "",
     _cloudVersion: 0,
@@ -407,6 +409,7 @@ function loadSavedState() {
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
       rejectedLeads: Array.isArray(parsed.rejectedLeads) ? parsed.rejectedLeads : [],
       quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
+      afterSalesOrders: Array.isArray(parsed.afterSalesOrders) ? parsed.afterSalesOrders : [],
       deletedRecords: Array.isArray(parsed.deletedRecords) ? parsed.deletedRecords : [],
       ownerUsername: String(parsed.ownerUsername || ""),
       _cloudVersion: Number(parsed._cloudVersion || 0),
@@ -423,6 +426,7 @@ function workspaceStateSnapshot() {
     customers,
     rejectedLeads,
     quotes: quoteHistory,
+    afterSalesOrders,
     deletedRecords
   };
 }
@@ -442,6 +446,10 @@ function recordIdentity(record, type) {
   if (type === "quotes") {
     if (record?.id) return `quotes:id:${record.id}`;
     return `${type}:${record?.customer || ""}|${record?.model || ""}|${record?.createdAt || ""}`;
+  }
+  if (type === "afterSalesOrders") {
+    if (record?.id) return `afterSalesOrders:id:${record.id}`;
+    return `${type}:${record?.orderNo || ""}|${record?.customer || ""}|${record?.vin || ""}|${record?.createdAt || ""}`.toLowerCase();
   }
   if (record?.id) return `lead:id:${record.id}`;
   return `lead:${record?.company || ""}|${record?.country || ""}|${
@@ -487,6 +495,8 @@ function mergeWorkspaceStates(remoteState, localState) {
       .filter((record) => !deletedKeys.has(recordIdentity(record, "rejectedLeads"))),
     quotes: mergeRecordLists(remoteState?.quotes, localState?.quotes, "quotes")
       .filter((record) => !deletedKeys.has(recordIdentity(record, "quotes"))),
+    afterSalesOrders: mergeRecordLists(remoteState?.afterSalesOrders, localState?.afterSalesOrders, "afterSalesOrders")
+      .filter((record) => !deletedKeys.has(recordIdentity(record, "afterSalesOrders"))),
     deletedRecords: mergedDeletedRecords
   };
   const localBuckets = new Map();
@@ -519,6 +529,9 @@ function applyWorkspaceState(state, render = false) {
   quoteHistory = Array.isArray(state?.quotes)
     ? state.quotes.filter((record) => !deletedKeys.has(recordIdentity(record, "quotes")))
     : [];
+  afterSalesOrders = Array.isArray(state?.afterSalesOrders)
+    ? state.afterSalesOrders.filter((record) => !deletedKeys.has(recordIdentity(record, "afterSalesOrders"))).map(normalizeAfterSalesOrder)
+    : [];
   persistLocalState(localStateDirty);
   if (render) {
     renderLeads();
@@ -528,6 +541,7 @@ function applyWorkspaceState(state, render = false) {
     renderKpis();
     renderQuoteHistory();
     renderQuoteCustomerSelect();
+    renderAfterSales();
   }
 }
 
@@ -770,6 +784,214 @@ function renderRiskProfile(selected = "") {
       <p>${text}</p>
     </article>
   `).join("");
+}
+
+function normalizeAfterSalesOrder(raw = {}) {
+  const createdAt = raw.createdAt || new Date().toISOString();
+  const serviceLogs = Array.isArray(raw.serviceLogs) ? raw.serviceLogs : [];
+  return {
+    id: raw.id || `AS-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`,
+    customer: raw.customer || "",
+    orderNo: raw.orderNo || raw.quoteId || "",
+    quoteId: raw.quoteId || "",
+    customerId: raw.customerId || "",
+    model: raw.model || "",
+    qty: Number(raw.qty || 1),
+    vin: raw.vin || "",
+    destination: raw.destination || raw.country || "",
+    deliveryDate: raw.deliveryDate || "",
+    warrantyUntil: raw.warrantyUntil || "",
+    status: raw.status || "待交付",
+    serviceType: raw.serviceType || "交付回访",
+    owner: raw.owner || "",
+    note: raw.note || "",
+    createdAt,
+    updatedAt: raw.updatedAt || createdAt,
+    serviceLogs: serviceLogs.map((log) => ({
+      at: log.at || createdAt,
+      type: log.type || raw.serviceType || "交付回访",
+      note: log.note || "",
+      status: log.status || raw.status || "待交付"
+    }))
+  };
+}
+
+function afterSalesSourceOptions() {
+  const quoted = quoteHistory.map((quote, index) => ({
+    value: `quote:${index}`,
+    label: `报价 ${quote.id || index + 1} · ${quote.customer || "未命名客户"} · ${quote.model || ""}`,
+    data: quote
+  }));
+  const wonCustomers = customers
+    .map((lead, index) => ({ lead, index }))
+    .filter(({ lead }) => lead.stage === "已成交" || lead.stage === "宸叉垚浜?");
+  return [
+    ...quoted,
+    ...wonCustomers.map(({ lead, index }) => ({
+      value: `customer:${index}`,
+      label: `成交客户 · ${lead.company || "未命名客户"} · ${lead.model || ""}`,
+      data: lead
+    }))
+  ];
+}
+
+function renderAfterSalesSourceSelect() {
+  const select = $("#afterSalesSource");
+  if (!select) return;
+  const current = select.value;
+  const options = afterSalesSourceOptions();
+  select.innerHTML = `<option value="">手工录入</option>${options.map((option) =>
+    `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`
+  ).join("")}`;
+  if ([...select.options].some((option) => option.value === current)) select.value = current;
+}
+
+function fillAfterSalesFromSource(value) {
+  const form = $("#afterSalesForm");
+  if (!form || !value) return;
+  const [type, rawIndex] = value.split(":");
+  const index = Number(rawIndex);
+  if (type === "quote") {
+    const quote = quoteHistory[index];
+    if (!quote) return;
+    form.customer.value = quote.customer || "";
+    form.orderNo.value = quote.id || "";
+    form.model.value = quote.model || "";
+    form.qty.value = quote.qty || 1;
+    form.destination.value = quote.destination || "";
+    form.note.value = quote.quoteNotes || "";
+  }
+  if (type === "customer") {
+    const lead = customers[index];
+    if (!lead) return;
+    form.customer.value = lead.company || "";
+    form.orderNo.value = "";
+    form.model.value = lead.model || "";
+    form.qty.value = 1;
+    form.destination.value = destinationByCountry[countryKey(lead.country)] || lead.country || "";
+    form.note.value = lead.next || "";
+  }
+}
+
+function afterSalesHealth(order) {
+  const status = order.status || "";
+  const warrantyDate = order.warrantyUntil ? new Date(order.warrantyUntil) : null;
+  const warrantyExpired = warrantyDate && !Number.isNaN(warrantyDate.getTime()) && warrantyDate < new Date();
+  if (status.includes("升级") || status.includes("投诉")) return ["urgent", "需优先处理"];
+  if (status.includes("处理")) return ["working", "处理中"];
+  if (warrantyExpired) return ["expired", "质保已到期"];
+  if (status.includes("解决") || status.includes("关闭")) return ["closed", "已闭环"];
+  return ["normal", "正常跟踪"];
+}
+
+function renderAfterSales() {
+  renderAfterSalesSourceSelect();
+  const board = $("#afterSalesBoard");
+  const summary = $("#afterSalesSummary");
+  if (!board) return;
+  const openCount = afterSalesOrders.filter((order) => !["已解决", "已关闭"].includes(order.status)).length;
+  const urgentCount = afterSalesOrders.filter((order) => afterSalesHealth(order)[0] === "urgent").length;
+  if (summary) summary.textContent = `${afterSalesOrders.length} 个售后订单 · ${openCount} 个待跟进${urgentCount ? ` · ${urgentCount} 个需升级` : ""}`;
+  board.innerHTML = afterSalesOrders.length ? afterSalesOrders.map((order, index) => {
+    const [healthClass, healthLabel] = afterSalesHealth(order);
+    const latestLog = order.serviceLogs?.[0];
+    return `
+      <article class="aftersales-card ${healthClass}">
+        <div class="aftersales-card-head">
+          <div>
+            <span>${escapeHtml(order.orderNo || "未填写订单号")}</span>
+            <h4>${escapeHtml(order.customer || "未填写客户")}</h4>
+          </div>
+          <b>${escapeHtml(healthLabel)}</b>
+        </div>
+        <dl>
+          <div><dt>车型 / 数量</dt><dd>${escapeHtml(order.model || "待确认")} · ${escapeHtml(order.qty || 1)} 台</dd></div>
+          <div><dt>VIN</dt><dd>${escapeHtml(order.vin || "待确认")}</dd></div>
+          <div><dt>目的港</dt><dd>${escapeHtml(order.destination || "待确认")}</dd></div>
+          <div><dt>交付日期</dt><dd>${escapeHtml(order.deliveryDate || "待确认")}</dd></div>
+          <div><dt>质保截止</dt><dd>${escapeHtml(order.warrantyUntil || "待确认")}</dd></div>
+          <div><dt>当前状态</dt><dd>${escapeHtml(order.status || "待交付")}</dd></div>
+        </dl>
+        <div class="aftersales-log">
+          <strong>${escapeHtml(order.serviceType || "交付回访")}</strong>
+          <p>${escapeHtml(order.note || latestLog?.note || "暂无处理记录")}</p>
+          ${latestLog ? `<small>最近记录：${escapeHtml(formatJobTime(latestLog.at))} · ${escapeHtml(latestLog.status)}</small>` : ""}
+        </div>
+        <div class="aftersales-actions">
+          <select data-after-status="${index}" aria-label="更新售后状态">
+            ${["待交付", "质保期内", "处理中", "已解决", "需升级处理", "已关闭"].map((status) =>
+              `<option ${status === order.status ? "selected" : ""}>${status}</option>`
+            ).join("")}
+          </select>
+          <button type="button" data-after-log="${index}">追加记录</button>
+          <button class="danger-button" type="button" data-after-delete="${index}">删除</button>
+        </div>
+      </article>
+    `;
+  }).join("") : `<p class="empty">暂无已完成订单。可以从报价历史或已成交客户生成售后订单，也可以手工录入。</p>`;
+}
+
+function saveAfterSalesOrder(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = Object.fromEntries(new FormData(form).entries());
+  const now = new Date().toISOString();
+  const order = normalizeAfterSalesOrder({
+    ...data,
+    createdAt: now,
+    updatedAt: now,
+    serviceLogs: data.note ? [{ at: now, type: data.serviceType, note: data.note, status: data.status }] : []
+  });
+  afterSalesOrders.unshift(order);
+  form.reset();
+  form.qty.value = 1;
+  saveState();
+  renderAfterSales();
+  renderKpis();
+}
+
+function updateAfterSalesStatus(index, status) {
+  const order = afterSalesOrders[index];
+  if (!order) return;
+  order.status = status;
+  order.updatedAt = new Date().toISOString();
+  order.serviceLogs = [{
+    at: order.updatedAt,
+    type: "状态更新",
+    note: `售后状态更新为：${status}`,
+    status
+  }, ...(order.serviceLogs || [])].slice(0, 20);
+  saveState();
+  renderAfterSales();
+}
+
+function appendAfterSalesLog(index) {
+  const order = afterSalesOrders[index];
+  if (!order) return;
+  const note = prompt("请输入本次售后处理记录，例如客户反馈、备件进度、下一步责任人：", order.note || "");
+  if (!note) return;
+  const now = new Date().toISOString();
+  order.note = note;
+  order.updatedAt = now;
+  order.serviceLogs = [{
+    at: now,
+    type: order.serviceType || "售后跟进",
+    note,
+    status: order.status || "处理中"
+  }, ...(order.serviceLogs || [])].slice(0, 20);
+  saveState();
+  renderAfterSales();
+}
+
+function deleteAfterSalesOrder(index) {
+  const order = afterSalesOrders[index];
+  if (!order) return;
+  if (!confirm(`确认删除 ${order.customer || "该客户"} 的售后订单吗？`)) return;
+  rememberDeletedRecord(order, "afterSalesOrders");
+  afterSalesOrders.splice(index, 1);
+  saveState();
+  renderAfterSales();
+  renderKpis();
 }
 
 function renderKeywords(words = defaultKeywords) {
@@ -1451,6 +1673,7 @@ function refreshAllLeadViews() {
   renderKpis();
   renderQuoteHistory();
   renderQuoteCustomerSelect();
+  renderAfterSales();
   saveState();
 }
 
@@ -2355,7 +2578,7 @@ function renderKpis() {
   const approvalBase = reviewLeads.length + customers.length;
   const approvalRate = approvalBase ? Math.round(customers.length / approvalBase * 100) : 0;
   const replyRate = contacted ? Math.round(replied / contacted * 100) : 0;
-  const hasAnyData = reviewLeads.length || customers.length || quoteHistory.length;
+  const hasAnyData = reviewLeads.length || customers.length || quoteHistory.length || afterSalesOrders.length;
   const nextRecommendation = !hasAnyData
     ? "当前还没有客户数据。请先运行自动获客，或从已完成任务导入线索。"
     : reviewLeads.some((lead) => !lead.researchAt)
@@ -3413,6 +3636,7 @@ function bindForms() {
     }
     saveState();
     renderQuoteHistory();
+    renderAfterSales();
     renderCrm();
     renderFollowTasks();
     renderKpis();
@@ -3479,6 +3703,22 @@ function bindForms() {
   $("#followFilter")?.addEventListener("change", renderFollowTasks);
 
   $("#riskCountry").addEventListener("change", (event) => renderRiskProfile(event.target.value));
+  $("#afterSalesForm")?.addEventListener("submit", saveAfterSalesOrder);
+  $("#afterSalesSource")?.addEventListener("change", (event) => fillAfterSalesFromSource(event.target.value));
+  $("#afterSalesBoard")?.addEventListener("change", (event) => {
+    if (event.target.matches("[data-after-status]")) {
+      updateAfterSalesStatus(Number(event.target.dataset.afterStatus), event.target.value);
+    }
+  });
+  $("#afterSalesBoard")?.addEventListener("click", (event) => {
+    const logButton = event.target.closest("[data-after-log]");
+    if (logButton) {
+      appendAfterSalesLog(Number(logButton.dataset.afterLog));
+      return;
+    }
+    const deleteButton = event.target.closest("[data-after-delete]");
+    if (deleteButton) deleteAfterSalesOrder(Number(deleteButton.dataset.afterDelete));
+  });
 
   $("#quoteHistory").addEventListener("click", (event) => {
     const downloadButton = event.target.closest("[data-quote-download]");
@@ -3496,13 +3736,14 @@ function bindForms() {
     quoteHistory.splice(index, 1);
     saveState();
     renderQuoteHistory();
+    renderAfterSales();
     renderKpis();
   });
 
   $("#exportCustomerTable").addEventListener("click", exportCustomersCsv);
 
   $("#exportData").addEventListener("click", () => {
-    const text = JSON.stringify({ reviewLeads, customers, rejectedLeads, quotes: quoteHistory, deletedRecords }, null, 2);
+    const text = JSON.stringify({ reviewLeads, customers, rejectedLeads, quotes: quoteHistory, afterSalesOrders, deletedRecords }, null, 2);
     downloadFile(
       text,
       `huawei-ev-leads-${new Date().toISOString().slice(0, 10)}.json`,
@@ -3516,10 +3757,12 @@ function bindForms() {
     customers.forEach((record) => rememberDeletedRecord(record, "customers"));
     rejectedLeads.forEach((record) => rememberDeletedRecord(record, "rejectedLeads"));
     quoteHistory.forEach((record) => rememberDeletedRecord(record, "quotes"));
+    afterSalesOrders.forEach((record) => rememberDeletedRecord(record, "afterSalesOrders"));
     reviewLeads = [];
     customers = [];
     rejectedLeads = [];
     quoteHistory = [];
+    afterSalesOrders = [];
     refreshAllLeadViews();
   });
 
@@ -3542,6 +3785,7 @@ async function loadSession() {
     customers = [];
     rejectedLeads = [];
     quoteHistory = [];
+    afterSalesOrders = [];
     deletedRecords = [];
     cloudStateVersion = 0;
     localStateDirty = false;
@@ -3647,6 +3891,7 @@ async function init() {
     ["报价客户", renderQuoteCustomerSelect],
     ["跟进", renderFollowTasks],
     ["风险", renderRiskProfile],
+    ["售后", renderAfterSales],
     ["KPI", renderKpis],
     ["导航", bindNavigation],
     ["表单", bindForms]

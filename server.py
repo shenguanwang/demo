@@ -218,6 +218,7 @@ def empty_workspace_state() -> dict:
         "customers": [],
         "rejectedLeads": [],
         "quotes": [],
+        "afterSalesOrders": [],
         "deletedRecords": [],
     }
 
@@ -230,7 +231,7 @@ def normalize_workspace_state(payload: dict) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("工作台数据格式无效")
     normalized = {}
-    for key in ("reviewLeads", "customers", "rejectedLeads", "quotes", "deletedRecords"):
+    for key in ("reviewLeads", "customers", "rejectedLeads", "quotes", "afterSalesOrders", "deletedRecords"):
         value = payload.get(key, [])
         if not isinstance(value, list):
             raise ValueError(f"{key} 必须是数组")
