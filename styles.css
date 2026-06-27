@@ -3631,6 +3631,8 @@ body {
 
 .review-card {
   border-radius: 20px;
+  content-visibility: auto;
+  contain-intrinsic-size: 520px;
 }
 
 .country-card:hover,

@@ -141,6 +141,7 @@ let discoveryJobs = [];
 let discoveryJobsTimer = null;
 let discoveryJobsExpanded = false;
 let reviewSelectedIds = new Set();
+let lastReviewDetailOpenedAt = 0;
 let currentSession = null;
 let crmViewFilter = "all";
 let navigationBound = false;
@@ -642,29 +643,29 @@ function evaluateLeadScore(text, options = {}) {
   const value = String(text || "").toLowerCase();
   const dimensions = {
     tradeQualification: /import.{0,8}(license|licence|permit)|export.{0,8}(license|licence|permit)|licensed importer|customs (registration|registered|code)|trade license|commercial registration|进出口资质|进出口许可证|进口许可证|出口许可证|海关注册|海关备案|报关资质|贸易许可证|授权进口商/.test(value)
-      ? 30
-      : /vehicle importer|car importer|parallel import|import and export|汽车进口|平行进口/.test(value) ? 16 : 0,
+      ? 20
+      : /vehicle importer|car importer|parallel import|import and export|汽车进口|平行进口/.test(value) ? 11 : 0,
     customerFit: /import|distributor|进口|分销|平行进口/.test(value)
-      ? 25
+      ? 27
       : /dealer|showroom|trading|经销|展厅|贸易/.test(value)
-        ? 20
+        ? 22
         : /fleet|rental|procurement|车队|租赁|采购/.test(value)
-          ? 18
-          : /automotive|vehicle|cars|汽车/.test(value) ? 10 : 0,
+          ? 20
+          : /automotive|vehicle|cars|汽车/.test(value) ? 12 : 0,
     purchaseIntent: /rfq|looking to buy|supplier wanted|dealer wanted|bulk order|询价|求购|招募经销商|批量采购/.test(value)
-      ? 18
-      : /procurement|wholesale|fleet purchase|采购|批发|车队/.test(value) ? 13 : 0,
+      ? 20
+      : /procurement|wholesale|fleet purchase|采购|批发|车队/.test(value) ? 15 : 0,
     businessCapacity: /branches|locations|regional network|集团|分店|区域网络/.test(value)
-      ? 11
+      ? 13
       : /multi-brand|brand portfolio|多品牌/.test(value)
-        ? 9
-        : /luxury|premium|supercar|豪华|高端/.test(value) ? 6 : 0,
+        ? 11
+        : /luxury|premium|supercar|豪华|高端/.test(value) ? 7 : 0,
     modelFit: /electric|hybrid|new energy|chinese car|新能源|电动|混动|中国汽车/.test(value)
-      ? 6
-      : options.model ? 3 : 0,
+      ? 8
+      : options.model ? 5 : 0,
     contactability: /owner|founder|director|procurement manager|老板|创始人|采购经理/.test(value)
-      ? 5
-      : /@|whatsapp|phone|contact|邮箱|电话|联系/.test(value) ? 4 : 0,
+      ? 7
+      : /@|whatsapp|phone|contact|邮箱|电话|联系/.test(value) ? 6 : 0,
     penalty: 0
   };
   if (/repair|workshop|spare parts|car wash|detailing|维修|配件|洗车|美容/.test(value) &&
@@ -934,12 +935,12 @@ function renderReview() {
       <div class="score-breakdown">
         <span>评分依据${lead.manualScoreAdjustment ? ` · 人工校准 ${lead.manualScoreAdjustment > 0 ? "+" : ""}${escapeHtml(lead.manualScoreAdjustment)}` : ""}</span>
         <div class="score-dimensions">
-          <span>进出口资质 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/30</strong></span>
-          <span>客户匹配 <strong>${escapeHtml(lead.scoreDimensions?.customerFit || 0)}/25</strong></span>
-          <span>采购意向 <strong>${escapeHtml(lead.scoreDimensions?.purchaseIntent || 0)}/18</strong></span>
-          <span>经营能力 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/12</strong></span>
-          <span>车型匹配 <strong>${escapeHtml(lead.scoreDimensions?.modelFit || 0)}/10</strong></span>
-          <span>可触达性 <strong>${escapeHtml(lead.scoreDimensions?.contactability || 0)}/5</strong></span>
+          <span>进出口资质 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/20</strong></span>
+          <span>客户匹配 <strong>${escapeHtml(lead.scoreDimensions?.customerFit || 0)}/27</strong></span>
+          <span>采购意向 <strong>${escapeHtml(lead.scoreDimensions?.purchaseIntent || 0)}/20</strong></span>
+          <span>经营能力 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/14</strong></span>
+          <span>车型匹配 <strong>${escapeHtml(lead.scoreDimensions?.modelFit || 0)}/12</strong></span>
+          <span>可触达性 <strong>${escapeHtml(lead.scoreDimensions?.contactability || 0)}/7</strong></span>
           ${Number(lead.scoreDimensions?.penalty || 0) < 0
             ? `<span class="penalty">风险扣分 <strong>${escapeHtml(lead.scoreDimensions.penalty)}</strong></span>`
             : ""}
@@ -955,12 +956,28 @@ function renderReview() {
           <button type="button" data-score-reset data-index="${index}">恢复系统分</button>
         </div>
       </div>
-      <details class="review-more">
+      <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}">
         <summary>
           <span>查看全部来源与核验详情</span>
           <small>${lead.sourceCoverage?.total || lead.evidenceSources?.length || 0} 个来源 · ${(lead.socialProfiles || []).length} 个社媒账号</small>
         </summary>
-        <div class="review-more-content">
+        <div class="review-more-content" data-review-detail-content></div>
+      </details>
+      <div class="split-actions">
+        ${safeHttpUrl(lead.sourceUrl || lead.source)
+          ? `<a class="button-link ghost" href="${escapeHtml(safeHttpUrl(lead.sourceUrl || lead.source))}" target="_blank" rel="noopener noreferrer">查看线索原文</a>`
+          : `<button class="ghost" type="button" disabled title="该线索没有可打开的原始网址">查看线索原文</button>`}
+        <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
+        <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
+        <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
+      </div>
+    </article>
+  `).join("") : `<p class="empty">暂无待审核线索。一键获客抓到的客户会先出现在这里。</p>`;
+}
+
+
+function renderReviewDetailContent(lead) {
+  return `
       <div class="review-drawer-head">
         <div>
           <strong>${escapeHtml(lead.company)} · 核验详情</strong>
@@ -1055,18 +1072,54 @@ function renderReview() {
       </div>
       <p><strong>中文判断：</strong>${escapeHtml(lead.reason)}</p>
       <p><strong>审核说明：</strong>证据完整度和系统评分仅供参考；即使证据不足，也可以由人工判断后点击“通过”。</p>
-        </div>
-      </details>
-      <div class="split-actions">
-        ${safeHttpUrl(lead.sourceUrl || lead.source)
-          ? `<a class="button-link ghost" href="${escapeHtml(safeHttpUrl(lead.sourceUrl || lead.source))}" target="_blank" rel="noopener noreferrer">查看线索原文</a>`
-          : `<button class="ghost" type="button" disabled title="该线索没有可打开的原始网址">查看线索原文</button>`}
-        <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
-        <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
-        <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
-      </div>
-    </article>
-  `).join("") : `<p class="empty">暂无待审核线索。一键获客抓到的客户会先出现在这里。</p>`;
+  `;
+}
+
+function reviewDetailLead(details) {
+  const id = details?.dataset?.reviewDetailId || "";
+  const index = Number(details?.dataset?.reviewDetailIndex);
+  return reviewLeads.find((lead) => String(lead.id || "") === id) || reviewLeads[index] || null;
+}
+
+function clearReviewDetail(details) {
+  const content = details?.querySelector("[data-review-detail-content]");
+  if (!content) return;
+  content.textContent = "";
+  delete content.dataset.loaded;
+}
+
+function closeOpenReviewDetails(except = null) {
+  $$("#reviewGrid details.review-more[open]").forEach((details) => {
+    if (details !== except) details.removeAttribute("open");
+  });
+}
+
+function reviewDetailNow() {
+  return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
+}
+
+function markReviewDetailOpened() {
+  lastReviewDetailOpenedAt = reviewDetailNow();
+}
+
+function shouldSkipReviewScrollClose() {
+  return reviewDetailNow() - lastReviewDetailOpenedAt < 500;
+}
+
+function closeReviewDetailsFromUserScroll() {
+  if (!$("#review")?.classList.contains("active")) return;
+  if (shouldSkipReviewScrollClose()) return;
+  closeOpenReviewDetails();
+}
+
+function hydrateReviewDetail(details) {
+  const content = details?.querySelector("[data-review-detail-content]");
+  if (!content || content.dataset.loaded === "true") return;
+  const lead = reviewDetailLead(details);
+  content.innerHTML = lead
+    ? renderReviewDetailContent(lead)
+    : `<p class="empty">详情已刷新，请重新打开线索。</p>`;
+  content.dataset.loaded = "true";
 }
 
 function reviewLeadTimestamp(lead) {
@@ -1502,7 +1555,7 @@ function normalizeLead(raw) {
     googleReviews: Number(raw.googleReviews || 0),
     businessStatus: raw.businessStatus || "",
     baseScore,
-    scoreModelVersion: 6,
+    scoreModelVersion: 7,
     manualScoreAdjustment,
     scoreTier,
     scoreDimensions: scoreModelVersion >= 6 && raw.scoreDimensions
@@ -1513,7 +1566,7 @@ function normalizeLead(raw) {
       : fallbackBreakdown,
     scoreBasis: scoreModelVersion >= 6 && raw.scoreBasis
       ? raw.scoreBasis
-      : "100分机会模型：进出口资质30、客户匹配25、采购意向18、经营能力12、车型匹配10、可触达性5",
+      : "100分机会模型：进出口资质20、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7",
     model: raw.model || "问界 M9",
     createdAt: raw.createdAt || raw.importedAt || raw.discoveredAt || new Date().toISOString(),
     score,
@@ -3045,14 +3098,28 @@ function bindForms() {
     renderReview();
   });
 
-  $("#reviewGrid").addEventListener("scroll", () => {
-    $("#reviewGrid details[open]")?.removeAttribute("open");
-  });
+  $("#reviewGrid").addEventListener("toggle", (event) => {
+    const details = event.target;
+    if (!details?.matches?.("details.review-more")) return;
+    if (!details.open) {
+      clearReviewDetail(details);
+      return;
+    }
+    markReviewDetailOpened();
+    closeOpenReviewDetails(details);
+    hydrateReviewDetail(details);
+  }, true);
 
-  window.addEventListener("scroll", () => {
-    if (!$("#review")?.classList.contains("active")) return;
-    $("#reviewGrid details[open]")?.removeAttribute("open");
-  }, { passive: true });
+  $("#reviewGrid").addEventListener("scroll", closeReviewDetailsFromUserScroll, { passive: true });
+
+  window.addEventListener("scroll", closeReviewDetailsFromUserScroll, { passive: true });
+  window.addEventListener("wheel", closeReviewDetailsFromUserScroll, { passive: true });
+  window.addEventListener("touchmove", closeReviewDetailsFromUserScroll, { passive: true });
+  window.addEventListener("keydown", (event) => {
+    const scrollKeys = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", "Space"]);
+    if (!scrollKeys.has(event.code) && event.key !== " ") return;
+    closeReviewDetailsFromUserScroll();
+  });
 
   ["#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
     $(selector)?.addEventListener("change", renderReview);

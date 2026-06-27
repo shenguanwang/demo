@@ -2882,11 +2882,11 @@ def research_company(params: dict[str, list[str]]) -> dict:
         "confidenceLabel": confidence_label,
         "score": website_score,
         "baseScore": website_score,
-        "scoreModelVersion": 6,
+        "scoreModelVersion": 7,
         "scoreTier": score_tier,
         "scoreDimensions": score_dimensions,
         "scoreBreakdown": website_score_breakdown,
-        "scoreBasis": "100分机会模型：进出口资质30、客户匹配25、采购意向18、经营能力12、车型匹配10、可触达性5，另计风险扣分",
+        "scoreBasis": "100分机会模型：进出口资质20、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7，另计风险扣分",
         "isCompetitor": is_competitor,
         "businessSignals": business_signals,
         "intentSignals": intent_signals,
@@ -3469,64 +3469,64 @@ def lead_opportunity_score(
         "贸易许可证", "商业登记", "授权进口商",
     )
     if any(term in lower for term in qualification_terms):
-        set_dimension("tradeQualification", "明确具备进出口、海关或贸易许可资质", 30)
+        set_dimension("tradeQualification", "明确具备进出口、海关或贸易许可资质", 20)
     elif any(term in lower for term in (
         "vehicle importer", "car importer", "automotive importer",
         "parallel import", "import and export",
     )):
-        set_dimension("tradeQualification", "公开业务显示具备车辆进口经验，资质待核验", 16)
+        set_dimension("tradeQualification", "公开业务显示具备车辆进口经验，资质待核验", 11)
 
     if any(term in lower for term in ("vehicle importer", "car importer", "automotive importer", "parallel import", "import and export")):
-        set_dimension("customerFit", "汽车进口或平行进口客户", 25)
+        set_dimension("customerFit", "汽车进口或平行进口客户", 27)
     elif any(term in lower for term in ("distributor", "distribution", "authorized dealer", "exclusive dealer")):
-        set_dimension("customerFit", "品牌分销或代理客户", 23)
+        set_dimension("customerFit", "品牌分销或代理客户", 25)
     elif any(term in lower for term in ("dealer", "dealership", "showroom", "motors", "auto trading", "automotive trading")):
-        set_dimension("customerFit", "汽车经销、展厅或贸易客户", 20)
+        set_dimension("customerFit", "汽车经销、展厅或贸易客户", 22)
     elif any(term in lower for term in ("fleet", "rental", "chauffeur", "procurement", "corporate buyer")):
-        set_dimension("customerFit", "车队、租赁或企业采购客户", 18)
+        set_dimension("customerFit", "车队、租赁或企业采购客户", 20)
     elif any(term in lower for term in ("automotive", "vehicles", "cars", "auto business")):
-        set_dimension("customerFit", "汽车行业相关客户", 10)
+        set_dimension("customerFit", "汽车行业相关客户", 12)
 
     if any(term in lower for term in ("luxury", "premium", "supercar", "range rover", "mercedes", "bmw", "porsche", "bentley")):
-        set_dimension("businessCapacity", "经营豪华或高端汽车", 6)
+        set_dimension("businessCapacity", "经营豪华或高端汽车", 7)
     if any(term in lower for term in ("our brands", "brands we represent", "multi-brand", "wide range of brands", "brand portfolio")):
-        set_dimension("businessCapacity", "具备多品牌经营能力", 9)
+        set_dimension("businessCapacity", "具备多品牌经营能力", 11)
     if any(term in lower for term in ("branches", "locations", "group of companies", "nationwide", "regional network")):
-        set_dimension("businessCapacity", "具备多网点或区域经营能力", 11)
+        set_dimension("businessCapacity", "具备多网点或区域经营能力", 13)
     if google_reviews >= 100:
-        set_dimension("businessCapacity", "地图评价量显示经营规模较稳定", 12)
+        set_dimension("businessCapacity", "地图评价量显示经营规模较稳定", 14)
     elif google_reviews >= 20:
-        set_dimension("businessCapacity", "地图经营评价较充分", 7)
+        set_dimension("businessCapacity", "地图经营评价较充分", 8)
     elif any(term in lower for term in ("wholesale", "fleet", "corporate sales", "bulk sales")):
-        set_dimension("businessCapacity", "具备批发、车队或企业销售能力", 8)
+        set_dimension("businessCapacity", "具备批发、车队或企业销售能力", 10)
 
     if any(term in lower for term in BUYING_INTENT_TERMS):
-        set_dimension("purchaseIntent", "存在明确采购、询价或招商意向", 18)
+        set_dimension("purchaseIntent", "存在明确采购、询价或招商意向", 20)
     elif any(term in lower for term in ("fleet", "procurement", "wholesale", "bulk order", "corporate sales")):
-        set_dimension("purchaseIntent", "存在车队、批发或企业采购场景", 13)
+        set_dimension("purchaseIntent", "存在车队、批发或企业采购场景", 15)
     elif any(term in lower for term in ("new brand", "brand partnership", "new models", "expanding portfolio")):
-        set_dimension("purchaseIntent", "存在引入新品牌或扩充车型信号", 11)
+        set_dimension("purchaseIntent", "存在引入新品牌或扩充车型信号", 13)
 
     model_lower = requested_model.lower()
     if any(term in lower for term in ("electric vehicle", "electric cars", " ev ", "hybrid", "new energy", "chinese car", "chinese vehicle")):
-        set_dimension("modelFit", "经营新能源或中国汽车", 6)
+        set_dimension("modelFit", "经营新能源或中国汽车", 8)
     if any(term in lower for term in ("luxury", "premium", "executive", "vip", "flagship")) and any(
         term in model_lower for term in ("m9", "s800", "s9", "问界", "尊界", "享界")
     ):
-        set_dimension("modelFit", "高端客户画像与目标车型匹配", 10)
+        set_dimension("modelFit", "高端客户画像与目标车型匹配", 12)
     elif any(term in lower for term in ("suv", "4x4", "family")) and any(
         term in model_lower for term in ("m9", "m8", "r7", "问界", "智界")
     ):
-        set_dimension("modelFit", "SUV 客群与目标车型匹配", 9)
+        set_dimension("modelFit", "SUV 客群与目标车型匹配", 11)
     elif requested_model and dimensions["modelFit"] == 0:
-        set_dimension("modelFit", "汽车业务与目标车型存在基础匹配", 3)
+        set_dimension("modelFit", "汽车业务与目标车型存在基础匹配", 5)
 
     if has_official_website:
-        set_dimension("contactability", "可核验企业官网", 2)
+        set_dimension("contactability", "可核验企业官网", 3)
     if has_contact:
-        set_dimension("contactability", "存在公开商业联系方式", 4)
+        set_dimension("contactability", "存在公开商业联系方式", 6)
     if re.search(r"\b(owner|founder|director|general manager|procurement manager|purchasing manager)\b", lower):
-        set_dimension("contactability", "发现公开决策人或采购岗位", 5)
+        set_dimension("contactability", "发现公开决策人或采购岗位", 7)
 
     if re.search(r"\b(repair|workshop|spare parts|car wash|detailing|tyres?)\b", lower) and not re.search(
         r"\b(importer|distributor|dealer|dealership|showroom|vehicle sales)\b", lower
@@ -4443,11 +4443,11 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "model": model,
                 "score": score,
                 "baseScore": score,
-                "scoreModelVersion": 6,
+                "scoreModelVersion": 7,
                 "scoreTier": score_tier,
                 "scoreDimensions": score_dimensions,
                 "scoreBreakdown": score_breakdown,
-                "scoreBasis": "100分机会模型：进出口资质30、客户匹配25、采购意向18、经营能力12、车型匹配10、可触达性5，另计风险扣分",
+                "scoreBasis": "100分机会模型：进出口资质20、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7，另计风险扣分",
                 "stage": "准备联系" if score >= 80 else "待审核",
                 "next": "生成英文开发信并人工确认",
                 "website": combined[:1000],
