@@ -2065,6 +2065,9 @@ def social_search_variants(
             "tlgrm.eu",
         )
         for place in markets:
+            for telegram_site in telegram_sites:
+                queries.append(f"site:{telegram_site} {place} \"{company_terms[0]}\" contact phone email")
+                queries.append(f"site:{telegram_site} {place} \"{company_terms[0]}\" \u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b \u0442\u0435\u043b\u0435\u0444\u043e\u043d")
             for term in broad_terms:
                 for telegram_site in telegram_sites:
                     queries.append(f"site:{telegram_site} {place} \"{term}\"")
@@ -2073,6 +2076,8 @@ def social_search_variants(
         return list(dict.fromkeys(queries))
     if platform == "twitter":
         for place in markets:
+            queries.append(f"site:x.com {place} \"{company_terms[0]}\" contact phone email")
+            queries.append(f"site:twitter.com {place} \"{company_terms[0]}\" bio contact")
             for term in broad_terms:
                 queries.append(f"site:x.com {place} \"{term}\"")
                 queries.append(f"site:twitter.com {place} \"{term}\"")
@@ -2088,12 +2093,19 @@ def social_search_variants(
             "vk": ("vk.com",),
         }.get(platform, (site,))
         for place in markets:
+            for variant in site_variants:
+                queries.append(f"site:{variant} {place} \"{company_terms[0]}\" contact phone email")
+                queries.append(f"site:{variant} {place} \"{company_terms[0]}\" about bio contacts")
+                if platform in {"vk", "reddit"}:
+                    queries.append(f"site:{variant} {place} \"{company_terms[0]}\" \u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b \u0442\u0435\u043b\u0435\u0444\u043e\u043d")
             for term in broad_terms:
                 for variant in site_variants:
                     queries.append(f"site:{variant} {place} \"{term}\"")
         return list(dict.fromkeys(queries))
     if platform == "linkedin":
         for place in markets:
+            queries.append(f"site:linkedin.com/company {place} \"{company_terms[0]}\" contact email phone")
+            queries.append(f"site:linkedin.com/company {place} \"{company_terms[0]}\" about")
             for term in broad_terms:
                 queries.append(f"site:linkedin.com/company {place} \"{term}\"")
                 queries.append(f"site:linkedin.com/in {place} \"{term}\"")
@@ -3095,6 +3107,12 @@ def valid_phone_candidate(value: str, context: str = "") -> bool:
         return False
     lowered = context.lower()
     has_contact_label = bool(re.search(r"\b(whatsapp|phone|mobile|tel|call|contact|wa)\b|电话|联系", lowered))
+    if not has_contact_label:
+        has_contact_label = bool(re.search(
+            r"\b(contacts?)\b|\u0442\u0435\u043b\u0435\u0444\u043e\u043d|\u0442\u0435\u043b\.|\u043c\u043e\u0431\.|\u043a\u043e\u043d\u0442\u0430\u043a\u0442|\u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b|\u0437\u0432\u043e\u043d",
+            lowered,
+            flags=re.I,
+        ))
     if not value.strip().startswith("+") and not has_contact_label:
         return False
     return True
@@ -3109,7 +3127,7 @@ def add_phone_candidate(target: list[str], value: str, context: str = "") -> Non
         target.append(value)
 
 
-PHONE_CANDIDATE_PATTERN = r"\+?\d(?:[\s().-]?\d){7,14}"
+PHONE_CANDIDATE_PATTERN = r"\+?\d(?:[\s().-]*\d){7,14}"
 
 
 def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
@@ -3145,6 +3163,13 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
         if re.search(r"whatsapp|\bwa\b", context, re.I):
             add_phone_candidate(whatsapps, value, context)
         add_phone_candidate(phones, value, context)
+    for match in re.finditer(
+        rf"(?:\u0442\u0435\u043b\u0435\u0444\u043e\u043d|\u0442\u0435\u043b\.|\u043c\u043e\u0431\.|\u043a\u043e\u043d\u0442\u0430\u043a\u0442|\u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b|\u0437\u0432\u043e\u043d)[:\s\w/.-]{{0,40}}?({PHONE_CANDIDATE_PATTERN})",
+        text,
+        flags=re.I,
+    ):
+        context = text[max(0, match.start() - 80):match.end() + 80]
+        add_phone_candidate(phones, match.group(1), context)
     for match in re.finditer(PHONE_CANDIDATE_PATTERN, text):
         context = text[max(0, match.start() - 80):match.end() + 80]
         if not clean_phone_value(match.group(0)).startswith("+"):
@@ -3170,6 +3195,24 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
         if is_social_profile_url(value) and value not in social_accounts:
             social_accounts.append(value)
     social_accounts = social_accounts[:8]
+    websites = []
+    for value in re.findall(r'https?://[^"\'\s<]+|www\.[^\s<>"\']+', page, flags=re.I):
+        value = html.unescape(value).rstrip(".,;:)]}'\"")
+        if value.startswith("www."):
+            value = f"https://{value}"
+        parsed = urllib.parse.urlparse(value)
+        domain = parsed.netloc.lower().removeprefix("www.")
+        if not domain or any(blocked in domain for blocked in BLOCKED_DOMAINS):
+            continue
+        if any(social in domain for social in (
+            "instagram.com", "facebook.com", "linkedin.com", "tiktok.com",
+            "youtube.com", "youtu.be", "t.me", "telegram.me", "x.com",
+            "twitter.com", "threads.net", "pinterest.", "reddit.com", "vk.com",
+            "wa.me", "whatsapp.com",
+        )):
+            continue
+        if value not in websites:
+            websites.append(value)
     tag_email = tags.get("email") or tags.get("contact:email") or ""
     tag_phone = tags.get("phone") or tags.get("contact:phone") or ""
     tag_whatsapp = tags.get("contact:whatsapp") or tags.get("whatsapp") or ""
@@ -3201,9 +3244,26 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
         "whatsapp": (whatsapps[0] if whatsapps else whatsapp_urls[0] if whatsapp_urls else ""),
         "whatsapps": list(dict.fromkeys([*whatsapps, *whatsapp_urls]))[:20],
         "social_accounts": social_accounts,
+        "websites": websites[:8],
         "contact_name": contact_name,
         "contact_role": contact_role,
     }
+
+
+def merge_public_contacts(base: dict, incoming: dict) -> dict:
+    merged = dict(base or {})
+    for key in ("emails", "phones", "whatsapps", "social_accounts", "websites"):
+        values = [*(merged.get(key) or []), *(incoming.get(key) or [])]
+        merged[key] = list(dict.fromkeys(value for value in values if value))
+    for key, list_key in (
+        ("email", "emails"),
+        ("phone", "phones"),
+        ("whatsapp", "whatsapps"),
+    ):
+        merged[key] = merged.get(key) or incoming.get(key) or (merged.get(list_key) or [""])[0]
+    for key in ("contact_name", "contact_role"):
+        merged[key] = merged.get(key) or incoming.get(key) or ""
+    return merged
 
 
 def detect_competitor(text: str) -> bool:
@@ -3220,7 +3280,7 @@ def detect_competitor(text: str) -> bool:
 
 
 def is_brand_bound_chinese_dealer(text: str) -> bool:
-    """Exclude single-brand Chinese OEM 4S/authorized outlets from channel leads.
+    """Exclude single-brand OEM 4S/authorized outlets from channel leads.
 
     They are useful market intelligence, but normally cannot introduce another
     flagship brand without approval from their existing principal distributor.
@@ -3234,15 +3294,35 @@ def is_brand_bound_chinese_dealer(text: str) -> bool:
         "zeekr", "nio", "xpeng", "li auto", "东风", "长安", "吉利", "比亚迪",
         "奇瑞", "长城", "红旗", "广汽", "北汽", "江淮",
     )
+    chinese_oem_terms = chinese_oem_terms + (
+        "bmw", "mini", "mercedes", "mercedes-benz", "benz", "audi",
+        "volkswagen", "vw", "porsche", "land rover", "range rover", "jaguar",
+        "lexus", "toyota", "nissan", "infiniti", "honda", "acura", "mazda",
+        "mitsubishi", "subaru", "hyundai", "kia", "genesis", "renault",
+        "peugeot", "citroen", "skoda", "seat", "volvo", "ford", "chevrolet",
+        "cadillac", "jeep", "dodge", "chrysler", "fiat", "alfa romeo",
+        "maserati", "ferrari", "lamborghini", "bentley", "rolls-royce",
+        "\u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u044b\u0439 \u0434\u0438\u043b\u0435\u0440 bmw", "\u0434\u0438\u043b\u0435\u0440 bmw", "bmw borishof", "bmw-",
+    )
     binding_terms = (
         "4s", "4 s", "authorized dealer", "official dealer", "exclusive dealer",
         "authorized distributor", "official distributor", "brand showroom", "dealer of",
         "官方授权", "授权经销商", "品牌专营", "4s店",
     )
+    binding_terms = binding_terms + (
+        "franchise dealer", "franchised dealer", "main dealer",
+        "\u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u044b\u0439 \u0434\u0438\u043b\u0435\u0440", "\u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u043e\u0433\u043e \u0434\u0438\u043b\u0435\u0440\u0430", "\u0430\u0432\u0442\u043e\u0440\u0438\u0437\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u0434\u0438\u043b\u0435\u0440",
+        "\u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u044b\u0439 \u0441\u0435\u0440\u0432\u0438\u0441", "\u0434\u0438\u043b\u0435\u0440\u0441\u043a\u0438\u0439 \u0446\u0435\u043d\u0442\u0440", "\u0434\u0446 ",
+    )
     multi_brand_terms = (
         "multi-brand", "multiple brands", "brand portfolio", "independent importer",
         "parallel import", "import export", "auto trading", "automotive trading",
         "多品牌", "平行进口", "汽车贸易", "进出口",
+    )
+    multi_brand_terms = multi_brand_terms + (
+        "multi brand", "used cars", "pre-owned", "all brands", "97 \u0430\u0432\u0442\u043e\u043c\u043e\u0431\u0438\u043b\u044c", "97 brands",
+        "\u0430\u0432\u0442\u043e\u043c\u043e\u0431\u0438\u043b\u044c\u043d\u044b\u0439 \u0445\u043e\u043b\u0434\u0438\u043d\u0433", "\u043c\u0443\u043b\u044c\u0442\u0438\u0431\u0440\u0435\u043d\u0434", "\u043c\u0443\u043b\u044c\u0442\u0438\u0431\u0440\u0435\u043d\u0434\u043e\u0432\u044b\u0439",
+        "\u0430\u0432\u0442\u043e\u043c\u043e\u0431\u0438\u043b\u0438 \u0441 \u043f\u0440\u043e\u0431\u0435\u0433\u043e\u043c", "\u043f\u043e\u0434\u0431\u043e\u0440 \u0430\u0432\u0442\u043e\u043c\u043e\u0431\u0438\u043b\u0435\u0439", "\u0432\u044b\u043a\u0443\u043f \u0430\u0432\u0442\u043e\u043c\u043e\u0431\u0438\u043b\u0435\u0439",
     )
     return (
         any(term in lower for term in chinese_oem_terms)
@@ -3653,13 +3733,13 @@ def discover(params: dict[str, list[str]]) -> dict:
     )
     query = (
         f"{city_focus} {keywords} {customer_types} {target_profile['query']} "
-        f"official website contact email WhatsApp {exclude_query}{cutoff_query}"
+        f"official website contact contacts about profile email phone WhatsApp {exclude_query}{cutoff_query}"
     ).strip()
     cities = discovery_cities(country, city_focus)
     market = city_focus or country.split(" ")[0]
     broad_business_query = (
         f"{market} automotive importer vehicle distributor car dealer showroom "
-        f"parallel import auto trading official website contact {exclude_query}{cutoff_query}"
+        f"parallel import auto trading official website contact contacts about email phone {exclude_query}{cutoff_query}"
     ).strip()
     if target_type in {"fleet", "buying", "government"}:
         intent_query = (
@@ -3673,15 +3753,15 @@ def discover(params: dict[str, list[str]]) -> dict:
         ).strip()
     china_ev_query = (
         f"{market} Chinese car importer electric vehicle distributor dealership "
-        f"official website contact {exclude_query}{cutoff_query}"
+        f"official website contact contacts about email phone {exclude_query}{cutoff_query}"
     ).strip()
     commercial_query_variants = [
         broad_business_query,
         intent_query,
         china_ev_query,
         query,
-        f"{market} \"auto trading\" OR \"automobile trading\" car showroom import export official website {exclude_query}{cutoff_query}",
-        f"{market} luxury car importer exporter \"new cars\" \"vehicle sourcing\" official website contact {exclude_query}{cutoff_query}",
+        f"{market} \"auto trading\" OR \"automobile trading\" car showroom import export official website contact contacts {exclude_query}{cutoff_query}",
+        f"{market} luxury car importer exporter \"new cars\" \"vehicle sourcing\" official website contact about email phone {exclude_query}{cutoff_query}",
         f"{market} \"authorized dealer\" OR \"exclusive distributor\" OR \"dealer network\" automotive official website {exclude_query}{cutoff_query}",
     ]
     if target_type in {"fleet", "buying", "government"}:
@@ -3694,11 +3774,11 @@ def discover(params: dict[str, list[str]]) -> dict:
         )
     if city_focus:
         commercial_query_variants.append(
-            f"{city_focus} car dealer showroom importer WhatsApp email official website {exclude_query}{cutoff_query}"
+            f"{city_focus} car dealer showroom importer WhatsApp email phone contacts official website {exclude_query}{cutoff_query}"
         )
     for city in cities[:8]:
         commercial_query_variants.extend([
-            f"{city} car dealers directory showroom motors contact website {exclude_query}{cutoff_query}",
+            f"{city} car dealers directory showroom motors contact contacts about website {exclude_query}{cutoff_query}",
             f"{city} auto trading LLC motors showroom WhatsApp email {exclude_query}{cutoff_query}",
             f"{city} used cars showroom dealer official website phone {exclude_query}{cutoff_query}",
             f"{city} imported cars luxury motors dealership contact {exclude_query}{cutoff_query}",
@@ -4063,15 +4143,16 @@ def discover(params: dict[str, list[str]]) -> dict:
             "Facebook", "Instagram", "TikTok", "LinkedIn", "YouTube",
             "Telegram", "X / Twitter", "Threads", "Pinterest", "Reddit", "VK",
         )
-        if not item.get("skip_fetch") and not is_raw_social_or_video_source:
+        should_fetch_social_page = is_raw_social_or_video_source
+        if not item.get("skip_fetch") and (not is_raw_social_or_video_source or should_fetch_social_page):
             try:
                 page = fetch_text(item["url"], timeout=8)
                 page_text = extract_meta(page)
-                contact = contact or extract_contact(page_text)
+                contact = contact or extract_contact(page if should_fetch_social_page else page_text)
             except (OSError, TimeoutError, UnicodeError):
                 pass
 
-        combined = f"{item['title']} {item['snippet']} {page_text}"
+        combined = f"{item['title']} {item['snippet']} {page_text} {item.get('url', '')}"
         if is_obviously_irrelevant_lead(combined):
             continue
         if not is_social_result and is_brand_bound_chinese_dealer(combined):
@@ -4149,8 +4230,13 @@ def discover(params: dict[str, list[str]]) -> dict:
         )
         source_contact_text = f"{item.get('snippet', '')} {item.get('title', '')}"
         contacts = extract_public_contacts(source_contact_text, item.get("tags"))
-        if not any(contacts.get(key) for key in ("email", "phone", "whatsapp")) and page:
-            contacts = extract_public_contacts(page_text, item.get("tags"))
+        if page and (is_raw_social_or_video_source or not any(contacts.get(key) for key in ("email", "phone", "whatsapp"))):
+            contacts = merge_public_contacts(
+                contacts,
+                extract_public_contacts(page if is_raw_social_or_video_source else page_text, item.get("tags")),
+            )
+        if not customer_website and contacts.get("websites"):
+            customer_website = contacts["websites"][0]
         if is_social_profile_url(item["url"]) and item["url"] not in contacts["social_accounts"]:
             contacts["social_accounts"].insert(0, item["url"])
         if item.get("account_type") == "个人决策人":
@@ -4395,7 +4481,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             "要拿 Telegram 私域/未收录数据，需要登录态采集或 Telegram 客户端 API。"
         )
     if excluded_brand_bound_dealers:
-        notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定中国主机厂的单品牌 4S/授权店。"
+        notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定主机厂的单品牌 4S/授权店。"
     if freshness_days and not leads and not notice:
         notice = f"没有找到可确认发布日期且在最近 {freshness_days} 天内的线索。可以放宽到 30 天，或更换 Instagram、Facebook、LinkedIn 来源。"
     if source_mode == "google" and not leads and not notice:
