@@ -1108,8 +1108,12 @@ function shouldSkipReviewScrollClose() {
 
 function closeReviewDetailsFromUserScroll() {
   if (!$("#review")?.classList.contains("active")) return;
-  if (shouldSkipReviewScrollClose()) return;
   closeOpenReviewDetails();
+}
+
+function closeReviewDetailsFromScrollEvent() {
+  if (shouldSkipReviewScrollClose()) return;
+  closeReviewDetailsFromUserScroll();
 }
 
 function hydrateReviewDetail(details) {
@@ -3110,9 +3114,9 @@ function bindForms() {
     hydrateReviewDetail(details);
   }, true);
 
-  $("#reviewGrid").addEventListener("scroll", closeReviewDetailsFromUserScroll, { passive: true });
+  $("#reviewGrid").addEventListener("scroll", closeReviewDetailsFromScrollEvent, { passive: true });
 
-  window.addEventListener("scroll", closeReviewDetailsFromUserScroll, { passive: true });
+  window.addEventListener("scroll", closeReviewDetailsFromScrollEvent, { passive: true });
   window.addEventListener("wheel", closeReviewDetailsFromUserScroll, { passive: true });
   window.addEventListener("touchmove", closeReviewDetailsFromUserScroll, { passive: true });
   window.addEventListener("keydown", (event) => {
