@@ -3992,7 +3992,7 @@ td {
 
 .review-filter-group {
   display: grid;
-  grid-template-columns: minmax(132px, 0.8fr) minmax(260px, 1.35fr) minmax(132px, 0.8fr) auto;
+  grid-template-columns: minmax(132px, 0.8fr) minmax(220px, 1.2fr) minmax(150px, 0.9fr) minmax(132px, 0.8fr) auto;
   align-items: end;
   gap: 10px;
 }

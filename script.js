@@ -1163,25 +1163,58 @@ function reviewSourceKey(lead) {
   return "dealer";
 }
 
+function reviewCountryKey(value) {
+  const key = countryKey(value);
+  return key ? key.toLowerCase() : "";
+}
+
+function reviewLeadCountryKey(lead) {
+  return reviewCountryKey(lead.country);
+}
+
 function renderReviewFilterOptions() {
   const sourceSelect = $("#reviewSourceFilter");
-  if (!sourceSelect) return;
-  const current = sourceSelect.value || "all";
+  const countrySelect = $("#reviewCountryFilter");
+  if (!sourceSelect && !countrySelect) return;
+  const current = sourceSelect?.value || "all";
   const available = new Set(reviewLeads.map(reviewSourceKey));
-  const options = reviewSourceOptions
-    .filter(([value]) => available.has(value) || value === current)
-    .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
-    .join("");
-  sourceSelect.innerHTML = `<option value="all">全部来源</option>${options || reviewSourceOptions.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
-  sourceSelect.value = current === "all" || [...available].includes(current) ? current : "all";
+  if (sourceSelect) {
+    const options = reviewSourceOptions
+      .filter(([value]) => available.has(value) || value === current)
+      .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+      .join("");
+    sourceSelect.innerHTML = `<option value="all">全部来源</option>${options || reviewSourceOptions.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
+    sourceSelect.value = current === "all" || [...available].includes(current) ? current : "all";
+  }
+
+  if (countrySelect) {
+    const currentCountry = countrySelect.value || "all";
+    const countryOptions = new Map();
+    countries.forEach((country) => {
+      const value = reviewCountryKey(country.name);
+      if (value) countryOptions.set(value, country.name);
+    });
+    reviewLeads.forEach((lead) => {
+      const value = reviewLeadCountryKey(lead);
+      if (value && !countryOptions.has(value)) countryOptions.set(value, lead.country);
+    });
+    const countryOptionHtml = [...countryOptions.entries()]
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1]), "zh-CN"))
+      .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+      .join("");
+    countrySelect.innerHTML = `<option value="all">全部国家</option>${countryOptionHtml}`;
+    countrySelect.value = currentCountry === "all" || countryOptions.has(currentCountry) ? currentCountry : "all";
+  }
 }
 
 function reviewLeadMatchesFilters(lead) {
   const timeFilter = $("#reviewTimeFilter")?.value || "all";
   const sourceFilter = $("#reviewSourceFilter")?.value || "all";
+  const countryFilter = $("#reviewCountryFilter")?.value || "all";
   const tierFilter = $("#reviewTierFilter")?.value || "all";
   const source = reviewSourceKey(lead);
   if (sourceFilter !== "all" && source !== sourceFilter) return false;
+  if (countryFilter !== "all" && reviewLeadCountryKey(lead) !== countryFilter) return false;
   if (tierFilter !== "all" && lead.scoreTier !== tierFilter) return false;
   if (timeFilter === "all") return true;
   const date = reviewLeadTimestamp(lead);
@@ -3012,13 +3045,23 @@ function bindForms() {
     renderReview();
   });
 
-  ["#reviewTimeFilter", "#reviewSourceFilter", "#reviewTierFilter"].forEach((selector) => {
+  $("#reviewGrid").addEventListener("scroll", () => {
+    $("#reviewGrid details[open]")?.removeAttribute("open");
+  });
+
+  window.addEventListener("scroll", () => {
+    if (!$("#review")?.classList.contains("active")) return;
+    $("#reviewGrid details[open]")?.removeAttribute("open");
+  }, { passive: true });
+
+  ["#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
     $(selector)?.addEventListener("change", renderReview);
   });
 
   $("#clearReviewFilters")?.addEventListener("click", () => {
     $("#reviewTimeFilter").value = "all";
     $("#reviewSourceFilter").value = "all";
+    $("#reviewCountryFilter").value = "all";
     $("#reviewTierFilter").value = "all";
     renderReview();
   });
