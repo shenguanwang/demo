@@ -2481,19 +2481,20 @@ function renderFollowTasks() {
   const box = $("#followTasks");
   if (!box) return;
   const today = new Date().toISOString().slice(0, 10);
+  const defaultNextDate = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
   const filter = $("#followFilter")?.value || "due";
   const allTasks = customers
     .map((lead, index) => ({ lead, index }))
     .filter(({ lead }) => !["已成交", "已流失"].includes(lead.stage));
   const dueCount = allTasks.filter(({ lead }) => !lead.nextFollowAt || lead.nextFollowAt <= today).length;
   const overdueCount = allTasks.filter(({ lead }) => lead.nextFollowAt && lead.nextFollowAt < today).length;
-  const summary = $("#followSummary");
-  if (summary) summary.innerHTML = `<span>待跟进 <strong>${allTasks.length}</strong></span><span>今日到期 <strong>${dueCount}</strong></span><span class="${overdueCount ? "overdue" : ""}">已逾期 <strong>${overdueCount}</strong></span>`;
   const tasks = allTasks
     .filter(({ lead }) => filter === "all"
       || (filter === "recent" ? (lead.followUpHistory || []).length : !lead.nextFollowAt || lead.nextFollowAt <= today))
     .sort((a, b) => String(a.lead.nextFollowAt || "").localeCompare(String(b.lead.nextFollowAt || "")))
     .slice(0, 30);
+  const summary = $("#followSummary");
+  if (summary) summary.innerHTML = `<span>当前显示 <strong>${tasks.length}</strong></span><span>今日到期 <strong>${dueCount}</strong></span><span class="${overdueCount ? "overdue" : ""}">已逾期 <strong>${overdueCount}</strong></span>`;
   box.innerHTML = tasks.length ? tasks.map(({ lead, index }) => `
     <article class="${lead.nextFollowAt && lead.nextFollowAt < today ? "follow-overdue" : ""}">
       <span>${escapeHtml(lead.stage || "待跟进")}${lead.score >= 80 ? " · A 级优先" : ""}</span>
@@ -2516,7 +2517,7 @@ function renderFollowTasks() {
           <option value="需要报价">需要报价</option><option value="继续跟进">继续跟进</option>
           <option value="暂缓">暂缓</option><option value="无效客户">无效客户</option>
         </select>
-        <input data-follow-date="${index}" type="date" value="${escapeHtml(lead.nextFollowAt || today)}">
+        <input data-follow-date="${index}" type="date" value="${escapeHtml(lead.nextFollowAt && lead.nextFollowAt > today ? lead.nextFollowAt : defaultNextDate)}">
         <input data-follow-note="${index}" placeholder="记录客户反馈或下一步">
         <button type="button" data-follow-action="record" data-index="${index}">保存记录</button>
       </div>
@@ -2533,8 +2534,9 @@ function renderFollowTasks() {
 function recordFollowUp(index) {
   const lead = customers[index];
   if (!lead) return;
+  const button = document.querySelector(`[data-follow-action="record"][data-index="${index}"]`);
   const outcome = document.querySelector(`[data-follow-outcome="${index}"]`)?.value || "继续跟进";
-  const nextDate = document.querySelector(`[data-follow-date="${index}"]`)?.value || "";
+  const nextDate = document.querySelector(`[data-follow-date="${index}"]`)?.value || new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
   const nextTime = document.querySelector(`[data-follow-time="${index}"]`)?.value || "10:00";
   const assignedTo = document.querySelector(`[data-follow-owner="${index}"]`)?.value.trim() || "管理员";
   const customerTimezone = document.querySelector(`[data-follow-timezone="${index}"]`)?.value.trim() || "";
@@ -2561,6 +2563,10 @@ function recordFollowUp(index) {
   if (outcome === "暂缓") lead.stage = "暂缓";
   if (outcome === "无效客户") lead.stage = "已流失";
   lead.next = note || defaultNextAction(lead.stage);
+  if (button) {
+    button.disabled = true;
+    button.textContent = "已保存";
+  }
   refreshAllLeadViews();
 }
 

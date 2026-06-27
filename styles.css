@@ -647,9 +647,9 @@ button:disabled {
 
 .follow-entry {
   display: grid;
-  grid-template-columns: minmax(130px, .7fr) minmax(140px, .7fr) minmax(220px, 1.5fr) auto;
-  gap: 7px;
-  margin: 12px 0;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(150px, 0.8fr) minmax(240px, 1.4fr);
+  gap: 10px;
+  margin: 14px 0 12px;
 }
 
 .follow-context {
@@ -688,6 +688,9 @@ button:disabled {
 }
 
 .follow-entry button {
+  grid-column: 1 / -1;
+  justify-self: end;
+  min-width: 116px;
   background: #263340;
   color: #fff;
   font-weight: 700;
@@ -3066,13 +3069,13 @@ tbody tr:last-child td {
 
 .risk-grid article {
   position: relative;
-  padding-top: 48px;
+  padding-top: 22px;
 }
 
 .risk-timing {
-  position: absolute;
-  top: 16px;
-  left: 18px;
+  display: inline-flex;
+  width: fit-content;
+  margin-bottom: 12px;
   padding: 5px 8px;
   border-radius: 999px;
   background: #fbf3e5;
