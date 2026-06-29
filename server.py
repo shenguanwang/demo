@@ -2875,6 +2875,51 @@ def official_site_pages(website: str) -> list[dict]:
     return pages
 
 
+def company_domain_candidates(company: str) -> list[str]:
+    stop_words = {
+        "auto", "autos", "car", "cars", "motor", "motors", "group", "llc",
+        "ltd", "inc", "co", "company", "trading", "dealer", "dealership",
+    }
+    tokens = [
+        token.lower()
+        for token in re.findall(r"[a-z0-9]+", company or "", flags=re.I)
+        if len(token) > 1
+    ]
+    core_tokens = [token for token in tokens if token not in stop_words] or tokens
+    if not core_tokens:
+        return []
+    joined = "".join(core_tokens[:4])
+    dashed = "-".join(core_tokens[:4])
+    candidates = [f"https://www.{joined}.com", f"https://{joined}.com"]
+    if dashed != joined:
+        candidates.extend([f"https://www.{dashed}.com", f"https://{dashed}.com"])
+    return list(dict.fromkeys(candidates))
+
+
+def website_matches_company(company: str, pages: list[dict]) -> bool:
+    tokens = [
+        token.lower()
+        for token in re.findall(r"[a-z0-9]+", company or "", flags=re.I)
+        if len(token) > 2
+    ]
+    if not tokens or not pages:
+        return False
+    haystack = " ".join(
+        f"{page.get('url', '')} {page.get('text', '')}"
+        for page in pages[:2]
+    ).lower()
+    required = min(len(tokens), 2)
+    return sum(token in haystack for token in tokens[:4]) >= required
+
+
+def infer_company_website(company: str) -> tuple[str, list[dict]]:
+    for candidate in company_domain_candidates(company):
+        pages = official_site_pages(candidate)
+        if website_matches_company(company, pages):
+            return pages[0]["url"], pages
+    return "", []
+
+
 def research_company(params: dict[str, list[str]]) -> dict:
     company = clean_text((params.get("company") or [""])[0])
     country = clean_text((params.get("country") or [""])[0])
@@ -2905,12 +2950,16 @@ def research_company(params: dict[str, list[str]]) -> dict:
         "contact_role_sources": [],
     }
 
+    inferred_site_pages: list[dict] = []
+    if not website:
+        website, inferred_site_pages = infer_company_website(company)
+
     if source_url:
         name, kind = source_category(source_url)
         evidence.append(evidence_item(source_url, company, "原始线索来源", name, kind))
         seen_urls.add(source_url.lower().rstrip("/"))
 
-    site_pages = official_site_pages(website)
+    site_pages = inferred_site_pages or official_site_pages(website)
     official_website_text = " ".join(
         clean_text(page.get("html", ""))[:20_000] or page.get("text", "")
         for page in site_pages
