@@ -144,7 +144,6 @@ let discoveryJobsExpanded = false;
 let discoverySchedules = [];
 let reviewSelectedIds = new Set();
 let selectedReviewLeadId = "";
-let lastReviewDetailOpenedAt = 0;
 let currentSession = null;
 let crmViewFilter = "all";
 let navigationBound = false;
@@ -1392,28 +1391,6 @@ function closeOpenReviewDetails(except = null) {
   $$("#reviewGrid details.review-more[open]").forEach((details) => {
     if (details !== except) details.removeAttribute("open");
   });
-}
-
-function reviewDetailNow() {
-  return typeof performance !== "undefined" && performance.now ? performance.now() : Date.now();
-}
-
-function markReviewDetailOpened() {
-  lastReviewDetailOpenedAt = reviewDetailNow();
-}
-
-function shouldSkipReviewScrollClose() {
-  return reviewDetailNow() - lastReviewDetailOpenedAt < 500;
-}
-
-function closeReviewDetailsFromUserScroll() {
-  if (!$("#review")?.classList.contains("active")) return;
-  closeOpenReviewDetails();
-}
-
-function closeReviewDetailsFromScrollEvent() {
-  if (shouldSkipReviewScrollClose()) return;
-  closeReviewDetailsFromUserScroll();
 }
 
 function hydrateReviewDetail(details) {
@@ -3579,21 +3556,9 @@ function bindForms() {
       clearReviewDetail(details);
       return;
     }
-    markReviewDetailOpened();
     closeOpenReviewDetails(details);
     hydrateReviewDetail(details);
   }, true);
-
-  $("#reviewGrid").addEventListener("scroll", closeReviewDetailsFromScrollEvent, { passive: true });
-
-  window.addEventListener("scroll", closeReviewDetailsFromScrollEvent, { passive: true });
-  window.addEventListener("wheel", closeReviewDetailsFromUserScroll, { passive: true });
-  window.addEventListener("touchmove", closeReviewDetailsFromUserScroll, { passive: true });
-  window.addEventListener("keydown", (event) => {
-    const scrollKeys = new Set(["ArrowDown", "ArrowUp", "PageDown", "PageUp", "Home", "End", "Space"]);
-    if (!scrollKeys.has(event.code) && event.key !== " ") return;
-    closeReviewDetailsFromUserScroll();
-  });
 
   ["#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
     $(selector)?.addEventListener("change", renderReview);

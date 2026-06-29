@@ -2170,41 +2170,21 @@ textarea {
   padding: 0 16px 16px;
 }
 
-.review-drawer-head {
-  display: none;
-}
-
 .review-more[open] .review-more-content {
-  position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 40;
-  width: min(720px, 92vw);
-  overflow-y: auto;
-  padding: 20px 22px 30px;
-  border-left: 1px solid var(--line);
+  padding: 16px;
+  border-top: 1px solid var(--line);
   background: #fff;
-  box-shadow: -18px 0 42px rgba(15, 23, 42, 0.18);
-}
-
-.review-more[open] > summary {
-  display: none;
 }
 
 .review-drawer-head {
-  position: sticky;
-  top: -20px;
-  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  margin: -20px -22px 14px;
-  padding: 16px 22px;
+  margin: -2px 0 14px;
+  padding: 0 0 12px;
   border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.96);
-  backdrop-filter: blur(10px);
+  background: #fff;
 }
 
 .review-drawer-head > div {
@@ -3597,17 +3577,6 @@ tbody tr:last-child td {
     flex-direction: column;
   }
 
-  .review-more[open] .review-more-content {
-    width: 100vw;
-    padding: 18px 16px 28px;
-  }
-
-  .review-drawer-head {
-    top: -18px;
-    margin: -18px -16px 14px;
-    padding: 14px 16px;
-  }
-
   .review-decision {
     grid-template-columns: 1fr 1fr;
   }
@@ -4161,11 +4130,11 @@ tbody tr:hover td {
 
 .review-more[open] .review-more-content {
   background: #ffffff;
-  box-shadow: -12px 0 34px rgba(18, 26, 34, 0.12);
+  box-shadow: none;
 }
 
 .review-drawer-head {
-  background: rgba(255, 255, 255, 0.96);
+  background: #fff;
 }
 
 .section-head {
