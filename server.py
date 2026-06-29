@@ -1513,6 +1513,13 @@ BLOCKED_DOMAINS = (
     "wikimedia.org",
     "youtube.com",
     "youtu.be",
+    "ytimg.com",
+    "iytimg.com",
+    "gstatic.com",
+    "googleusercontent.com",
+    "doubleclick.net",
+    "googletagmanager.com",
+    "google-analytics.com",
     "google.com",
     "bing.com",
     "facebook.com/search",
@@ -1671,6 +1678,73 @@ def normalize_public_url(value: str) -> str:
     if not re.match(r"^https?://", value, flags=re.I):
         return "https://" + value.lstrip("/")
     return value
+
+
+SOCIAL_OR_PLATFORM_DOMAINS = (
+    "instagram.com", "facebook.com", "linkedin.com", "tiktok.com",
+    "youtube.com", "youtu.be", "t.me", "telegram.me", "telegram.dog",
+    "x.com", "twitter.com", "threads.net", "pinterest.", "reddit.com",
+    "vk.com", "wa.me", "whatsapp.com", "linktr.ee", "beacons.ai",
+    "taplink.", "bit.ly", "tinyurl.com",
+)
+
+STATIC_ASSET_DOMAINS = (
+    "bootstrap", "jquery", "fontawesome", "cloudflare", "cloudfront.net",
+    "jsdelivr.net", "unpkg.com", "cdnjs.", "akamai", "dlron.us",
+    "dealerinspire.com", "dealer.com", "carsforsale.com",
+)
+
+NON_CUSTOMER_WEBSITE_PATHS = (
+    "/generate_204", "/gen_204", "/favicon", "/pixel", "/collect",
+    "/analytics", "/ads/", "/static/", "/assets/", "/cdn-cgi/",
+)
+
+
+def is_business_website_url(url: str) -> bool:
+    normalized = normalize_public_url(url)
+    if not normalized:
+        return False
+    parsed = urllib.parse.urlparse(normalized)
+    domain = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path.lower()
+    if not domain or "." not in domain:
+        return False
+    if any(blocked in domain for blocked in BLOCKED_DOMAINS):
+        return False
+    if domain.startswith(("cdn.", "static.", "assets.", "img.", "images.", "media.")):
+        return False
+    if any(asset in domain for asset in STATIC_ASSET_DOMAINS):
+        return False
+    if any(platform in domain for platform in SOCIAL_OR_PLATFORM_DOMAINS):
+        return False
+    if any(part in path for part in NON_CUSTOMER_WEBSITE_PATHS):
+        return False
+    if re.search(r"\.(?:png|jpe?g|gif|svg|webp|css|js|ico|json|xml|txt|pdf)$", path):
+        return False
+    return True
+
+
+def extract_business_websites(page: str) -> list[str]:
+    candidates = []
+    for value in re.findall(r'https?://[^"\'\s<]+|www\.[^\s<>"\']+', page, flags=re.I):
+        value = html.unescape(value).rstrip(".,;:)]}'\"")
+        if value.startswith("www."):
+            value = f"https://{value}"
+        if is_business_website_url(value):
+            candidates.append(normalize_public_url(value))
+    text = clean_text(page)
+    for value in re.findall(
+        r"(?<![@/\w.-])(?:[a-z0-9-]+\.)+[a-z]{2,}(?:/[^\s<>'\"]*)?",
+        text,
+        flags=re.I,
+    ):
+        value = html.unescape(value).rstrip(".,;:)]}'\"")
+        domain = urllib.parse.urlparse(normalize_public_url(value)).netloc.lower()
+        if domain in {"example.com", "example.org", "example.net", "mail.com"}:
+            continue
+        if is_business_website_url(value):
+            candidates.append(normalize_public_url(value))
+    return list(dict.fromkeys(candidates))[:8]
 
 
 def is_social_profile_url(url: str) -> bool:
@@ -2768,7 +2842,7 @@ def email_context(text: str, email: str, radius: int = 120) -> str:
 
 def official_site_pages(website: str) -> list[dict]:
     website = normalize_public_url(website)
-    if not website:
+    if not is_business_website_url(website):
         return []
     try:
         homepage, final_website = fetch_document(website, timeout=12)
@@ -2808,6 +2882,8 @@ def research_company(params: dict[str, list[str]]) -> dict:
     lead_type = clean_text((params.get("type") or [""])[0])
     website = normalize_public_url((params.get("website") or [""])[0])
     source_url = normalize_public_url((params.get("sourceUrl") or [""])[0])
+    if website and not is_business_website_url(website):
+        website = ""
     if not company:
         raise ValueError("缺少公司名称")
 
@@ -3419,12 +3495,18 @@ def valid_phone_candidate(value: str, context: str = "") -> bool:
     digits = re.sub(r"\D", "", value)
     if not 8 <= len(digits) <= 15:
         return False
+    if len(digits) == 10 and digits[0] in "01":
+        return False
+    if len(digits) == 11 and digits.startswith("1") and digits[1] in "01":
+        return False
     if re.search(r"\b20\d{2}[./-]\d{1,2}[./-]\d{1,2}", value) or value.count(".") >= 2:
         return False
     if len(set(digits)) <= 2 and not value.strip().startswith("+"):
         return False
     lowered = context.lower()
     has_contact_label = bool(re.search(r"\b(whatsapp|phone|mobile|tel|call|contact|wa)\b|电话|联系", lowered))
+    if not has_contact_label:
+        has_contact_label = bool(re.search(r"\b(click|sales|service|parts|appointment|dealer|dealership)\b", lowered))
     if not has_contact_label:
         has_contact_label = bool(re.search(
             r"\b(contacts?)\b|\u0442\u0435\u043b\u0435\u0444\u043e\u043d|\u0442\u0435\u043b\.|\u043c\u043e\u0431\.|\u043a\u043e\u043d\u0442\u0430\u043a\u0442|\u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b|\u0437\u0432\u043e\u043d",
@@ -3446,6 +3528,7 @@ def add_phone_candidate(target: list[str], value: str, context: str = "") -> Non
 
 
 PHONE_CANDIDATE_PATTERN = r"\+?\d(?:[\s().-]*\d){7,14}"
+NANP_PHONE_PATTERN = r"(?<!\d)(?:\+?1[\s().-]*)?(?:[2-9]\d{2})[\s().-]*[2-9]\d{2}[\s().-]*\d{4}(?!\d)"
 
 
 def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
@@ -3482,6 +3565,16 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
             add_phone_candidate(whatsapps, value, context)
         add_phone_candidate(phones, value, context)
     for match in re.finditer(
+        rf"(?:whatsapp|wa|phone|mobile|tel|call|click|contact|sales|service|parts|appointment)[^\d+]{{0,70}}?({PHONE_CANDIDATE_PATTERN})",
+        text,
+        flags=re.I,
+    ):
+        context = text[max(0, match.start() - 100):match.end() + 100]
+        value = match.group(1)
+        if re.search(r"whatsapp|\bwa\b", context, re.I):
+            add_phone_candidate(whatsapps, value, context)
+        add_phone_candidate(phones, value, context)
+    for match in re.finditer(
         rf"(?:\u0442\u0435\u043b\u0435\u0444\u043e\u043d|\u0442\u0435\u043b\.|\u043c\u043e\u0431\.|\u043a\u043e\u043d\u0442\u0430\u043a\u0442|\u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b|\u0437\u0432\u043e\u043d)[:\s\w/.-]{{0,40}}?({PHONE_CANDIDATE_PATTERN})",
         text,
         flags=re.I,
@@ -3493,6 +3586,10 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
         if not clean_phone_value(match.group(0)).startswith("+"):
             continue
         add_phone_candidate(phones, match.group(0), context)
+    for match in re.finditer(NANP_PHONE_PATTERN, text):
+        context = text[max(0, match.start() - 100):match.end() + 100]
+        if re.search(r"\b(phone|tel|call|click|contact|sales|service|parts|appointment|dealer|dealership)\b", context, re.I):
+            add_phone_candidate(phones, match.group(0), context)
     whatsapp_urls = list(
         dict.fromkeys(
             html.unescape(value).rstrip(".,;:)]}'\"")
@@ -3513,24 +3610,7 @@ def extract_public_contacts(page: str, tags: dict | None = None) -> dict:
         if is_social_profile_url(value) and value not in social_accounts:
             social_accounts.append(value)
     social_accounts = social_accounts[:8]
-    websites = []
-    for value in re.findall(r'https?://[^"\'\s<]+|www\.[^\s<>"\']+', page, flags=re.I):
-        value = html.unescape(value).rstrip(".,;:)]}'\"")
-        if value.startswith("www."):
-            value = f"https://{value}"
-        parsed = urllib.parse.urlparse(value)
-        domain = parsed.netloc.lower().removeprefix("www.")
-        if not domain or any(blocked in domain for blocked in BLOCKED_DOMAINS):
-            continue
-        if any(social in domain for social in (
-            "instagram.com", "facebook.com", "linkedin.com", "tiktok.com",
-            "youtube.com", "youtu.be", "t.me", "telegram.me", "x.com",
-            "twitter.com", "threads.net", "pinterest.", "reddit.com", "vk.com",
-            "wa.me", "whatsapp.com",
-        )):
-            continue
-        if value not in websites:
-            websites.append(value)
+    websites = extract_business_websites(page)
     tag_email = tags.get("email") or tags.get("contact:email") or ""
     tag_phone = tags.get("phone") or tags.get("contact:phone") or ""
     tag_whatsapp = tags.get("contact:whatsapp") or tags.get("whatsapp") or ""
@@ -4546,6 +4626,9 @@ def discover(params: dict[str, list[str]]) -> dict:
         customer_website = item.get("customer_website") or (
             item["url"] if source_type == "车商官网或汽车行业网站" else ""
         )
+        customer_website = normalize_public_url(customer_website)
+        if customer_website and not is_business_website_url(customer_website):
+            customer_website = ""
         source_contact_text = f"{item.get('snippet', '')} {item.get('title', '')}"
         contacts = extract_public_contacts(source_contact_text, item.get("tags"))
         if page and (is_raw_social_or_video_source or not any(contacts.get(key) for key in ("email", "phone", "whatsapp"))):
@@ -4554,7 +4637,25 @@ def discover(params: dict[str, list[str]]) -> dict:
                 extract_public_contacts(page if is_raw_social_or_video_source else page_text, item.get("tags")),
             )
         if not customer_website and contacts.get("websites"):
-            customer_website = contacts["websites"][0]
+            customer_website = next(
+                (website for website in contacts["websites"] if is_business_website_url(website)),
+                "",
+            )
+        official_contact_url = ""
+        official_contact_excerpt = ""
+        if (
+            customer_website
+            and target_type != "individual"
+            and not all(contacts.get(key) for key in ("email", "phone", "whatsapp"))
+        ):
+            for official_page in official_site_pages(customer_website)[:3]:
+                official_contacts = extract_public_contacts(official_page.get("html", ""))
+                contacts = merge_public_contacts(contacts, official_contacts)
+                if not official_contact_url and any(official_contacts.get(key) for key in ("email", "phone", "whatsapp")):
+                    official_contact_url = official_page.get("url", "")
+                    official_contact_excerpt = clean_text(official_page.get("html", ""))[:700]
+                if all(contacts.get(key) for key in ("email", "phone", "whatsapp")):
+                    break
         if is_social_profile_url(item["url"]) and item["url"] not in contacts["social_accounts"]:
             contacts["social_accounts"].insert(0, item["url"])
         if item.get("account_type") == "个人决策人":
@@ -4587,17 +4688,21 @@ def discover(params: dict[str, list[str]]) -> dict:
             if contact_contacts.get("phone"):
                 contacts["phone"] = contact_contacts["phone"]
                 contacts["phones"] = list(dict.fromkeys([*(contacts.get("phones") or []), *(contact_contacts.get("phones") or [])]))
+        contact_source_url = official_contact_url or source_url
+        contact_source_name = "公司官网" if official_contact_url else origin
+        contact_source_excerpt = official_contact_excerpt or source_excerpt
         email_sources = [
             {
                 "email": email,
                 "sources": [{
-                    "url": source_url,
-                    "name": origin,
+                    "url": contact_source_url,
+                    "name": contact_source_name,
                     "verified": bool(
                         item.get("origin") in ("OpenStreetMap", "Google Maps")
+                        or official_contact_url
                         or (page and re.search(re.escape(email), page, re.I))
                     ),
-                    "excerpt": source_excerpt[:260],
+                    "excerpt": contact_source_excerpt[:260],
                 }],
             }
             for email in contacts.get("emails") or ([contacts["email"]] if contacts["email"] else [])
@@ -4608,11 +4713,11 @@ def discover(params: dict[str, list[str]]) -> dict:
         ]
         contacts["email"] = verified_email_sources[0]["email"] if verified_email_sources else ""
         phone_sources = [
-            {"value": phone, "sources": [{"url": source_url, "name": origin, "excerpt": source_excerpt[:260]}]}
+            {"value": phone, "sources": [{"url": contact_source_url, "name": contact_source_name, "excerpt": contact_source_excerpt[:260]}]}
             for phone in contacts.get("phones") or ([contacts["phone"]] if contacts["phone"] else [])
         ]
         whatsapp_sources = [
-            {"value": value, "sources": [{"url": source_url, "name": origin, "excerpt": source_excerpt[:260]}]}
+            {"value": value, "sources": [{"url": contact_source_url, "name": contact_source_name, "excerpt": contact_source_excerpt[:260]}]}
             for value in contacts.get("whatsapps") or ([contacts["whatsapp"]] if contacts["whatsapp"] else [])
         ]
         recommended_models = recommend_models(combined, model)
