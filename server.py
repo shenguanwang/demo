@@ -280,6 +280,66 @@ def load_workspace_state(workspace_key: str) -> dict:
         }
 
 
+def summarize_workspace_for_kpi(state: dict) -> dict:
+    review_leads = state.get("reviewLeads", []) if isinstance(state, dict) else []
+    customers = state.get("customers", []) if isinstance(state, dict) else []
+    quotes = state.get("quotes", []) if isinstance(state, dict) else []
+    after_sales_orders = state.get("afterSalesOrders", []) if isinstance(state, dict) else []
+    verified = sum(1 for lead in [*review_leads, *customers] if isinstance(lead, dict) and lead.get("researchAt"))
+    contacted = sum(
+        1 for lead in customers
+        if isinstance(lead, dict) and str(lead.get("stage", "")) not in {"准备联系", "暂停", "已流失"}
+    )
+    replied = sum(
+        1 for lead in customers
+        if isinstance(lead, dict) and str(lead.get("stage", "")) in {"有回复", "报价中", "谈判中", "已成交"}
+    )
+    completed = sum(1 for lead in customers if isinstance(lead, dict) and str(lead.get("stage", "")) == "已成交")
+    return {
+        "pending": len(review_leads),
+        "verified": verified,
+        "customers": len(customers),
+        "contacted": contacted,
+        "replied": replied,
+        "quotes": len(quotes),
+        "afterSales": len(after_sales_orders),
+        "completed": completed,
+    }
+
+
+def load_admin_kpi_summary() -> dict:
+    users = list_users()
+    rows = []
+    totals = {
+        "pending": 0,
+        "verified": 0,
+        "customers": 0,
+        "contacted": 0,
+        "replied": 0,
+        "quotes": 0,
+        "afterSales": 0,
+        "completed": 0,
+    }
+    for user in users:
+        username = user.get("username", "")
+        workspace = load_workspace_state(username)
+        metrics = summarize_workspace_for_kpi(workspace.get("state", {}))
+        for key in totals:
+            totals[key] += int(metrics.get(key, 0))
+        rows.append({
+            "username": username,
+            "role": user.get("role", "user"),
+            "status": user.get("status", "enabled"),
+            "builtIn": bool(user.get("builtIn")),
+            "createdAt": user.get("createdAt", ""),
+            "updatedAt": workspace.get("updatedAt", ""),
+            "exists": bool(workspace.get("exists")),
+            **metrics,
+        })
+    rows.sort(key=lambda item: (item["customers"] + item["pending"] + item["quotes"]), reverse=True)
+    return {"users": rows, "totals": totals}
+
+
 def save_workspace_state(workspace_key: str, payload: dict, expected_version: int | None = None) -> dict:
     storage_key = workspace_storage_key(workspace_key)
     state = normalize_workspace_state(payload)
@@ -5176,6 +5236,14 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 self.send_json(200, {"ok": True, "users": list_users()})
             except (OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/kpi":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                self.send_json(200, {"ok": True, **load_admin_kpi_summary()})
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/workspace-state":

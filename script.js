@@ -238,6 +238,8 @@ let discoverySchedules = [];
 let reviewSelectedIds = new Set();
 let selectedReviewLeadId = "";
 let currentSession = null;
+let adminKpiSnapshot = null;
+let adminKpiLoading = false;
 let crmViewFilter = "all";
 let navigationBound = false;
 
@@ -2724,6 +2726,112 @@ function recordFollowUp(index) {
   refreshAllLeadViews();
 }
 
+function summarizeKpiState(state) {
+  const stateReviewLeads = Array.isArray(state?.reviewLeads) ? state.reviewLeads : [];
+  const stateCustomers = Array.isArray(state?.customers) ? state.customers : [];
+  const stateQuotes = Array.isArray(state?.quotes) ? state.quotes : [];
+  const stateAfterSales = Array.isArray(state?.afterSalesOrders) ? state.afterSalesOrders : [];
+  const contactedStages = new Set(["已联系", "有回复", "报价中", "谈判中", "已成交"]);
+  const repliedStages = new Set(["有回复", "报价中", "谈判中", "已成交"]);
+  return {
+    pending: stateReviewLeads.length,
+    verified: [...stateReviewLeads, ...stateCustomers].filter((lead) => lead.researchAt).length,
+    customers: stateCustomers.length,
+    contacted: stateCustomers.filter((lead) => contactedStages.has(lead.stage)).length,
+    replied: stateCustomers.filter((lead) => repliedStages.has(lead.stage)).length,
+    quotes: stateQuotes.length,
+    afterSales: stateAfterSales.length,
+    completed: stateCustomers.filter((lead) => lead.stage === "已成交").length
+  };
+}
+
+function formatSyncTime(value) {
+  if (!value) return "未同步";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+}
+
+function renderAdminKpis() {
+  const panel = $("#adminKpiPanel");
+  if (!panel) return;
+  const isAdmin = currentSession?.role === "admin";
+  panel.hidden = !isAdmin;
+  if (!isAdmin) return;
+  const status = $("#adminKpiStatus");
+  const rows = $("#adminKpiRows");
+  const summary = $("#adminKpiSummary");
+  if (!adminKpiSnapshot) {
+    if (status) status.textContent = adminKpiLoading ? "正在读取团队数据…" : "等待读取团队数据";
+    if (rows) rows.innerHTML = `<tr><td colspan="10">正在读取团队数据…</td></tr>`;
+    if (summary) summary.innerHTML = "";
+    if (!adminKpiLoading) refreshAdminKpis();
+    return;
+  }
+  const users = Array.isArray(adminKpiSnapshot.users) ? adminKpiSnapshot.users : [];
+  const totals = adminKpiSnapshot.totals || {};
+  if (adminKpiSnapshot.error) {
+    if (status) status.textContent = `团队KPI读取失败：${adminKpiSnapshot.error}`;
+    if (rows) rows.innerHTML = `<tr><td colspan="10">${escapeHtml(adminKpiSnapshot.error)}</td></tr>`;
+    if (summary) summary.innerHTML = "";
+    return;
+  }
+  if (status) status.textContent = `已同步 ${users.length} 位销售人员的数据`;
+  if (summary) {
+    summary.innerHTML = `
+      <div><span>团队待审核</span><strong>${Number(totals.pending || 0)}</strong></div>
+      <div><span>团队客户</span><strong>${Number(totals.customers || 0)}</strong></div>
+      <div><span>团队已联系</span><strong>${Number(totals.contacted || 0)}</strong></div>
+      <div><span>团队有回复</span><strong>${Number(totals.replied || 0)}</strong></div>
+      <div><span>团队报价</span><strong>${Number(totals.quotes || 0)}</strong></div>
+      <div><span>成交/售后</span><strong>${Number(totals.completed || 0)} / ${Number(totals.afterSales || 0)}</strong></div>
+    `;
+  }
+  if (rows) {
+    rows.innerHTML = users.length ? users.map((user) => `
+      <tr>
+        <td><strong>${escapeHtml(user.username || "-")}</strong><br><small>${user.role === "admin" ? "管理员" : "销售"}</small></td>
+        <td><span class="user-status ${user.status === "disabled" ? "disabled" : ""}">${user.status === "disabled" ? "已禁用" : "启用中"}</span></td>
+        <td>${Number(user.pending || 0)}</td>
+        <td>${Number(user.verified || 0)}</td>
+        <td><strong>${Number(user.customers || 0)}</strong></td>
+        <td>${Number(user.contacted || 0)}</td>
+        <td>${Number(user.replied || 0)}</td>
+        <td>${Number(user.quotes || 0)}</td>
+        <td>${Number(user.completed || 0)} / ${Number(user.afterSales || 0)}</td>
+        <td>${escapeHtml(formatSyncTime(user.updatedAt))}</td>
+      </tr>
+    `).join("") : `<tr><td colspan="10">还没有销售人员数据。</td></tr>`;
+  }
+}
+
+async function refreshAdminKpis({ forceSync = false } = {}) {
+  if (currentSession?.role !== "admin" || adminKpiLoading) return;
+  adminKpiLoading = true;
+  const status = $("#adminKpiStatus");
+  if (status) status.textContent = forceSync ? "正在同步并读取团队数据…" : "正在读取团队数据…";
+  try {
+    if (forceSync && cloudStateReady) {
+      await pushCloudState(workspaceStateSnapshot());
+    }
+    const response = await apiFetch("/api/admin/kpi", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    adminKpiSnapshot = result;
+  } catch (error) {
+    adminKpiSnapshot = { users: [], totals: {}, error: error.message };
+    if (status) status.textContent = `团队KPI读取失败：${error.message}`;
+  } finally {
+    adminKpiLoading = false;
+    renderKpis();
+  }
+}
+
 function renderKpis() {
   const pending = $("#kpiPending");
   if (!pending) return;
@@ -2735,9 +2843,23 @@ function renderKpis() {
   $("#kpiContacted").textContent = contacted;
   $("#kpiReplied").textContent = replied;
   $("#kpiQuotes").textContent = quoteHistory.length;
-  const approvalBase = reviewLeads.length + customers.length;
-  const approvalRate = approvalBase ? Math.round(customers.length / approvalBase * 100) : 0;
-  const replyRate = contacted ? Math.round(replied / contacted * 100) : 0;
+  if (currentSession?.role === "admin" && adminKpiSnapshot?.totals) {
+    const totals = adminKpiSnapshot.totals;
+    pending.textContent = Number(totals.pending || 0);
+    $("#kpiVerified").textContent = Number(totals.verified || 0);
+    $("#kpiCustomers").textContent = Number(totals.customers || 0);
+    $("#kpiContacted").textContent = Number(totals.contacted || 0);
+    $("#kpiReplied").textContent = Number(totals.replied || 0);
+    $("#kpiQuotes").textContent = Number(totals.quotes || 0);
+  }
+  const rateMetrics = currentSession?.role === "admin" && adminKpiSnapshot?.totals
+    ? adminKpiSnapshot.totals
+    : { pending: reviewLeads.length, customers: customers.length, contacted, replied };
+  const approvalBase = Number(rateMetrics.pending || 0) + Number(rateMetrics.customers || 0);
+  const approvalRate = approvalBase ? Math.round(Number(rateMetrics.customers || 0) / approvalBase * 100) : 0;
+  const replyRate = Number(rateMetrics.contacted || 0)
+    ? Math.round(Number(rateMetrics.replied || 0) / Number(rateMetrics.contacted || 0) * 100)
+    : 0;
   const hasAnyData = reviewLeads.length || customers.length || quoteHistory.length || afterSalesOrders.length;
   const nextRecommendation = !hasAnyData
     ? "当前还没有客户数据。请先运行自动获客，或从已完成任务导入线索。"
@@ -2751,6 +2873,7 @@ function renderKpis() {
     <div><span>客户回复率</span><strong>${replyRate}%</strong></div>
     <div class="wide"><span>当前最重要动作</span><strong>${escapeHtml(nextRecommendation)}</strong></div>
   `;
+  renderAdminKpis();
 }
 
 function bindNavigation() {
@@ -3717,6 +3840,12 @@ function bindForms() {
   $("#refreshUsers")?.addEventListener("click", () => loadUsers().catch((error) => {
     $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
   }));
+
+  $("#refreshKpiDashboard")?.addEventListener("click", () => {
+    adminKpiSnapshot = null;
+    renderKpis();
+    refreshAdminKpis({ forceSync: true });
+  });
 
   $("#userRows")?.addEventListener("click", async (event) => {
     const button = event.target.closest("[data-user-action]");

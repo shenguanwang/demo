@@ -858,8 +858,9 @@
         <div>
           <p class="eyebrow">Step 9</p>
           <h2>KPI 看板</h2>
-          <p>作用：看哪个国家、哪个车型、哪个渠道最有效，让你少做无用功。</p>
+          <p>作用：管理员看团队总览和每个销售的线索、客户、跟进、报价与售后统计；销售人员看自己的数据。</p>
         </div>
+        <button class="ghost compact" id="refreshKpiDashboard" type="button">刷新KPI</button>
       </div>
       <div class="kpi-grid">
         <div><span>待审核线索</span><strong id="kpiPending">0</strong><p>一键获客后先进入这里</p></div>
@@ -870,6 +871,36 @@
         <div><span>报价版本</span><strong id="kpiQuotes">0</strong><p>每次保存生成一个历史版本</p></div>
       </div>
       <div class="panel section-gap kpi-insight" id="kpiInsight"></div>
+      <div class="panel section-gap admin-kpi-panel" id="adminKpiPanel" hidden>
+        <div class="panel-head">
+          <div>
+            <h3>销售人员统计</h3>
+            <span id="adminKpiStatus">正在读取团队数据…</span>
+          </div>
+        </div>
+        <div class="admin-kpi-summary" id="adminKpiSummary"></div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>销售</th>
+                <th>状态</th>
+                <th>待审核</th>
+                <th>已核验</th>
+                <th>客户</th>
+                <th>已联系</th>
+                <th>有回复</th>
+                <th>报价</th>
+                <th>成交/售后</th>
+                <th>最后同步</th>
+              </tr>
+            </thead>
+            <tbody id="adminKpiRows">
+              <tr><td colspan="10">正在读取团队数据…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     </section>
   </main>
 

@@ -3401,10 +3401,48 @@ tbody tr:last-child td {
   font-size: 14px;
 }
 
+.admin-kpi-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.admin-kpi-panel[hidden] {
+  display: none;
+}
+
+.admin-kpi-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.admin-kpi-summary > div {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-soft);
+}
+
+.admin-kpi-summary span,
+.admin-kpi-summary strong {
+  display: block;
+}
+
+.admin-kpi-summary span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.admin-kpi-summary strong {
+  margin-top: 5px;
+  font-size: 20px;
+}
+
 @media (max-width: 1120px) {
   .country-grid,
   .risk-grid,
   .kpi-grid,
+  .admin-kpi-summary,
   .aftersales-board {
     grid-template-columns: repeat(2, minmax(220px, 1fr));
   }
