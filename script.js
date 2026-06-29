@@ -143,6 +143,7 @@ let discoveryJobsTimer = null;
 let discoveryJobsExpanded = false;
 let discoverySchedules = [];
 let reviewSelectedIds = new Set();
+let selectedReviewLeadId = "";
 let lastReviewDetailOpenedAt = 0;
 let currentSession = null;
 let crmViewFilter = "all";
@@ -1111,7 +1112,7 @@ function renderReview() {
   const rankedLeads = reviewLeads
     .map((lead, index) => ({ lead, index }))
     .filter(({ lead }) => reviewLeadMatchesFilters(lead));
-  const visibleIds = new Set(rankedLeads.map(({ lead }) => lead.id));
+  const visibleIds = new Set(rankedLeads.map(({ lead, index }) => String(lead.id || index)));
   reviewSelectedIds = new Set([...reviewSelectedIds].filter((id) => reviewLeads.some((lead) => lead.id === id)));
   const selectedVisibleCount = [...reviewSelectedIds].filter((id) => visibleIds.has(id)).length;
   const summary = $("#reviewFilterSummary");
@@ -1126,7 +1127,39 @@ function renderReview() {
     deleteSelectedButton.disabled = !reviewSelectedIds.size;
     deleteSelectedButton.textContent = `删除已选（${reviewSelectedIds.size}）`;
   }
-  $("#reviewGrid").innerHTML = rankedLeads.length ? rankedLeads.map(({ lead, index }, rankIndex) => `
+  if (!rankedLeads.length) {
+    $("#reviewGrid").innerHTML = `<p class="empty">暂无待审核线索。一键获客抓到的客户会先出现在这里。</p>`;
+    return;
+  }
+  const rankedLeadRows = rankedLeads.map((record, rankIndex) => ({ ...record, rankIndex }));
+  if (!selectedReviewLeadId || !visibleIds.has(selectedReviewLeadId)) {
+    selectedReviewLeadId = String(rankedLeadRows[0].lead.id || rankedLeadRows[0].index);
+  }
+  const selectedRecord = rankedLeadRows.find(({ lead, index }) => String(lead.id || index) === selectedReviewLeadId) || rankedLeadRows[0];
+  const reviewListHtml = rankedLeadRows.map(({ lead, index, rankIndex }) => {
+    const rowId = String(lead.id || index);
+    const phoneCount = evidenceValues(lead.phoneSources, lead.phone).length + evidenceValues(lead.whatsappSources, lead.whatsapp).length;
+    const missing = (lead.sourceCoverage?.missingFields || []).join("、") || "齐全";
+    return `
+      <article class="review-list-row ${rowId === selectedReviewLeadId ? "active" : ""}" data-review-lead-row="${escapeHtml(rowId)}" tabindex="0">
+        <label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>
+        <div class="review-list-main">
+          <strong>${escapeHtml(lead.company)}</strong>
+          <span>${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.origin || lead.sourceType || "公开来源")}</span>
+        </div>
+        <div class="review-list-badges">
+          <b>${escapeHtml(lead.score)}分 · ${escapeHtml(scoreTierLabel(lead.scoreTier))}</b>
+          <span>${escapeHtml(lead.confidenceLabel || "待确认")} ${escapeHtml(lead.confidence || 0)}%</span>
+        </div>
+        <div class="review-list-meta">
+          <span>电话 ${phoneCount}</span>
+          <span>来源 ${escapeHtml(lead.sourceCoverage?.total || lead.evidenceSources?.length || 0)}/官${escapeHtml(lead.sourceCoverage?.official || 0)}</span>
+          <span>缺 ${escapeHtml(missing)}</span>
+        </div>
+      </article>
+    `;
+  }).join("");
+  const selectedDetailHtml = [selectedRecord].map(({ lead, index, rankIndex }) => `
     <article class="review-card">
       <div class="review-title-row">
         <div>
@@ -1227,7 +1260,19 @@ function renderReview() {
         <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
       </div>
     </article>
-  `).join("") : `<p class="empty">暂无待审核线索。一键获客抓到的客户会先出现在这里。</p>`;
+  `).join("");
+  $("#reviewGrid").innerHTML = `
+    <div class="review-workbench">
+      <aside class="review-workbench-list" aria-label="待审核线索列表">
+        <div class="review-workbench-list-head">
+          <strong>待审核线索</strong>
+          <span>${rankedLeadRows.length} 条</span>
+        </div>
+        <div class="review-list-scroll">${reviewListHtml}</div>
+      </aside>
+      <section class="review-workbench-detail">${selectedDetailHtml}</section>
+    </div>
+  `;
 }
 
 
@@ -3481,6 +3526,13 @@ function bindForms() {
   });
 
   $("#reviewGrid").addEventListener("click", (event) => {
+    const row = event.target.closest("[data-review-lead-row]");
+    if (row && !event.target.closest("input, button, a, summary, details")) {
+      selectedReviewLeadId = row.dataset.reviewLeadRow;
+      closeOpenReviewDetails();
+      renderReview();
+      return;
+    }
     const closeDetailsButton = event.target.closest("[data-close-review-details]");
     if (closeDetailsButton) {
       closeDetailsButton.closest("details")?.removeAttribute("open");
