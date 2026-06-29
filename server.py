@@ -1521,6 +1521,12 @@ BLOCKED_DOMAINS = (
     "googletagmanager.com",
     "google-analytics.com",
     "google.com",
+    "google.cn",
+    "googleapis.com",
+    "youtubei-att.googleapis.com",
+    "googlevideo.com",
+    "schema.org",
+    "w3.org",
     "bing.com",
     "facebook.com/search",
     "linkedin.com/jobs",
@@ -1724,12 +1730,42 @@ def is_business_website_url(url: str) -> bool:
     return True
 
 
+def unwrap_public_redirect_url(url: str) -> str:
+    url = (
+        str(url or "")
+        .replace("\\u0026", "&")
+        .replace("\\u003d", "=")
+        .replace("\\/", "/")
+    )
+    normalized = normalize_public_url(url)
+    parsed = urllib.parse.urlparse(normalized)
+    domain = parsed.netloc.lower().removeprefix("www.")
+    if not domain:
+        return normalized
+    params = urllib.parse.parse_qs(parsed.query)
+    redirect_keys = ("q", "url", "u", "target", "redirect", "redir", "uddg")
+    if any(host in domain for host in ("youtube.com", "youtu.be", "google.com", "bing.com", "duckduckgo.com", "facebook.com", "l.facebook.com")):
+        for key in redirect_keys:
+            for value in params.get(key, []):
+                candidate = html.unescape(value).strip()
+                if candidate and re.match(r"^https?://|^www\.|^(?:[a-z0-9-]+\.)+[a-z]{2,}", candidate, flags=re.I):
+                    return normalize_public_url(candidate)
+    return normalized
+
+
 def extract_business_websites(page: str) -> list[str]:
+    page = (
+        str(page or "")
+        .replace("\\u0026", "&")
+        .replace("\\u003d", "=")
+        .replace("\\/", "/")
+    )
     candidates = []
     for value in re.findall(r'https?://[^"\'\s<]+|www\.[^\s<>"\']+', page, flags=re.I):
         value = html.unescape(value).rstrip(".,;:)]}'\"")
         if value.startswith("www."):
             value = f"https://{value}"
+        value = unwrap_public_redirect_url(value)
         if is_business_website_url(value):
             candidates.append(normalize_public_url(value))
     text = clean_text(page)
@@ -1991,8 +2027,11 @@ def read_social_profile(
     title = f"{platform} · {handle}"
     description = ""
     final_url = url
+    external_websites: list[str] = []
     try:
         page, final_url = fetch_document(url, timeout=18, user_agent=user_agent)
+        page_contacts = extract_public_contacts(page)
+        external_websites = page_contacts.get("websites") or []
         meta = parse_meta_tags(page)
         title = meta.get("og:title") or meta.get("twitter:title") or title
         description = (
@@ -2023,6 +2062,7 @@ def read_social_profile(
         "description": clean_text(description)[:700],
         "url": final_url,
         "handle": handle[:120],
+        "externalWebsites": external_websites[:5],
         **analysis,
         "accountType": account_type,
     }
@@ -3188,6 +3228,46 @@ def research_company(params: dict[str, list[str]]) -> dict:
             item["title"],
         )
     )
+    social_external_websites = list(dict.fromkeys(
+        website_url
+        for profile in social_profiles
+        for website_url in (profile.get("externalWebsites") or [])
+        if is_business_website_url(website_url)
+    ))
+    if not site_pages and social_external_websites:
+        for candidate_website in social_external_websites[:3]:
+            candidate_pages = official_site_pages(candidate_website)
+            if not candidate_pages:
+                continue
+            website = candidate_pages[0]["url"]
+            site_pages = candidate_pages
+            official_website_text = " ".join(
+                clean_text(page.get("html", ""))[:20_000] or page.get("text", "")
+                for page in site_pages
+            )
+            for page_index, page in enumerate(site_pages):
+                page_contacts = extract_public_contacts(page["html"])
+                merge_contact_data(
+                    contacts,
+                    page_contacts,
+                    page["url"],
+                    "公司官网" if page_index == 0 else "公司官网内页",
+                    verified=True,
+                    source_excerpt=page["html"],
+                )
+                key = page["url"].lower().rstrip("/")
+                if key not in seen_urls:
+                    evidence.append(
+                        evidence_item(
+                            page["url"],
+                            company,
+                            page["text"],
+                            "公司官网" if page_index == 0 else "公司官网内页",
+                            "官方公司页面",
+                        )
+                    )
+                    seen_urls.add(key)
+            break
     social_business_signals = list(dict.fromkeys(
         signal
         for profile in social_profiles
