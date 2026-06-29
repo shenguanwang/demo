@@ -1202,45 +1202,60 @@ function startFinderSearchProgress() {
   };
 }
 
+function reviewStatusMode() {
+  return $("#reviewStatusFilter")?.value === "approved" ? "approved" : "pending";
+}
+
+function reviewSourceLeads() {
+  return reviewStatusMode() === "approved" ? customers : reviewLeads;
+}
+
 function renderReview() {
   // Keep the review queue stable. Scores are decision support, not a reason to
   // move the card the reviewer is currently working on after manual calibration.
-  purgeIrrelevantReviewLeads();
+  const reviewMode = reviewStatusMode();
+  if (reviewMode === "pending") purgeIrrelevantReviewLeads();
   renderReviewFilterOptions();
-  const rankedLeads = reviewLeads
+  const sourceLeads = reviewSourceLeads();
+  const rankedLeads = sourceLeads
     .map((lead, index) => ({ lead, index }))
     .filter(({ lead }) => reviewLeadMatchesFilters(lead));
-  const visibleIds = new Set(rankedLeads.map(({ lead, index }) => String(lead.id || index)));
-  reviewSelectedIds = new Set([...reviewSelectedIds].filter((id) => reviewLeads.some((lead) => lead.id === id)));
-  const selectedVisibleCount = [...reviewSelectedIds].filter((id) => visibleIds.has(id)).length;
+  const visibleIds = new Set(rankedLeads.map(({ lead, index }) => `${reviewMode}:${lead.id || index}`));
+  if (reviewMode === "pending") {
+    reviewSelectedIds = new Set([...reviewSelectedIds].filter((id) => reviewLeads.some((lead) => lead.id === id)));
+  } else {
+    reviewSelectedIds = new Set();
+  }
+  const visibleReviewIds = rankedLeads.map(({ lead }) => lead.id).filter(Boolean);
+  const selectedVisibleCount = [...reviewSelectedIds].filter((id) => visibleReviewIds.includes(id)).length;
   const summary = $("#reviewFilterSummary");
-  if (summary) summary.textContent = `显示 ${rankedLeads.length} / ${reviewLeads.length} 条${reviewSelectedIds.size ? ` · 已选 ${reviewSelectedIds.size} 条` : ""}`;
+  if (summary) summary.textContent = `显示 ${rankedLeads.length} / ${sourceLeads.length} 条${reviewMode === "approved" ? " · 已审核客户" : reviewSelectedIds.size ? ` · 已选 ${reviewSelectedIds.size} 条` : ""}`;
   const selectVisibleButton = $("#selectVisibleReviewLeads");
   if (selectVisibleButton) {
-    selectVisibleButton.disabled = !rankedLeads.length;
+    selectVisibleButton.disabled = reviewMode === "approved" || !rankedLeads.length;
     selectVisibleButton.textContent = rankedLeads.length && selectedVisibleCount === rankedLeads.length ? "取消选择当前结果" : "全选当前结果";
   }
   const deleteSelectedButton = $("#deleteSelectedReviewLeads");
   if (deleteSelectedButton) {
-    deleteSelectedButton.disabled = !reviewSelectedIds.size;
+    deleteSelectedButton.disabled = reviewMode === "approved" || !reviewSelectedIds.size;
     deleteSelectedButton.textContent = `删除已选（${reviewSelectedIds.size}）`;
   }
   if (!rankedLeads.length) {
-    $("#reviewGrid").innerHTML = `<p class="empty">暂无待审核线索。一键获客抓到的客户会先出现在这里。</p>`;
+    $("#reviewGrid").innerHTML = `<p class="empty">${reviewMode === "approved" ? "暂无已审核客户。客户池中的客户会显示在这里。" : "暂无待审核线索。一键获客抓到的客户会先出现在这里。"}</p>`;
     return;
   }
   const rankedLeadRows = rankedLeads.map((record, rankIndex) => ({ ...record, rankIndex }));
   if (!selectedReviewLeadId || !visibleIds.has(selectedReviewLeadId)) {
-    selectedReviewLeadId = String(rankedLeadRows[0].lead.id || rankedLeadRows[0].index);
+    selectedReviewLeadId = `${reviewMode}:${rankedLeadRows[0].lead.id || rankedLeadRows[0].index}`;
   }
-  const selectedRecord = rankedLeadRows.find(({ lead, index }) => String(lead.id || index) === selectedReviewLeadId) || rankedLeadRows[0];
+  const selectedRecord = rankedLeadRows.find(({ lead, index }) => `${reviewMode}:${lead.id || index}` === selectedReviewLeadId) || rankedLeadRows[0];
   const reviewListHtml = rankedLeadRows.map(({ lead, index, rankIndex }) => {
-    const rowId = String(lead.id || index);
+    const rowId = `${reviewMode}:${lead.id || index}`;
     const phoneCount = evidenceValues(lead.phoneSources, lead.phone).length + evidenceValues(lead.whatsappSources, lead.whatsapp).length;
     const missing = (lead.sourceCoverage?.missingFields || []).join("、") || "齐全";
     return `
       <article class="review-list-row ${rowId === selectedReviewLeadId ? "active" : ""}" data-review-lead-row="${escapeHtml(rowId)}" tabindex="0">
-        <label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>
+        ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="review-approved-mark">已审核</span>`}
         <div class="review-list-main">
           <strong>${escapeHtml(lead.company)}</strong>
           <span>${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.origin || lead.sourceType || "公开来源")}</span>
@@ -1262,16 +1277,16 @@ function renderReview() {
       <div class="review-title-row">
         <div>
           <div class="review-card-meta">
-            <label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>
+            ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="tag">已审核客户</span>`}
             <span class="tag">#${rankIndex + 1} · ${lead.researchAt ? "已完成公开信息尽调" : "待全网补全"}</span>
             <span class="review-captured-at">${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.source || lead.origin || "未知来源")}</span>
           </div>
           <h3>${escapeHtml(lead.company)}</h3>
           <p>${escapeHtml(lead.researchSummary || "当前只有原始发现来源，请先执行全网补全。")}</p>
         </div>
-        <button class="research-button" type="button" data-research-index="${index}">
+        ${reviewMode === "pending" ? `<button class="research-button" type="button" data-research-index="${index}">
           ${lead.researching ? "正在检索…" : lead.researchAt ? "重新全网核验" : "全网补全信息"}
-        </button>
+        </button>` : `<span class="review-approved-status">已进入客户池</span>`}
       </div>
       <div class="review-decision">
         <div class="decision-main">
@@ -1335,22 +1350,24 @@ function renderReview() {
           ? lead.scoreBreakdown.map((item) => `<b class="${Number(item.points) < 0 ? "negative" : ""}">${escapeHtml(item.label)} ${Number(item.points) > 0 ? "+" : ""}${escapeHtml(item.points)}</b>`).join("")
           : `<b>${escapeHtml(lead.scoreBasis || "等待官网核验")}</b>`}
         </div>
-        <div class="score-calibration">
+        ${reviewMode === "pending" ? `<div class="score-calibration">
           <span>人工校准</span>
           <button type="button" data-score-adjust="-5" data-index="${index}">-5</button>
           <button type="button" data-score-adjust="5" data-index="${index}">+5</button>
           <button type="button" data-score-reset data-index="${index}">恢复系统分</button>
-        </div>
+        </div>` : ""}
       </div>
       <div class="split-actions">
         ${safeHttpUrl(lead.sourceUrl || lead.source)
           ? `<a class="button-link ghost" href="${escapeHtml(safeHttpUrl(lead.sourceUrl || lead.source))}" target="_blank" rel="noopener noreferrer">查看线索原文</a>`
           : `<button class="ghost" type="button" disabled title="该线索没有可打开的原始网址">查看线索原文</button>`}
-        <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
-        <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
-        <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
+        ${reviewMode === "pending" ? `
+          <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
+          <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
+          <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
+        ` : `<button class="primary" type="button" data-section="crm">回到客户池</button>`}
       </div>
-      <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}">
+      <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}">
         <summary>
           <span>查看全部来源与核验详情</span>
           <small class="review-source-badges">
@@ -1366,7 +1383,7 @@ function renderReview() {
     <div class="review-workbench">
       <aside class="review-workbench-list" aria-label="待审核线索列表">
         <div class="review-workbench-list-head">
-          <strong>待审核线索</strong>
+          <strong>${reviewMode === "approved" ? "已审核客户" : "待审核线索"}</strong>
           <span>${rankedLeadRows.length} 条</span>
         </div>
         <div class="review-list-scroll">${reviewListHtml}</div>
@@ -1479,7 +1496,8 @@ function renderReviewDetailContent(lead) {
 function reviewDetailLead(details) {
   const id = details?.dataset?.reviewDetailId || "";
   const index = Number(details?.dataset?.reviewDetailIndex);
-  return reviewLeads.find((lead) => String(lead.id || "") === id) || reviewLeads[index] || null;
+  const leads = details?.dataset?.reviewDetailMode === "approved" ? customers : reviewLeads;
+  return leads.find((lead) => String(lead.id || "") === id) || leads[index] || null;
 }
 
 function clearReviewDetail(details) {
@@ -1612,8 +1630,9 @@ function renderReviewFilterOptions() {
   const sourceSelect = $("#reviewSourceFilter");
   const countrySelect = $("#reviewCountryFilter");
   if (!sourceSelect && !countrySelect) return;
+  const sourceLeads = reviewSourceLeads();
   const current = sourceSelect?.value || "all";
-  const available = new Set(reviewLeads.map(reviewSourceKey));
+  const available = new Set(sourceLeads.map(reviewSourceKey));
   if (sourceSelect) {
     const options = reviewSourceOptions
       .filter(([value]) => available.has(value) || value === current)
@@ -1630,7 +1649,7 @@ function renderReviewFilterOptions() {
       const value = reviewCountryKey(country.name);
       if (value) countryOptions.set(value, country.name);
     });
-    reviewLeads.forEach((lead) => {
+    sourceLeads.forEach((lead) => {
       const value = reviewLeadCountryKey(lead);
       if (value && !countryOptions.has(value)) countryOptions.set(value, lead.country);
     });
@@ -1710,7 +1729,7 @@ function renderCrm() {
   }[crmViewFilter];
   $("#crmRows").innerHTML = filteredCustomers.length ? filteredCustomers.map(({ lead, index }) => `
     <tr>
-      <td><strong>${escapeHtml(lead.company)}</strong><br><span>${escapeHtml(lead.contactName || lead.email || lead.phone || "暂无联系人")}</span></td>
+      <td><button class="link-button crm-customer-link" type="button" data-crm-action="review" data-index="${index}">${escapeHtml(lead.company)}</button><br><span>${escapeHtml(lead.contactName || lead.email || lead.phone || "暂无联系人")}</span></td>
       <td>${escapeHtml(lead.country)}<br>${escapeHtml(lead.city)}</td>
       <td>${escapeHtml(lead.type)}</td>
       <td>${escapeHtml(lead.model)}</td>
@@ -1765,6 +1784,16 @@ function primaryEmailForLead(lead) {
   if (lead?.email) return String(lead.email).trim();
   const emailRecord = Array.isArray(lead?.emailSources) ? lead.emailSources.find((record) => record?.email) : null;
   return String(emailRecord?.email || "").trim();
+}
+
+function openCustomerInReview(index) {
+  const lead = customers[index];
+  if (!lead) return;
+  const statusFilter = $("#reviewStatusFilter");
+  if (statusFilter) statusFilter.value = "approved";
+  selectedReviewLeadId = `approved:${lead.id || index}`;
+  showSection("review");
+  renderReview();
 }
 
 function openCustomerInEmail(index) {
@@ -3779,6 +3808,11 @@ function bindForms() {
       renderReview();
       return;
     }
+    const sectionButton = event.target.closest("[data-section]");
+    if (sectionButton) {
+      showSection(sectionButton.dataset.section);
+      return;
+    }
     const closeDetailsButton = event.target.closest("[data-close-review-details]");
     if (closeDetailsButton) {
       closeDetailsButton.closest("details")?.removeAttribute("open");
@@ -3829,11 +3863,12 @@ function bindForms() {
     hydrateReviewDetail(details);
   }, true);
 
-  ["#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
+  ["#reviewStatusFilter", "#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
     $(selector)?.addEventListener("change", renderReview);
   });
 
   $("#clearReviewFilters")?.addEventListener("click", () => {
+    $("#reviewStatusFilter").value = "pending";
     $("#reviewTimeFilter").value = "all";
     $("#reviewSourceFilter").value = "all";
     $("#reviewCountryFilter").value = "all";
@@ -3842,13 +3877,17 @@ function bindForms() {
   });
 
   $("#selectVisibleReviewLeads")?.addEventListener("click", () => {
+    if (reviewStatusMode() !== "pending") return;
     const visible = reviewLeads.filter(reviewLeadMatchesFilters).map((lead) => lead.id);
     const allVisibleSelected = visible.length && visible.every((id) => reviewSelectedIds.has(id));
     visible.forEach((id) => allVisibleSelected ? reviewSelectedIds.delete(id) : reviewSelectedIds.add(id));
     renderReview();
   });
 
-  $("#deleteSelectedReviewLeads")?.addEventListener("click", () => deleteReviewLeads([...reviewSelectedIds]));
+  $("#deleteSelectedReviewLeads")?.addEventListener("click", () => {
+    if (reviewStatusMode() !== "pending") return;
+    deleteReviewLeads([...reviewSelectedIds]);
+  });
 
   $("#userForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
@@ -4005,6 +4044,7 @@ function bindForms() {
     const button = event.target.closest("[data-crm-action]");
     if (!button) return;
     const index = Number(button.dataset.index);
+    if (button.dataset.crmAction === "review") openCustomerInReview(index);
     if (button.dataset.crmAction === "email") openCustomerInEmail(index);
     if (button.dataset.crmAction === "quote") openCustomerInQuote(index);
     if (button.dataset.crmAction === "delete") {

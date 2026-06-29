@@ -1735,6 +1735,24 @@ textarea {
   gap: 9px;
 }
 
+.review-approved-mark,
+.review-approved-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #edf8f2;
+  color: #247251;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.review-approved-status {
+  align-self: start;
+  border: 1px solid #ccebdd;
+}
+
 .review-filter-group label {
   display: grid;
   gap: 5px;
@@ -2790,6 +2808,22 @@ textarea {
   background: #fff;
   color: #29343f;
   font-size: 11px;
+}
+
+.link-button.crm-customer-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #0f1b2a;
+  font: inherit;
+  font-weight: 800;
+  text-align: left;
+  cursor: pointer;
+}
+
+.link-button.crm-customer-link:hover {
+  color: #0f4d91;
+  text-decoration: underline;
 }
 
 .crm-actions button:hover,
