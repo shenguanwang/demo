@@ -1321,6 +1321,9 @@ DISCOVERY_KEYWORD_TERMS = (
 )
 
 OBVIOUS_IRRELEVANT_LEAD_PATTERNS = (
+    r"\b(cgtn|china global television|news channel|news network|television network|tv network|broadcasting|"
+    r"newsroom|journalist|newspaper|magazine|media outlet|press agency|public radio|radio station|"
+    r"political news|world news|breaking news|current affairs)\b",
     r"\b(towing|tow truck|roadside assistance|vehicle recovery|car recovery|breakdown service|wrecker)\b",
     r"\b(tax consultant|tax consultancy|vat consultant|vat consultancy|tax agent|tax filing|tax refund)\b",
     r"\b(tax free|duty free|excise tax|corporate tax|customs clearance|customs broker)\b",
@@ -1527,6 +1530,8 @@ BLOCKED_DOMAINS = (
     "googlevideo.com",
     "schema.org",
     "w3.org",
+    "cgtn.com",
+    "cgtnamerica.com",
     "bing.com",
     "facebook.com/search",
     "linkedin.com/jobs",
