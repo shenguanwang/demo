@@ -124,6 +124,99 @@ const riskProfiles = {
 const STORAGE_KEY = "huawei-ev-export-workbench-v3";
 const SOCIAL_CAPTURE_SEEN_KEY = "huawei-ev-social-capture-seen-v1";
 
+const IRRELEVANT_REVIEW_LEAD_DOMAINS = [
+  "cgtn.com",
+  "cgtnamerica.com",
+  "cnn.com",
+  "bbc.com",
+  "bbc.co.uk",
+  "reuters.com",
+  "apnews.com",
+  "aljazeera.com",
+  "bloomberg.com"
+];
+
+const IRRELEVANT_REVIEW_LEAD_PATTERNS = [
+  /\bcgtn\b/i,
+  /china global television/i,
+  /\bnews\b/i,
+  /\bnewsroom\b/i,
+  /\bjournalist\b/i,
+  /\bnewspaper\b/i,
+  /\bmagazine\b/i,
+  /\bmedia outlet\b/i,
+  /\bpress agency\b/i,
+  /\bbroadcast(ing|er)?\b/i,
+  /\btelevision network\b/i,
+  /\btv network\b/i,
+  /\bpublic radio\b/i,
+  /\bradio station\b/i,
+  /\bcurrent affairs\b/i,
+  /\bworld news\b/i,
+  /\bbreaking news\b/i
+];
+
+function leadHostname(value) {
+  try {
+    return new URL(String(value || "")).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function isBlockedLeadDomain(value) {
+  const hostname = leadHostname(value);
+  if (!hostname) return false;
+  return IRRELEVANT_REVIEW_LEAD_DOMAINS.some((domain) => (
+    hostname === domain || hostname.endsWith(`.${domain}`)
+  ));
+}
+
+function isIrrelevantReviewLead(lead) {
+  const evidenceSources = Array.isArray(lead?.evidenceSources) ? lead.evidenceSources : [];
+  const socialProfiles = Array.isArray(lead?.socialProfiles) ? lead.socialProfiles : [];
+  const urls = [
+    lead?.customerWebsite,
+    lead?.sourceUrl,
+    lead?.source,
+    ...evidenceSources.map((item) => item?.url),
+    ...socialProfiles.map((item) => item?.url)
+  ];
+  if (urls.some(isBlockedLeadDomain)) return true;
+
+  const text = [
+    lead?.company,
+    lead?.type,
+    lead?.sourceTitle,
+    lead?.sourceExcerpt,
+    lead?.researchSummary,
+    lead?.origin,
+    lead?.sourceType,
+    lead?.discoverySource,
+    lead?.sourceTranslation,
+    ...evidenceSources.flatMap((item) => [item?.title, item?.excerpt, item?.sourceName, item?.sourceType]),
+    ...socialProfiles.flatMap((item) => [item?.name, item?.title, item?.description])
+  ].filter(Boolean).join(" ");
+
+  return IRRELEVANT_REVIEW_LEAD_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+function filterReviewLeadsForBusinessFit(leads) {
+  return (Array.isArray(leads) ? leads : []).filter((lead) => !isIrrelevantReviewLead(lead));
+}
+
+function purgeIrrelevantReviewLeads() {
+  const keptLeads = filterReviewLeadsForBusinessFit(reviewLeads);
+  if (keptLeads.length === reviewLeads.length) return false;
+  reviewLeads = keptLeads;
+  reviewSelectedIds = new Set([...reviewSelectedIds].filter((id) => reviewLeads.some((lead) => lead.id === id)));
+  if (selectedReviewLeadId && !reviewLeads.some((lead) => String(lead.id) === selectedReviewLeadId)) {
+    selectedReviewLeadId = "";
+  }
+  saveState();
+  return true;
+}
+
 const savedState = loadSavedState();
 let reviewLeads = savedState.reviewLeads;
 let customers = savedState.customers;
@@ -437,7 +530,7 @@ function loadSavedState() {
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     return {
-      reviewLeads: Array.isArray(parsed.reviewLeads) ? parsed.reviewLeads : [],
+      reviewLeads: filterReviewLeadsForBusinessFit(parsed.reviewLeads),
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
       rejectedLeads: Array.isArray(parsed.rejectedLeads) ? parsed.rejectedLeads : [],
       quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
@@ -520,7 +613,8 @@ function mergeWorkspaceStates(remoteState, localState) {
   const deletedKeys = new Set(mergedDeletedRecords.map((record) => record.key));
   const merged = {
     reviewLeads: mergeRecordLists(remoteState?.reviewLeads, localState?.reviewLeads, "reviewLeads")
-      .filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads"))),
+      .filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads")))
+      .filter((record) => !isIrrelevantReviewLead(record)),
     customers: mergeRecordLists(remoteState?.customers, localState?.customers, "customers")
       .filter((record) => !deletedKeys.has(recordIdentity(record, "customers"))),
     rejectedLeads: mergeRecordLists(remoteState?.rejectedLeads, localState?.rejectedLeads, "rejectedLeads")
@@ -550,7 +644,9 @@ function applyWorkspaceState(state, render = false) {
   deletedRecords = Array.isArray(state?.deletedRecords) ? state.deletedRecords : [];
   const deletedKeys = new Set(deletedRecords.map((record) => record.key));
   reviewLeads = Array.isArray(state?.reviewLeads)
-    ? state.reviewLeads.filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads"))).map(normalizeLead)
+    ? filterReviewLeadsForBusinessFit(state.reviewLeads)
+        .filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads")))
+        .map(normalizeLead)
     : [];
   customers = Array.isArray(state?.customers)
     ? state.customers.filter((record) => !deletedKeys.has(recordIdentity(record, "customers"))).map(normalizeLead)
@@ -1107,6 +1203,7 @@ function startFinderSearchProgress() {
 function renderReview() {
   // Keep the review queue stable. Scores are decision support, not a reason to
   // move the card the reviewer is currently working on after manual calibration.
+  purgeIrrelevantReviewLeads();
   renderReviewFilterOptions();
   const rankedLeads = reviewLeads
     .map((lead, index) => ({ lead, index }))
