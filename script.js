@@ -1243,13 +1243,6 @@ function renderReview() {
           <button type="button" data-score-reset data-index="${index}">恢复系统分</button>
         </div>
       </div>
-      <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}">
-        <summary>
-          <span>查看全部来源与核验详情</span>
-          <small>${lead.sourceCoverage?.total || lead.evidenceSources?.length || 0} 个来源 · ${(lead.socialProfiles || []).length} 个社媒账号</small>
-        </summary>
-        <div class="review-more-content" data-review-detail-content></div>
-      </details>
       <div class="split-actions">
         ${safeHttpUrl(lead.sourceUrl || lead.source)
           ? `<a class="button-link ghost" href="${escapeHtml(safeHttpUrl(lead.sourceUrl || lead.source))}" target="_blank" rel="noopener noreferrer">查看线索原文</a>`
@@ -1258,6 +1251,16 @@ function renderReview() {
         <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
         <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
       </div>
+      <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}">
+        <summary>
+          <span>查看全部来源与核验详情</span>
+          <small class="review-source-badges">
+            <b>${lead.sourceCoverage?.total || lead.evidenceSources?.length || 0} 个来源</b>
+            <b>${(lead.socialProfiles || []).length} 个社媒账号</b>
+          </small>
+        </summary>
+        <div class="review-more-content" data-review-detail-content></div>
+      </details>
     </article>
   `).join("");
   $("#reviewGrid").innerHTML = `
