@@ -2675,6 +2675,8 @@ function renderFollowTasks() {
         </select>
         <input data-follow-date="${index}" type="date" value="${escapeHtml(lead.nextFollowAt && lead.nextFollowAt > today ? lead.nextFollowAt : defaultNextDate)}">
         <input data-follow-note="${index}" placeholder="记录客户反馈或下一步">
+      </div>
+      <div class="follow-save-row">
         <button type="button" data-follow-action="record" data-index="${index}">保存记录</button>
       </div>
       ${(lead.followUpHistory || []).length ? `<details class="follow-history"><summary>查看历史（${lead.followUpHistory.length}）</summary>${lead.followUpHistory.slice(0, 5).map((item) => `<p><b>${escapeHtml(item.at)}</b> · ${escapeHtml(item.outcome)}${item.note ? ` · ${escapeHtml(item.note)}` : ""}</p>`).join("")}</details>` : ""}
@@ -2749,12 +2751,8 @@ function formatSyncTime(value) {
   if (!value) return "未同步";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit"
-  });
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}年${pad(date.getMonth() + 1)}月${pad(date.getDate())}日 ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
 function renderAdminKpis() {
@@ -4091,7 +4089,7 @@ function renderUsers(users = []) {
       <td>${index + 1}</td>
       <td><strong>${escapeHtml(user.username)}</strong>${user.builtIn ? `<br><small>系统内置</small>` : ""}</td>
       <td>${user.role === "admin" ? "管理员" : "普通用户"}</td>
-      <td>${escapeHtml(user.createdAt || "-")}</td>
+      <td>${escapeHtml(formatSyncTime(user.createdAt))}</td>
       <td><span class="user-status ${user.status === "disabled" ? "disabled" : ""}">${user.status === "disabled" ? "已禁用" : "启用中"}</span></td>
       <td><div class="user-actions">${user.builtIn ? `<span class="meta">受保护</span>` : `
         <button type="button" data-user-action="password" data-username="${escapeHtml(user.username)}">改密码</button>

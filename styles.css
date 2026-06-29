@@ -658,9 +658,10 @@ button:disabled {
 
 .follow-entry {
   display: grid;
-  grid-template-columns: minmax(150px, 0.8fr) minmax(150px, 0.8fr) minmax(240px, 1.4fr);
+  grid-template-columns: minmax(140px, 0.8fr) minmax(150px, 0.8fr) minmax(220px, 1.4fr);
   gap: 10px;
-  margin: 14px 0 12px;
+  margin: 14px 0 8px;
+  max-width: 100%;
 }
 
 .follow-context {
@@ -689,7 +690,7 @@ button:disabled {
 
 .follow-entry select,
 .follow-entry input,
-.follow-entry button {
+.follow-save-row button {
   min-height: 36px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -698,9 +699,19 @@ button:disabled {
   font-size: 11px;
 }
 
-.follow-entry button {
-  grid-column: 1 / -1;
-  justify-self: end;
+.follow-entry select,
+.follow-entry input {
+  min-width: 0;
+  width: 100%;
+}
+
+.follow-save-row {
+  display: flex;
+  justify-content: flex-end;
+  margin: 0 0 12px;
+}
+
+.follow-save-row button {
   min-width: 116px;
   background: #263340;
   color: #fff;
@@ -1615,6 +1626,11 @@ textarea {
 
 .review-grid {
   grid-template-columns: 1fr;
+}
+
+#followTasks.task-list {
+  grid-template-columns: repeat(auto-fit, minmax(min(560px, 100%), 1fr));
+  align-items: start;
 }
 
 .user-management-layout {
@@ -3559,6 +3575,14 @@ tbody tr:last-child td {
     grid-template-columns: 1fr;
   }
 
+  .follow-save-row {
+    justify-content: stretch;
+  }
+
+  .follow-save-row button {
+    width: 100%;
+  }
+
   .follow-context {
     grid-template-columns: 1fr 1fr;
   }
@@ -4241,7 +4265,7 @@ td {
 .primary,
 .research-button,
 .discovery-job-action,
-.follow-entry button {
+.follow-save-row button {
   background: #101820;
   box-shadow: none;
 }
@@ -4249,7 +4273,7 @@ td {
 .primary:hover,
 .research-button:hover,
 .discovery-job-action:hover:not(:disabled),
-.follow-entry button:hover {
+.follow-save-row button:hover {
   background: #25303b;
 }
 
