@@ -273,6 +273,38 @@ function renderValueEvidence(records, fallback, emptyText = "公开页面未发�
   `).join("")}</div>`;
 }
 
+function evidenceValues(records, fallback = "") {
+  const values = [];
+  if (Array.isArray(records)) {
+    records.forEach((record) => {
+      const value = String(record?.value || "").trim();
+      if (value) values.push(value);
+    });
+  }
+  if (fallback) values.push(String(fallback).trim());
+  const seen = new Set();
+  return values.filter((value) => {
+    const key = value.replace(/\D/g, "") || value.toLowerCase();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function renderContactSummary(lead) {
+  const phones = evidenceValues(lead.phoneSources, lead.phone);
+  const whatsapps = evidenceValues(lead.whatsappSources, lead.whatsapp)
+    .filter((value) => !phones.some((phone) => (phone.replace(/\D/g, "") || phone) === (value.replace(/\D/g, "") || value)));
+  const rows = [
+    ...phones.map((value) => ({ label: "电话", value })),
+    ...whatsapps.map((value) => ({ label: "WhatsApp", value })),
+  ];
+  if (!rows.length) return escapeHtml("未发现");
+  return `<div class="contact-summary-list">${rows.map((row) => `
+    <span><b>${escapeHtml(row.label)}</b>${escapeHtml(row.value)}</span>
+  `).join("")}</div>`;
+}
+
 function mergeEmailSources(...groups) {
   const merged = [];
   groups.flat().filter(Boolean).forEach((record) => {
@@ -1139,7 +1171,7 @@ function renderReview() {
         </div>
         <div>
           <dt>电话 / WhatsApp</dt>
-          <dd>${escapeHtml([lead.phone, lead.whatsapp].filter(Boolean).join(" · ") || "未发现")}</dd>
+          <dd>${renderContactSummary(lead)}</dd>
         </div>
         <div>
           <dt>可信度</dt>

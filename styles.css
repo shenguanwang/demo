@@ -1979,6 +1979,25 @@ textarea {
   text-decoration: none;
 }
 
+.contact-summary-list {
+  display: grid;
+  gap: 5px;
+}
+
+.contact-summary-list span {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.contact-summary-list b {
+  flex: 0 0 auto;
+  color: #667085;
+  font-size: 11px;
+}
+
 .review-recommendation {
   margin: 16px 0;
   padding: 13px 15px;
