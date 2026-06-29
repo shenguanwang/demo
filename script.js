@@ -2535,30 +2535,25 @@ function emailDraftFromGeneratedText(text, data = {}) {
   };
 }
 
-function gmailComposeUrl(draft) {
+function outlookMailtoUrl(draft) {
   const params = new URLSearchParams({
-    view: "cm",
-    fs: "1",
-    to: draft.to || "",
-    su: draft.subject || "",
+    subject: draft.subject || "",
     body: draft.body || ""
   });
-  return `https://mail.google.com/mail/?${params.toString()}`;
+  return `mailto:${encodeURIComponent(draft.to || "")}?${params.toString()}`;
 }
 
-function openGmailDraft(data = Object.fromEntries(new FormData($("#emailForm")).entries())) {
+function openOutlookDraft(data = Object.fromEntries(new FormData($("#emailForm")).entries())) {
   const text = $("#englishLetter")?.textContent.trim() || "";
-  const status = $("#gmailDraftStatus");
+  const status = $("#outlookDraftStatus");
   if (!text) {
     if (status) status.textContent = "请先生成英文开发信。";
     return;
   }
   const draft = emailDraftFromGeneratedText(text, data);
-  const opened = window.open(gmailComposeUrl(draft), "_blank", "noopener,noreferrer");
+  window.location.href = outlookMailtoUrl(draft);
   if (status) {
-    status.textContent = opened
-      ? `已打开 Gmail 编辑窗口${draft.to ? `，收件人：${draft.to}` : "，客户邮箱未发现，收件人请手动填写"}。`
-      : "浏览器拦截了自动跳转，请点击“用 Gmail 编辑”。";
+    status.textContent = `已请求打开 Outlook 编辑窗口${draft.to ? `，收件人：${draft.to}` : "，客户邮箱未发现，收件人请手动填写"}。`;
   }
 }
 
@@ -3734,7 +3729,7 @@ function bindForms() {
     $("#followUpSequence").innerHTML = result.followUps.map((item) =>
       `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
     ).join("");
-    openGmailDraft(data);
+    openOutlookDraft(data);
   });
 
   $("#fillLeadFromCrm").addEventListener("click", () => {
@@ -3749,7 +3744,7 @@ function bindForms() {
     $("#followUpSequence").innerHTML = result.followUps.map((item) =>
       `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
     ).join("");
-    openGmailDraft(Object.fromEntries(new FormData(form).entries()));
+    openOutlookDraft(Object.fromEntries(new FormData(form).entries()));
   });
 
   $("#leadForm").addEventListener("submit", (event) => {
@@ -3932,7 +3927,7 @@ function bindForms() {
     }, 1200);
   });
 
-  $("#openGmailDraft")?.addEventListener("click", () => openGmailDraft());
+  $("#openOutlookDraft")?.addEventListener("click", () => openOutlookDraft());
 
   $("#quoteForm").addEventListener("submit", (event) => {
     event.preventDefault();
