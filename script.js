@@ -1761,6 +1761,12 @@ function renderQuoteCustomerSelect() {
   if ([...select.options].some((option) => option.value === current)) select.value = current;
 }
 
+function primaryEmailForLead(lead) {
+  if (lead?.email) return String(lead.email).trim();
+  const emailRecord = Array.isArray(lead?.emailSources) ? lead.emailSources.find((record) => record?.email) : null;
+  return String(emailRecord?.email || "").trim();
+}
+
 function openCustomerInEmail(index) {
   const lead = customers[index];
   if (!lead) return;
@@ -1768,6 +1774,7 @@ function openCustomerInEmail(index) {
   $("#leadSelect").value = String(index);
   form.company.value = lead.company;
   form.contactName.value = lead.contactName || "";
+  form.recipientEmail.value = primaryEmailForLead(lead);
   form.website.value = lead.customerWebsite || lead.sourceUrl || lead.source || "";
   form.websiteText.value = [
     lead.sourceExcerpt,
@@ -1775,6 +1782,7 @@ function openCustomerInEmail(index) {
     (lead.evidenceSources || []).slice(0, 4).map((item) => item.excerpt).join(" ")
   ].filter(Boolean).join(" ").slice(0, 2400);
   form.model.value = String(lead.model || "问界 M9").split("/")[0].trim();
+  form.channel.value = "Email";
   showSection("email");
 }
 
@@ -2509,6 +2517,49 @@ function generateLetter(data) {
   const chinese = `中文意思：我看到你们官网主要做${traits.join("、")}。我们供应中国华为系鸿蒙智行新能源车型，包括${data.model}。这款车的优势是${profile.chinese}。想问你们是否有兴趣了解经销商 CIF 报价、现车颜色和出口细节。`;
 
   return { insight, english, chinese, followUps };
+}
+
+function emailDraftFromGeneratedText(text, data = {}) {
+  const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
+  const subjectIndex = lines.findIndex((line) => /^subject\s*:/i.test(line.trim()));
+  const subject = subjectIndex >= 0
+    ? lines[subjectIndex].replace(/^subject\s*:\s*/i, "").trim()
+    : `HIMA smart EV export proposal for ${data.company || "your team"}`;
+  const body = subjectIndex >= 0
+    ? lines.filter((_, index) => index !== subjectIndex).join("\n").replace(/^\s+/, "")
+    : lines.join("\n");
+  return {
+    to: String(data.recipientEmail || "").trim(),
+    subject,
+    body
+  };
+}
+
+function gmailComposeUrl(draft) {
+  const params = new URLSearchParams({
+    view: "cm",
+    fs: "1",
+    to: draft.to || "",
+    su: draft.subject || "",
+    body: draft.body || ""
+  });
+  return `https://mail.google.com/mail/?${params.toString()}`;
+}
+
+function openGmailDraft(data = Object.fromEntries(new FormData($("#emailForm")).entries())) {
+  const text = $("#englishLetter")?.textContent.trim() || "";
+  const status = $("#gmailDraftStatus");
+  if (!text) {
+    if (status) status.textContent = "请先生成英文开发信。";
+    return;
+  }
+  const draft = emailDraftFromGeneratedText(text, data);
+  const opened = window.open(gmailComposeUrl(draft), "_blank", "noopener,noreferrer");
+  if (status) {
+    status.textContent = opened
+      ? `已打开 Gmail 编辑窗口${draft.to ? `，收件人：${draft.to}` : "，客户邮箱未发现，收件人请手动填写"}。`
+      : "浏览器拦截了自动跳转，请点击“用 Gmail 编辑”。";
+  }
 }
 
 function renderQuote(values = {}) {
@@ -3683,6 +3734,7 @@ function bindForms() {
     $("#followUpSequence").innerHTML = result.followUps.map((item) =>
       `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
     ).join("");
+    openGmailDraft(data);
   });
 
   $("#fillLeadFromCrm").addEventListener("click", () => {
@@ -3697,6 +3749,7 @@ function bindForms() {
     $("#followUpSequence").innerHTML = result.followUps.map((item) =>
       `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
     ).join("");
+    openGmailDraft(Object.fromEntries(new FormData(form).entries()));
   });
 
   $("#leadForm").addEventListener("submit", (event) => {
@@ -3878,6 +3931,8 @@ function bindForms() {
       $("#copyEmail").textContent = "复制英文";
     }, 1200);
   });
+
+  $("#openGmailDraft")?.addEventListener("click", () => openGmailDraft());
 
   $("#quoteForm").addEventListener("submit", (event) => {
     event.preventDefault();

@@ -1671,6 +1671,13 @@ textarea {
 .form-status.error { color: var(--red); }
 .form-status.success { color: var(--green); }
 
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .user-table-panel { min-width: 0; }
 .user-table-panel .panel-head > div { min-width: 0; }
 

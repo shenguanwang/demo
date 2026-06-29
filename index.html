@@ -597,6 +597,7 @@
             <input name="company" required placeholder="审核通过后可从客户池带入">
           </label>
           <input name="contactName" type="hidden">
+          <input name="recipientEmail" type="hidden">
           <label>客户官网 / 社媒主页
             <input name="website" placeholder="客户官网或社媒主页">
           </label>
@@ -625,8 +626,12 @@
         <div class="panel result-panel">
           <div class="panel-head">
             <h3>生成结果</h3>
-            <button class="ghost" id="copyEmail" type="button">复制英文</button>
+            <div class="result-actions">
+              <button class="ghost" id="openGmailDraft" type="button">用 Gmail 编辑</button>
+              <button class="ghost" id="copyEmail" type="button">复制英文</button>
+            </div>
           </div>
+          <p class="form-status" id="gmailDraftStatus" role="status"></p>
           <div class="insight-box">
             <span>中文判断</span>
             <p id="leadInsight">这家公司是迪拜豪华车展厅，适合推荐问界 M9 或尊界 S800。</p>
