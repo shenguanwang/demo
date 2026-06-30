@@ -2070,6 +2070,19 @@ textarea {
   border-radius: 8px;
 }
 
+.lead-card[data-candidate-lead] {
+  cursor: pointer;
+  transition: border-color 0.16s ease, box-shadow 0.16s ease, transform 0.16s ease;
+}
+
+.lead-card[data-candidate-lead]:hover,
+.lead-card[data-candidate-lead]:focus-visible {
+  border-color: #c79a3d;
+  box-shadow: 0 10px 24px rgba(22, 29, 38, 0.08);
+  outline: none;
+  transform: translateY(-1px);
+}
+
 .review-card {
   padding: 24px;
   border-radius: 16px;

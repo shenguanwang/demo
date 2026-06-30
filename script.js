@@ -1148,7 +1148,7 @@ function renderLeads() {
       : "进入审核前先不直接联系";
   }
   $("#leadList").innerHTML = filteredLeads.length ? filteredLeads.map((lead) => `
-    <article class="lead-card">
+    <article class="lead-card" data-candidate-lead="${escapeHtml(lead.id || "")}" role="button" tabindex="0" title="查看线索审核详情">
       <h3>${escapeHtml(lead.company)}</h3>
       <div class="lead-meta">
         <span>${escapeHtml(lead.country)} / ${escapeHtml(lead.city)}</span>
@@ -1160,6 +1160,31 @@ function renderLeads() {
       <strong class="score ${scoreVisualClass(lead.score)}">${lead.score} 分 · ${escapeHtml(lead.scoreTier || "D")}级</strong>
     </article>
   `).join("") : `<p class="empty">${job ? "这条搜索记录暂无候选客户，可能尚未导入或已被审核/删除。" : "暂无待审核线索。请先点击“一键获客到待审核”。"}</p>`;
+}
+
+function showCandidateInReview(leadId) {
+  const lead = reviewLeads.find((item) => String(item.id || "") === String(leadId || ""));
+  if (!lead) return;
+  const statusFilter = $("#reviewStatusFilter");
+  const discoveryFilter = $("#reviewDiscoveryFilter");
+  if (statusFilter) statusFilter.value = "pending";
+  if ($("#reviewTimeFilter")) $("#reviewTimeFilter").value = "all";
+  if ($("#reviewSourceFilter")) $("#reviewSourceFilter").value = "all";
+  if ($("#reviewCountryFilter")) $("#reviewCountryFilter").value = "all";
+  if ($("#reviewTierFilter")) $("#reviewTierFilter").value = "all";
+  renderReviewFilterOptions();
+  if (discoveryFilter) {
+    const hasJobOption = lead.discoveryJobId && [...discoveryFilter.options].some((option) => option.value === lead.discoveryJobId);
+    discoveryFilter.value = hasJobOption ? lead.discoveryJobId : "all";
+  }
+  selectedReviewLeadId = `pending:${lead.id}`;
+  showSection("review");
+  renderReview();
+  requestAnimationFrame(() => {
+    const row = document.querySelector(`[data-review-lead-row="${CSS.escape(selectedReviewLeadId)}"]`);
+    row?.scrollIntoView({ behavior: "smooth", block: "center" });
+    row?.focus({ preventScroll: true });
+  });
 }
 
 const finderStageOrder = ["search", "extract", "verify", "done"];
@@ -4035,6 +4060,20 @@ function bindForms() {
     if (!card) return;
     event.preventDefault();
     applyDiscoveryHistoryFilter(card.dataset.discoveryHistoryJob);
+  });
+
+  $("#leadList")?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-candidate-lead]");
+    if (!card) return;
+    showCandidateInReview(card.dataset.candidateLead);
+  });
+
+  $("#leadList")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const card = event.target.closest("[data-candidate-lead]");
+    if (!card) return;
+    event.preventDefault();
+    showCandidateInReview(card.dataset.candidateLead);
   });
 
   $("#selectVisibleReviewLeads")?.addEventListener("click", () => {
