@@ -97,7 +97,7 @@
         </button>
         <button type="button" data-section="crm">
           <span class="metric-icon blue">◎</span>
-          <span><small>正式客户</small><strong id="heroCustomers">0</strong><em>已进入客户池</em></span>
+          <span><small>客户池客户</small><strong id="heroCustomers">0</strong><em>已进入客户池</em></span>
           <b>→</b>
         </button>
         <button type="button" data-section="email">
@@ -268,7 +268,7 @@
               <div class="progress-step" data-progress-stage="search"><i>1</i><span>搜索来源</span></div>
               <div class="progress-step" data-progress-stage="extract"><i>2</i><span>提取企业</span></div>
               <div class="progress-step" data-progress-stage="verify"><i>3</i><span>交叉核验</span></div>
-              <div class="progress-step" data-progress-stage="done"><i>4</i><span>完成入库</span></div>
+              <div class="progress-step" data-progress-stage="done"><i>4</i><span>保存线索</span></div>
             </div>
             <p id="finderStatus">点击左侧按钮后，将显示搜索、提取和核验的实时流程进度。</p>
             <div class="finder-history">
@@ -326,7 +326,7 @@
         <div class="panel-head">
           <div>
             <h3>云端获客任务</h3>
-            <p>页面关闭或换设备后任务仍会继续。完成的任务可以随时导入待审核线索。</p>
+            <p>页面关闭或换设备后任务仍会继续。完成的任务可以随时导入线索审核。</p>
           </div>
           <div class="discovery-task-controls">
             <span id="discoveryJobCount">0 个任务</span>
@@ -436,7 +436,7 @@
       <div class="panel section-gap">
         <div class="panel-head">
           <h3>发现的候选客户</h3>
-          <span id="candidateLeadSummary">进入审核前先不直接联系</span>
+          <span id="candidateLeadSummary">点击客户卡片可跳到审核详情</span>
         </div>
         <div class="lead-list" id="leadList"></div>
       </div>
@@ -449,7 +449,7 @@
           <h2>线索审核</h2>
           <p>使用统一100分机会模型评估进出口资质、客户匹配、采购意向、经营能力、车型匹配和可触达性；进出口资质占20分，评分只用于排序，不替代人工决定。</p>
         </div>
-        <button class="primary" id="researchAllLeads" type="button">全网补全全部线索</button>
+        <button class="primary" id="researchAllLeads" type="button">全网补全当前线索</button>
       </div>
       <div class="review-toolbar" aria-label="线索审核筛选与批量操作">
         <div class="review-filter-group">
@@ -573,7 +573,7 @@
       <div class="split-actions section-gap">
         <button class="primary" id="exportCustomerTable" type="button">导出客户表格 CSV</button>
         <button class="ghost" id="exportData" type="button">导出完整备份 JSON</button>
-        <button class="ghost" id="clearSavedData" type="button">清空本机保存数据</button>
+        <button class="ghost" id="clearSavedData" type="button">清空当前账号数据</button>
       </div>
       <div class="crm-workbench" aria-label="客户池工作视图">
         <div class="crm-view-tabs" id="crmViewTabs">
@@ -583,7 +583,7 @@
           <button type="button" data-crm-filter="missing">未设下次跟进 <span id="crmCountMissing">0</span></button>
           <button type="button" data-crm-filter="priority">A / B 级优先 <span id="crmCountPriority">0</span></button>
         </div>
-        <p id="crmViewHint">显示全部正式客户。</p>
+        <p id="crmViewHint">显示全部客户池客户。</p>
       </div>
       <div class="table-wrap">
         <table>
@@ -709,11 +709,11 @@
       <div class="quote-layout">
         <form class="panel quote-calculator" id="quoteForm">
           <div class="panel-head">
-            <h3>CIF报价计算器</h3>
+            <h3>CIF 报价计算器</h3>
             <span>报价版本保存后不可覆盖</span>
           </div>
           <div class="quote-form-grid">
-            <label>选择线索
+            <label>选择客户
               <select name="customer" id="quoteCustomer"><option value="">未选择客户</option></select>
             </label>
             <label>车型
@@ -791,7 +791,7 @@
             </label>
           </div>
           <div class="quote-actions">
-            <button class="primary" type="submit">计算CIF</button>
+            <button class="primary" type="submit">计算 CIF</button>
             <button class="ghost" id="saveQuote" type="button">保存报价版本</button>
             <button class="ghost" id="downloadQuote" type="button">导出英文报价单</button>
           </div>
@@ -814,7 +814,7 @@
         </div>
         <div class="table-wrap quote-history-wrap">
           <table>
-            <thead><tr><th>版本</th><th>线索</th><th>车型</th><th>数量</th><th>CIF总价</th><th>交期</th><th>有效期</th><th>创建时间</th><th>操作</th></tr></thead>
+            <thead><tr><th>版本</th><th>客户</th><th>车型</th><th>数量</th><th>CIF 总价</th><th>交期</th><th>有效期</th><th>创建时间</th><th>操作</th></tr></thead>
             <tbody id="quoteHistory"></tbody>
           </table>
         </div>
@@ -837,7 +837,7 @@
       <div class="panel section-gap aftersales-panel">
         <div class="panel-head">
           <div>
-            <h3>已完成订单售后</h3>
+            <h3>已成交订单售后</h3>
             <p>成交后把订单、车辆、质保和服务记录放在这里，方便持续跟踪交付后的客户问题。</p>
           </div>
           <span id="afterSalesSummary">0 个售后订单</span>
@@ -897,7 +897,7 @@
       <div class="kpi-grid">
         <div><span>待审核线索</span><strong id="kpiPending">0</strong><p>一键获客后先进入这里</p></div>
         <div><span>已完成核验</span><strong id="kpiVerified">0</strong><p>有多来源证据链的线索</p></div>
-        <div><span>正式客户</span><strong id="kpiCustomers">0</strong><p>审核通过后进入客户池</p></div>
+        <div><span>客户池客户</span><strong id="kpiCustomers">0</strong><p>审核通过后进入客户池</p></div>
         <div><span>已联系客户</span><strong id="kpiContacted">0</strong><p>已完成首次触达</p></div>
         <div><span>有回复客户</span><strong id="kpiReplied">0</strong><p>进入有效销售沟通</p></div>
         <div><span>报价版本</span><strong id="kpiQuotes">0</strong><p>每次保存生成一个历史版本</p></div>

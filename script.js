@@ -448,7 +448,7 @@ function csvCell(value) {
 function exportCustomersCsv() {
   const button = $("#exportCustomerTable");
   if (!customers.length) {
-    button.textContent = "客户池暂无数据";
+    button.textContent = "客户池暂无客户";
     setTimeout(() => { button.textContent = "导出客户表格 CSV"; }, 1500);
     return;
   }
@@ -958,7 +958,7 @@ function afterSalesSourceOptions() {
   }));
   const wonCustomers = customers
     .map((lead, index) => ({ lead, index }))
-    .filter(({ lead }) => lead.stage === "已成交" || lead.stage === "宸叉垚浜?");
+    .filter(({ lead }) => lead.stage === "已成交");
   return [
     ...quoted,
     ...wonCustomers.map(({ lead, index }) => ({
@@ -1148,7 +1148,7 @@ function renderLeads() {
   if (summary) {
     summary.textContent = job
       ? `${discoveryJobLabel(job)}：显示 ${filteredLeads.length} 条候选客户`
-      : "进入审核前先不直接联系";
+      : "点击客户卡片可跳到审核详情";
   }
   $("#leadList").innerHTML = filteredLeads.length ? filteredLeads.map((lead) => `
     <article class="lead-card" data-candidate-lead="${escapeHtml(lead.id || "")}" role="button" tabindex="0" title="查看线索审核详情">
@@ -1793,7 +1793,7 @@ function renderCrm() {
   });
   const viewHint = $("#crmViewHint");
   if (viewHint) viewHint.textContent = {
-    all: `显示全部 ${customers.length} 位正式客户。`,
+    all: `显示全部 ${customers.length} 位客户池客户。`,
     due: `优先处理今天需要推进的 ${dueCustomers.length} 位客户。`,
     overdue: `共有 ${overdueCustomers.length} 位客户已超过计划跟进日期。`,
     missing: `共有 ${missingCustomers.length} 位客户尚未设定下一次跟进日期。`,
@@ -2184,8 +2184,8 @@ async function researchAllLeads() {
     .map((lead, index) => ({ lead, index }))
     .filter(({ lead }) => !lead.researchAt);
   if (!pending.length) {
-    button.textContent = "全部已完成核验";
-    setTimeout(() => { button.textContent = "全网补全全部线索"; }, 1600);
+    button.textContent = "当前线索已完成核验";
+    setTimeout(() => { button.textContent = "全网补全当前线索"; }, 1600);
     return;
   }
   button.disabled = true;
@@ -2194,7 +2194,7 @@ async function researchAllLeads() {
     await Promise.all(pending.slice(offset, offset + 3).map(({ index }) => researchLead(index)));
   }
   button.disabled = false;
-  button.textContent = "全网补全全部线索";
+  button.textContent = "全网补全当前线索";
 }
 
 async function autoResearchNewLeads(count, sourceLabel, freshnessLabel) {
@@ -3100,7 +3100,7 @@ function isScheduledDiscoveryJob(job) {
 function discoveryJobResultText(job) {
   const count = Number(job.result?.count || job.result?.leads?.length || 0);
   if (job.imported) return `已导入 ${count} 条`;
-  if (job.status === "completed") return count ? `发现 ${count} 条` : "无新线索";
+  if (job.status === "completed") return count ? `发现 ${count} 条` : "无可导入线索";
   if (job.status === "failed") return "执行失败";
   if (job.status === "canceled") return "已取消";
   return `${Number(job.progress || 0)}%`;
@@ -3203,7 +3203,7 @@ function renderDiscoveryJobs() {
           : canCancel
             ? "取消任务"
           : job.status === "completed"
-            ? "无新线索"
+            ? "无可导入线索"
             : `${Number(job.progress || 0)}%`;
     const actionAttribute = canImport
       ? `data-import-job="${escapeHtml(job.id)}"`
@@ -3560,7 +3560,7 @@ async function importDiscoveryJob(jobId) {
       state: "complete",
       title: `已导入 ${merged.fresh.length} 条新线索`,
       message: merged.fresh.length
-        ? "任务结果已进入线索审核，并已同步到云端客户数据。"
+        ? "任务结果已进入线索审核，并已同步到云端数据。"
         : "任务结果中的线索已存在，没有重复导入。"
     });
   } catch (error) {
@@ -4352,7 +4352,7 @@ function bindForms() {
   });
 
   $("#clearSavedData").addEventListener("click", () => {
-    if (!confirm("确认清空待审核线索、客户池、拒绝记录和报价吗？")) return;
+    if (!confirm("确认清空当前账号下的待审核线索、客户池、拒绝记录、报价和售后订单吗？")) return;
     reviewLeads.forEach((record) => rememberDeletedRecord(record, "reviewLeads"));
     customers.forEach((record) => rememberDeletedRecord(record, "customers"));
     rejectedLeads.forEach((record) => rememberDeletedRecord(record, "rejectedLeads"));
