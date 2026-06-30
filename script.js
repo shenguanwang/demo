@@ -3061,7 +3061,7 @@ function renderDiscoveryHistory() {
   }));
   const cards = [...jobCards, ...scheduleCards]
     .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
-    .slice(0, 12);
+    .slice(0, 24);
   if (countLabel) countLabel.textContent = `${cards.length} 条`;
   box.innerHTML = cards.length ? cards.map((card) => `
     <article class="finder-history-card ${escapeHtml(card.state || "")}">
