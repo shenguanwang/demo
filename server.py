@@ -13,6 +13,7 @@ import socketserver
 import base64
 import sqlite3
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -1194,23 +1195,70 @@ def discovery_failure_diagnostics(exc: Exception, params: dict[str, list[str]]) 
     }
 
 
+def discovery_progress_message(source_mode: str, stage: str) -> str:
+    if source_mode == "social":
+        return {
+            "search": "社媒综合正在检索 YouTube、Facebook、Instagram、TikTok、LinkedIn 等公开来源。",
+            "extract": "正在从社媒主页、频道简介和公开搜索结果中提取公司与联系方式。",
+            "verify": "正在去重并核对账号类型、业务信号和可联系信息。",
+        }.get(stage, "社媒综合搜索仍在后台执行。")
+    if source_mode in {"combined", "all"}:
+        return {
+            "search": "云端正在检索地图、企业官网、行业目录和公开社媒来源。",
+            "extract": "正在提取候选企业、官网、电话、邮箱和原始来源。",
+            "verify": "正在去重并交叉核验客户类型、采购意向和联系方式。",
+        }.get(stage, "云端获客任务仍在后台执行。")
+    return {
+        "search": "云端正在检索所选公开来源。",
+        "extract": "正在提取候选企业和联系方式。",
+        "verify": "正在去重并核验候选线索。",
+    }.get(stage, "云端获客任务仍在后台执行。")
+
+
+def heartbeat_discovery_job(job_id: str, source_mode: str, stop_event: threading.Event) -> None:
+    started_at = time.monotonic()
+    while not stop_event.wait(25):
+        elapsed = time.monotonic() - started_at
+        progress = min(88, 12 + int(elapsed // 30) * 7)
+        stage = "search" if progress < 35 else "extract" if progress < 68 else "verify"
+        update_discovery_job(
+            job_id,
+            skip_statuses=("canceled", "completed", "failed"),
+            status="running",
+            stage=stage,
+            progress=progress,
+            message=discovery_progress_message(source_mode, stage),
+        )
+
+
 def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
+    heartbeat_stop = threading.Event()
+    heartbeat_thread: threading.Thread | None = None
     try:
         with DISCOVERY_WORKER_SLOTS:
+            source_mode = (params.get("sourceMode") or ["combined"])[0]
             started = update_discovery_job(
                 job_id,
                 skip_statuses=("canceled",),
                 status="running",
                 stage="search",
                 progress=12,
-                message="云端正在检索地图、企业官网、行业目录和公开社媒来源。",
+                message=discovery_progress_message(source_mode, "search"),
             )
             if not started:
                 return
+            heartbeat_thread = threading.Thread(
+                target=heartbeat_discovery_job,
+                args=(job_id, source_mode, heartbeat_stop),
+                name=f"discovery-heartbeat-{job_id[:8]}",
+                daemon=True,
+            )
+            heartbeat_thread.start()
             result = discover(params)
+            heartbeat_stop.set()
             update_discovery_job(
                 job_id,
-                skip_statuses=("canceled",),
+                skip_statuses=("canceled", "failed"),
                 status="completed",
                 stage="done",
                 progress=100,
@@ -1219,6 +1267,7 @@ def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
             )
     except Exception as exc:
         diagnostics = discovery_failure_diagnostics(exc, params)
+        heartbeat_stop.set()
         update_discovery_job(
             job_id,
             skip_statuses=("canceled",),
@@ -1230,6 +1279,9 @@ def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
             result={"diagnostics": diagnostics},
         )
     finally:
+        heartbeat_stop.set()
+        if heartbeat_thread and heartbeat_thread.is_alive():
+            heartbeat_thread.join(timeout=1)
         with ACTIVE_DISCOVERY_WORKERS_LOCK:
             ACTIVE_DISCOVERY_WORKERS.discard(job_id)
 
