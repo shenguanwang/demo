@@ -325,7 +325,11 @@
           </div>
           <div class="discovery-task-controls">
             <span id="discoveryJobCount">0 个任务</span>
-            <button class="ghost compact" id="toggleDiscoveryJobs" type="button" hidden>展开全部</button>
+            <div class="discovery-pager" aria-label="云端获客任务分页">
+              <button class="ghost compact" id="discoveryPrevPage" type="button" disabled>←</button>
+              <span id="discoveryPageLabel">1 / 1</span>
+              <button class="ghost compact" id="discoveryNextPage" type="button" disabled>→</button>
+            </div>
             <button class="ghost compact" id="refreshDiscoveryJobs" type="button">刷新任务</button>
           </div>
         </div>

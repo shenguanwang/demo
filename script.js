@@ -233,7 +233,8 @@ let cloudSaveTimer = null;
 let cloudSaveChain = Promise.resolve();
 let discoveryJobs = [];
 let discoveryJobsTimer = null;
-let discoveryJobsExpanded = false;
+let discoveryJobPage = 1;
+const DISCOVERY_JOBS_PAGE_SIZE = 6;
 let discoverySchedules = [];
 let activeDiscoveryJobFilter = "all";
 let reviewSelectedIds = new Set();
@@ -3164,22 +3165,18 @@ function renderDiscoveryJobs() {
   const box = $("#discoveryJobList");
   if (!box) return;
   const stateLabels = discoveryJobStateLabels();
-  const activeJobs = discoveryJobs.filter((job) => ["queued", "running"].includes(job.status));
-  const inactiveJobs = discoveryJobs.filter((job) => !["queued", "running"].includes(job.status));
-  const collapsedJobs = [
-    ...activeJobs,
-    ...inactiveJobs.slice(0, Math.max(0, 4 - activeJobs.length))
-  ];
-  const visibleJobs = discoveryJobsExpanded ? discoveryJobs : collapsedJobs;
+  const pageCount = Math.max(1, Math.ceil(discoveryJobs.length / DISCOVERY_JOBS_PAGE_SIZE));
+  discoveryJobPage = Math.max(1, Math.min(discoveryJobPage, pageCount));
+  const pageStart = (discoveryJobPage - 1) * DISCOVERY_JOBS_PAGE_SIZE;
+  const visibleJobs = discoveryJobs.slice(pageStart, pageStart + DISCOVERY_JOBS_PAGE_SIZE);
   const count = $("#discoveryJobCount");
-  if (count) count.textContent = `${discoveryJobs.length} 个任务`;
-  const toggle = $("#toggleDiscoveryJobs");
-  if (toggle) {
-    toggle.hidden = discoveryJobs.length <= collapsedJobs.length;
-    toggle.textContent = discoveryJobsExpanded
-      ? "收起任务"
-      : `展开全部（${discoveryJobs.length}）`;
-  }
+  if (count) count.textContent = `${discoveryJobs.length} 个历史任务`;
+  const pageLabel = $("#discoveryPageLabel");
+  if (pageLabel) pageLabel.textContent = `${discoveryJobPage} / ${pageCount}`;
+  const prevPage = $("#discoveryPrevPage");
+  const nextPage = $("#discoveryNextPage");
+  if (prevPage) prevPage.disabled = discoveryJobPage <= 1;
+  if (nextPage) nextPage.disabled = discoveryJobPage >= pageCount;
   box.innerHTML = visibleJobs.length ? visibleJobs.map((job) => {
     const count = Number(job.result?.count || job.result?.leads?.length || 0);
     const canImport = job.status === "completed" && !job.imported && count > 0;
@@ -3662,8 +3659,14 @@ async function loadDiscoverySourceStatus() {
 }
 
 function bindForms() {
-  $("#toggleDiscoveryJobs")?.addEventListener("click", () => {
-    discoveryJobsExpanded = !discoveryJobsExpanded;
+  $("#discoveryPrevPage")?.addEventListener("click", () => {
+    discoveryJobPage = Math.max(1, discoveryJobPage - 1);
+    renderDiscoveryJobs();
+  });
+
+  $("#discoveryNextPage")?.addEventListener("click", () => {
+    const pageCount = Math.max(1, Math.ceil(discoveryJobs.length / DISCOVERY_JOBS_PAGE_SIZE));
+    discoveryJobPage = Math.min(pageCount, discoveryJobPage + 1);
     renderDiscoveryJobs();
   });
 
@@ -3726,6 +3729,7 @@ function bindForms() {
     const submitButton = event.currentTarget.querySelector('button[type="submit"]');
     submitButton.disabled = true;
     submitButton.textContent = "正在搜索并自动核验…";
+    discoveryJobPage = 1;
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const words = generateKeywords(data.goal, data.country, data.model);
     renderKeywords(words);

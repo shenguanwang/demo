@@ -584,19 +584,7 @@ def verify_session_token(token: str) -> bool:
 
 
 def cleanup_discovery_jobs() -> None:
-    cutoff = datetime.now(timezone.utc) - timedelta(seconds=DISCOVERY_JOB_TTL)
     initialize_state_store()
-    with DISCOVERY_JOBS_LOCK:
-        if DATABASE_URL:
-            with postgres_connection() as connection:
-                with connection.cursor() as cursor:
-                    cursor.execute("DELETE FROM discovery_jobs WHERE updated_at < %s", (cutoff,))
-        else:
-            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-                connection.execute(
-                    "DELETE FROM discovery_jobs WHERE updated_at < ?",
-                    (cutoff.isoformat(timespec="seconds"),),
-                )
 
 
 def discovery_job_public(job: dict) -> dict:
@@ -1023,7 +1011,7 @@ def load_discovery_job(job_id: str, owner_username: str | None = None) -> dict |
     return row_to_discovery_job(row) if row else None
 
 
-def list_discovery_jobs(owner_username: str, limit: int = 20) -> list[dict]:
+def list_discovery_jobs(owner_username: str, limit: int | None = None) -> list[dict]:
     cleanup_discovery_jobs()
     query = (
         "SELECT job_id, payload, status, stage, progress, message, result, error, "
@@ -1033,11 +1021,17 @@ def list_discovery_jobs(owner_username: str, limit: int = 20) -> list[dict]:
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute(query + "%s ORDER BY updated_at DESC LIMIT %s", (owner_username, limit))
+                if limit:
+                    cursor.execute(query + "%s ORDER BY updated_at DESC LIMIT %s", (owner_username, limit))
+                else:
+                    cursor.execute(query + "%s ORDER BY updated_at DESC", (owner_username,))
                 rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            rows = connection.execute(query + "? ORDER BY updated_at DESC LIMIT ?", (owner_username, limit)).fetchall()
+            if limit:
+                rows = connection.execute(query + "? ORDER BY updated_at DESC LIMIT ?", (owner_username, limit)).fetchall()
+            else:
+                rows = connection.execute(query + "? ORDER BY updated_at DESC", (owner_username,)).fetchall()
     return [discovery_job_public(row_to_discovery_job(row)) for row in rows]
 
 

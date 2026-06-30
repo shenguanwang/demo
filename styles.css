@@ -1177,6 +1177,31 @@ textarea {
   font-size: 11px;
 }
 
+.discovery-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.discovery-pager .ghost.compact {
+  min-width: 34px;
+  min-height: 30px;
+  padding: 0 9px;
+  border-radius: 999px;
+}
+
+.discovery-pager span {
+  min-width: 46px;
+  color: #44515f;
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
 .ghost.compact {
   min-height: 36px;
   padding: 0 14px;
