@@ -294,7 +294,14 @@
             <h3>定时自动抓取</h3>
             <p>把左侧当前找客户条件保存为计划，到时间后后台自动创建获客任务，结果会出现在下方云端获客任务里。</p>
           </div>
-          <span class="schedule-status" id="scheduleStatus">等待设置</span>
+          <div class="schedule-panel-actions">
+            <span class="schedule-status" id="scheduleStatus">等待设置</span>
+            <div class="schedule-pager" aria-label="定时抓取计划分页">
+              <button class="ghost compact" id="schedulePrevPage" type="button" disabled>←</button>
+              <span id="schedulePageLabel">1 / 1</span>
+              <button class="ghost compact" id="scheduleNextPage" type="button" disabled>→</button>
+            </div>
+          </div>
         </div>
         <form class="schedule-form" id="scheduleForm">
           <label>执行频率

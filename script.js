@@ -234,8 +234,10 @@ let cloudSaveChain = Promise.resolve();
 let discoveryJobs = [];
 let discoveryJobsTimer = null;
 let discoveryJobPage = 1;
-const DISCOVERY_JOBS_PAGE_SIZE = 6;
+const DISCOVERY_JOBS_PAGE_SIZE = 4;
 let discoverySchedules = [];
+let discoverySchedulePage = 1;
+const DISCOVERY_SCHEDULES_PAGE_SIZE = 4;
 let finderHistoryPage = 1;
 const FINDER_HISTORY_PAGE_SIZE = 18;
 let activeDiscoveryJobFilter = "all";
@@ -3269,10 +3271,20 @@ function renderDiscoverySchedules() {
   if (!box) return;
   const status = $("#scheduleStatus");
   const enabledCount = discoverySchedules.filter((schedule) => schedule.enabled).length;
+  const pageCount = Math.max(1, Math.ceil(discoverySchedules.length / DISCOVERY_SCHEDULES_PAGE_SIZE));
+  discoverySchedulePage = Math.max(1, Math.min(discoverySchedulePage, pageCount));
+  const pageStart = (discoverySchedulePage - 1) * DISCOVERY_SCHEDULES_PAGE_SIZE;
+  const visibleSchedules = discoverySchedules.slice(pageStart, pageStart + DISCOVERY_SCHEDULES_PAGE_SIZE);
   if (status) status.textContent = discoverySchedules.length
-    ? `${enabledCount} 个计划启用`
+    ? `${enabledCount} 个启用 / ${discoverySchedules.length} 个计划`
     : "未设置计划";
-  box.innerHTML = discoverySchedules.length ? discoverySchedules.map((schedule) => `
+  const pageLabel = $("#schedulePageLabel");
+  if (pageLabel) pageLabel.textContent = `${discoverySchedulePage} / ${pageCount}`;
+  const prevPage = $("#schedulePrevPage");
+  const nextPage = $("#scheduleNextPage");
+  if (prevPage) prevPage.disabled = discoverySchedulePage <= 1;
+  if (nextPage) nextPage.disabled = discoverySchedulePage >= pageCount;
+  box.innerHTML = visibleSchedules.length ? visibleSchedules.map((schedule) => `
     <article class="schedule-item">
       <div>
         <div class="schedule-title">
@@ -3340,6 +3352,7 @@ async function saveDiscoverySchedule(event) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    discoverySchedulePage = 1;
     await loadDiscoverySchedules();
     await loadDiscoveryJobs().catch(() => undefined);
     const status = $("#scheduleStatus");
@@ -3691,6 +3704,17 @@ function bindForms() {
     const pageCount = Math.max(1, Math.ceil(discoveryJobs.length / DISCOVERY_JOBS_PAGE_SIZE));
     discoveryJobPage = Math.min(pageCount, discoveryJobPage + 1);
     renderDiscoveryJobs();
+  });
+
+  $("#schedulePrevPage")?.addEventListener("click", () => {
+    discoverySchedulePage = Math.max(1, discoverySchedulePage - 1);
+    renderDiscoverySchedules();
+  });
+
+  $("#scheduleNextPage")?.addEventListener("click", () => {
+    const pageCount = Math.max(1, Math.ceil(discoverySchedules.length / DISCOVERY_SCHEDULES_PAGE_SIZE));
+    discoverySchedulePage = Math.min(pageCount, discoverySchedulePage + 1);
+    renderDiscoverySchedules();
   });
 
   $("#refreshDiscoveryJobs")?.addEventListener("click", () => {

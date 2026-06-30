@@ -1177,7 +1177,8 @@ textarea {
   font-size: 11px;
 }
 
-.discovery-pager {
+.discovery-pager,
+.schedule-pager {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -1187,14 +1188,16 @@ textarea {
   background: #fff;
 }
 
-.discovery-pager .ghost.compact {
+.discovery-pager .ghost.compact,
+.schedule-pager .ghost.compact {
   min-width: 34px;
   min-height: 30px;
   padding: 0 9px;
   border-radius: 999px;
 }
 
-.discovery-pager span {
+.discovery-pager span,
+.schedule-pager span {
   min-width: 46px;
   color: #44515f;
   font-size: 11px;
@@ -1384,6 +1387,14 @@ textarea {
   color: var(--muted);
   background: #fff;
   white-space: nowrap;
+}
+
+.schedule-panel-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .schedule-list {
