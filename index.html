@@ -427,7 +427,7 @@
       <div class="panel section-gap">
         <div class="panel-head">
           <h3>发现的候选客户</h3>
-          <span>进入审核前先不直接联系</span>
+          <span id="candidateLeadSummary">进入审核前先不直接联系</span>
         </div>
         <div class="lead-list" id="leadList"></div>
       </div>
@@ -449,6 +449,9 @@
               <option value="pending">待审核线索</option>
               <option value="approved">已审核客户</option>
             </select>
+          </label>
+          <label>搜索记录
+            <select id="reviewDiscoveryFilter"><option value="all">全部搜索记录</option></select>
           </label>
           <label>时间
             <select id="reviewTimeFilter">

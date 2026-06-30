@@ -235,6 +235,7 @@ let discoveryJobs = [];
 let discoveryJobsTimer = null;
 let discoveryJobsExpanded = false;
 let discoverySchedules = [];
+let activeDiscoveryJobFilter = "all";
 let reviewSelectedIds = new Set();
 let selectedReviewLeadId = "";
 let currentSession = null;
@@ -1128,8 +1129,25 @@ function renderKeywords(words = defaultKeywords) {
   $("#keywords").innerHTML = words.map((word) => `<span>${word}</span>`).join("");
 }
 
+function discoveryJobLeadMatches(lead, jobId) {
+  return jobId === "all" || String(lead.discoveryJobId || "") === String(jobId || "");
+}
+
+function activeDiscoveryJob() {
+  if (activeDiscoveryJobFilter === "all") return null;
+  return discoveryJobs.find((job) => String(job.id) === String(activeDiscoveryJobFilter)) || null;
+}
+
 function renderLeads() {
-  $("#leadList").innerHTML = reviewLeads.length ? reviewLeads.map((lead) => `
+  const filteredLeads = reviewLeads.filter((lead) => discoveryJobLeadMatches(lead, activeDiscoveryJobFilter));
+  const summary = $("#candidateLeadSummary");
+  const job = activeDiscoveryJob();
+  if (summary) {
+    summary.textContent = job
+      ? `${discoveryJobLabel(job)}：显示 ${filteredLeads.length} 条候选客户`
+      : "进入审核前先不直接联系";
+  }
+  $("#leadList").innerHTML = filteredLeads.length ? filteredLeads.map((lead) => `
     <article class="lead-card">
       <h3>${escapeHtml(lead.company)}</h3>
       <div class="lead-meta">
@@ -1141,7 +1159,7 @@ function renderLeads() {
       <p>${escapeHtml(lead.reason)}</p>
       <strong class="score ${scoreVisualClass(lead.score)}">${lead.score} 分 · ${escapeHtml(lead.scoreTier || "D")}级</strong>
     </article>
-  `).join("") : `<p class="empty">暂无待审核线索。请先点击“一键获客到待审核”。</p>`;
+  `).join("") : `<p class="empty">${job ? "这条搜索记录暂无候选客户，可能尚未导入或已被审核/删除。" : "暂无待审核线索。请先点击“一键获客到待审核”。"}</p>`;
 }
 
 const finderStageOrder = ["search", "extract", "verify", "done"];
@@ -1626,10 +1644,27 @@ function reviewLeadCountryKey(lead) {
   return reviewCountryKey(lead.country);
 }
 
+function discoveryJobFilterOptions(leads) {
+  const options = new Map();
+  leads.forEach((lead) => {
+    const id = String(lead.discoveryJobId || "");
+    if (!id) return;
+    const job = discoveryJobs.find((item) => String(item.id) === id);
+    options.set(id, lead.discoveryJobLabel || discoveryJobLabel(job) || `搜索记录 ${id.slice(0, 8)}`);
+  });
+  discoveryJobs.forEach((job) => {
+    const id = String(job.id || "");
+    if (!id || options.has(id)) return;
+    options.set(id, discoveryJobLabel(job));
+  });
+  return [...options.entries()];
+}
+
 function renderReviewFilterOptions() {
   const sourceSelect = $("#reviewSourceFilter");
   const countrySelect = $("#reviewCountryFilter");
-  if (!sourceSelect && !countrySelect) return;
+  const discoverySelect = $("#reviewDiscoveryFilter");
+  if (!sourceSelect && !countrySelect && !discoverySelect) return;
   const sourceLeads = reviewSourceLeads();
   const current = sourceSelect?.value || "all";
   const available = new Set(sourceLeads.map(reviewSourceKey));
@@ -1660,14 +1695,23 @@ function renderReviewFilterOptions() {
     countrySelect.innerHTML = `<option value="all">全部国家</option>${countryOptionHtml}`;
     countrySelect.value = currentCountry === "all" || countryOptions.has(currentCountry) ? currentCountry : "all";
   }
+
+  if (discoverySelect) {
+    const currentDiscovery = discoverySelect.value || "all";
+    const options = discoveryJobFilterOptions(sourceLeads);
+    discoverySelect.innerHTML = `<option value="all">全部搜索记录</option>${options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
+    discoverySelect.value = currentDiscovery === "all" || options.some(([value]) => value === currentDiscovery) ? currentDiscovery : "all";
+  }
 }
 
 function reviewLeadMatchesFilters(lead) {
+  const discoveryFilter = $("#reviewDiscoveryFilter")?.value || "all";
   const timeFilter = $("#reviewTimeFilter")?.value || "all";
   const sourceFilter = $("#reviewSourceFilter")?.value || "all";
   const countryFilter = $("#reviewCountryFilter")?.value || "all";
   const tierFilter = $("#reviewTierFilter")?.value || "all";
   const source = reviewSourceKey(lead);
+  if (discoveryFilter !== "all" && String(lead.discoveryJobId || "") !== discoveryFilter) return false;
   if (sourceFilter !== "all" && source !== sourceFilter) return false;
   if (countryFilter !== "all" && reviewLeadCountryKey(lead) !== countryFilter) return false;
   if (tierFilter !== "all" && lead.scoreTier !== tierFilter) return false;
@@ -1907,6 +1951,9 @@ function normalizeLead(raw) {
     source: raw.source || "Website",
     sourceMode: raw.sourceMode || raw.discoverySource || "",
     discoverySource: raw.discoverySource || raw.sourceMode || "",
+    discoveryJobId: raw.discoveryJobId || raw.jobId || "",
+    discoveryJobLabel: raw.discoveryJobLabel || "",
+    discoveryJobImportedAt: raw.discoveryJobImportedAt || "",
     platform: raw.platform || "",
     origin: raw.origin || "公开网页",
     sourceType: raw.sourceType || "公开商业网站",
@@ -3040,6 +3087,7 @@ function renderDiscoveryHistory() {
     .filter((schedule) => !schedule.lastJobId)
     .map((schedule) => ({
       kind: "定时抓取",
+      id: "",
       status: schedule.enabled ? "已启用" : "已暂停",
       time: schedule.updatedAt || schedule.createdAt || schedule.nextRunAt,
       country: schedule.country,
@@ -3051,6 +3099,7 @@ function renderDiscoveryHistory() {
     }));
   const jobCards = discoveryJobs.map((job) => ({
     kind: isScheduledDiscoveryJob(job) ? "定时抓取" : "自动抓取",
+    id: job.id || "",
     status: stateLabels[job.status] || job.status || "未知",
     state: job.status || "",
     time: job.updatedAt || job.createdAt,
@@ -3064,7 +3113,7 @@ function renderDiscoveryHistory() {
     .slice(0, 24);
   if (countLabel) countLabel.textContent = `${cards.length} 条`;
   box.innerHTML = cards.length ? cards.map((card) => `
-    <article class="finder-history-card ${escapeHtml(card.state || "")}">
+    <article class="finder-history-card ${escapeHtml(card.state || "")} ${card.id && activeDiscoveryJobFilter === card.id ? "active" : ""}" ${card.id ? `data-discovery-history-job="${escapeHtml(card.id)}" role="button" tabindex="0"` : ""}>
       <div>
         <span>${escapeHtml(card.kind)}</span>
         <b>${escapeHtml(card.status)}</b>
@@ -3077,6 +3126,13 @@ function renderDiscoveryHistory() {
       </footer>
     </article>
   `).join("") : `<p class="empty">暂无搜索记录。</p>`;
+}
+
+function applyDiscoveryHistoryFilter(jobId) {
+  activeDiscoveryJobFilter = jobId || "all";
+  renderLeads();
+  renderDiscoveryHistory();
+  $("#leadList")?.closest(".panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 function renderDiscoveryJobs() {
@@ -3302,6 +3358,7 @@ async function loadDiscoveryJobs() {
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
   discoveryJobs = Array.isArray(result.jobs) ? result.jobs : [];
   renderDiscoveryJobs();
+  renderReviewFilterOptions();
   const active = discoveryJobs.find((job) => ["queued", "running"].includes(job.status));
   if (active) {
     setFinderProgress({
@@ -3423,13 +3480,25 @@ async function deleteDiscoveryJob(jobId) {
   }
 }
 
-function mergeDiscoveryResult(result, sourceMode = "") {
+function discoveryJobLabel(job) {
+  if (!job) return "";
+  return `${job.country || "未指定市场"} · ${job.model || "未指定车型"} · ${formatJobTime(job.createdAt || job.updatedAt)}`;
+}
+
+function mergeDiscoveryResult(result, sourceMode = "", job = null) {
   const found = Array.isArray(result?.leads) ? result.leads : [];
   const existing = new Set(
     [...reviewLeads, ...customers].map((lead) => `${lead.company}|${lead.source}`.toLowerCase())
   );
   const fresh = found
-    .map((lead) => normalizeLead({ ...lead, sourceMode, discoverySource: sourceMode }))
+    .map((lead) => normalizeLead({
+      ...lead,
+      sourceMode,
+      discoverySource: sourceMode,
+      discoveryJobId: job?.id || "",
+      discoveryJobLabel: discoveryJobLabel(job),
+      discoveryJobImportedAt: new Date().toISOString()
+    }))
     .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()));
   if (fresh.length) {
     reviewLeads = [...fresh, ...reviewLeads];
@@ -3450,7 +3519,7 @@ async function importDiscoveryJob(jobId) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    const merged = mergeDiscoveryResult(result.job?.result || {}, result.job?.payload?.sourceMode || "");
+    const merged = mergeDiscoveryResult(result.job?.result || {}, result.job?.payload?.sourceMode || "", result.job);
     await markDiscoveryImported(jobId);
     setFinderProgress({
       percent: 100,
@@ -3534,7 +3603,7 @@ async function runCloudDiscovery(data, words, onProgress) {
     const job = statusResult.job || {};
     if (typeof onProgress === "function") onProgress(job);
     if (job.status === "completed") {
-      return { ...(job.result || { ok: true, leads: [], count: 0 }), __jobId: job.id };
+      return { ...(job.result || { ok: true, leads: [], count: 0 }), __jobId: job.id, __job: job };
     }
     if (job.status === "failed") throw new Error(job.error || job.message || "云端搜索失败");
     if (job.status === "canceled") {
@@ -3642,7 +3711,17 @@ function bindForms() {
     })
       .then(async (result) => {
         const elapsedSeconds = searchProgress.stop();
-        const { found, fresh } = mergeDiscoveryResult(result, data.sourceMode);
+        const { found, fresh } = mergeDiscoveryResult(
+          result,
+          data.sourceMode,
+          result.__job || {
+            id: result.__jobId,
+            country: data.country,
+            model: data.model,
+            sourceMode: data.sourceMode,
+            createdAt: new Date().toISOString()
+          }
+        );
         if (!found.length) {
           await markDiscoveryImported(result.__jobId);
           setFinderProgress({
@@ -3930,17 +4009,32 @@ function bindForms() {
     hydrateReviewDetail(details);
   }, true);
 
-  ["#reviewStatusFilter", "#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
+  ["#reviewStatusFilter", "#reviewDiscoveryFilter", "#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
     $(selector)?.addEventListener("change", renderReview);
   });
 
   $("#clearReviewFilters")?.addEventListener("click", () => {
     $("#reviewStatusFilter").value = "pending";
+    $("#reviewDiscoveryFilter").value = "all";
     $("#reviewTimeFilter").value = "all";
     $("#reviewSourceFilter").value = "all";
     $("#reviewCountryFilter").value = "all";
     $("#reviewTierFilter").value = "all";
     renderReview();
+  });
+
+  $("#finderHistoryGrid")?.addEventListener("click", (event) => {
+    const card = event.target.closest("[data-discovery-history-job]");
+    if (!card) return;
+    applyDiscoveryHistoryFilter(card.dataset.discoveryHistoryJob);
+  });
+
+  $("#finderHistoryGrid")?.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const card = event.target.closest("[data-discovery-history-job]");
+    if (!card) return;
+    event.preventDefault();
+    applyDiscoveryHistoryFilter(card.dataset.discoveryHistoryJob);
   });
 
   $("#selectVisibleReviewLeads")?.addEventListener("click", () => {
