@@ -1189,6 +1189,100 @@ textarea {
   margin-top: 16px;
 }
 
+.finder-history {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.finder-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.finder-history-head strong {
+  font-size: 13px;
+}
+
+.finder-history-head span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.finder-history-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  gap: 10px;
+}
+
+.finder-history-card {
+  display: grid;
+  gap: 8px;
+  min-height: 132px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.finder-history-card > div,
+.finder-history-card footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.finder-history-card span,
+.finder-history-card p,
+.finder-history-card footer {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.finder-history-card b {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #eef3f8;
+  color: #31506f;
+  font-size: 10px;
+}
+
+.finder-history-card.running b,
+.finder-history-card.queued b {
+  background: #fff4df;
+  color: #9a661f;
+}
+
+.finder-history-card.completed b {
+  background: #edf8f2;
+  color: #247251;
+}
+
+.finder-history-card.failed b,
+.finder-history-card.canceled b {
+  background: #fff0ee;
+  color: #a33c32;
+}
+
+.finder-history-card strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.finder-history-card p {
+  margin: 0;
+}
+
+.finder-history-card em {
+  color: #101820;
+  font-style: normal;
+  font-weight: 800;
+}
+
 .scheduled-discovery {
   display: grid;
   gap: 18px;

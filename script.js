@@ -3008,16 +3008,81 @@ function formatJobTime(value) {
   }).format(date);
 }
 
-function renderDiscoveryJobs() {
-  const box = $("#discoveryJobList");
-  if (!box) return;
-  const stateLabels = {
+function discoveryJobStateLabels() {
+  return {
     queued: "排队中",
     running: "运行中",
     completed: "已完成",
     failed: "失败",
     canceled: "已取消"
   };
+}
+
+function isScheduledDiscoveryJob(job) {
+  return discoverySchedules.some((schedule) => schedule.lastJobId && schedule.lastJobId === job.id);
+}
+
+function discoveryJobResultText(job) {
+  const count = Number(job.result?.count || job.result?.leads?.length || 0);
+  if (job.imported) return `已导入 ${count} 条`;
+  if (job.status === "completed") return count ? `发现 ${count} 条` : "无新线索";
+  if (job.status === "failed") return "执行失败";
+  if (job.status === "canceled") return "已取消";
+  return `${Number(job.progress || 0)}%`;
+}
+
+function renderDiscoveryHistory() {
+  const box = $("#finderHistoryGrid");
+  if (!box) return;
+  const countLabel = $("#finderHistoryCount");
+  const stateLabels = discoveryJobStateLabels();
+  const scheduleCards = discoverySchedules
+    .filter((schedule) => !schedule.lastJobId)
+    .map((schedule) => ({
+      kind: "定时抓取",
+      status: schedule.enabled ? "已启用" : "已暂停",
+      time: schedule.updatedAt || schedule.createdAt || schedule.nextRunAt,
+      country: schedule.country,
+      model: schedule.model,
+      sourceMode: schedule.sourceMode,
+      result: schedule.enabled
+        ? `下次 ${formatJobTime(schedule.nextRunAt)}`
+        : "计划暂停"
+    }));
+  const jobCards = discoveryJobs.map((job) => ({
+    kind: isScheduledDiscoveryJob(job) ? "定时抓取" : "自动抓取",
+    status: stateLabels[job.status] || job.status || "未知",
+    state: job.status || "",
+    time: job.updatedAt || job.createdAt,
+    country: job.country,
+    model: job.model,
+    sourceMode: job.sourceMode,
+    result: discoveryJobResultText(job)
+  }));
+  const cards = [...jobCards, ...scheduleCards]
+    .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
+    .slice(0, 12);
+  if (countLabel) countLabel.textContent = `${cards.length} 条`;
+  box.innerHTML = cards.length ? cards.map((card) => `
+    <article class="finder-history-card ${escapeHtml(card.state || "")}">
+      <div>
+        <span>${escapeHtml(card.kind)}</span>
+        <b>${escapeHtml(card.status)}</b>
+      </div>
+      <strong>${escapeHtml(card.country || "未指定市场")} · ${escapeHtml(card.model || "未指定车型")}</strong>
+      <p>${escapeHtml(discoverySourceLabel(card.sourceMode))}</p>
+      <footer>
+        <span>${escapeHtml(formatJobTime(card.time))}</span>
+        <em>${escapeHtml(card.result || "-")}</em>
+      </footer>
+    </article>
+  `).join("") : `<p class="empty">暂无搜索记录。</p>`;
+}
+
+function renderDiscoveryJobs() {
+  const box = $("#discoveryJobList");
+  if (!box) return;
+  const stateLabels = discoveryJobStateLabels();
   const activeJobs = discoveryJobs.filter((job) => ["queued", "running"].includes(job.status));
   const inactiveJobs = discoveryJobs.filter((job) => !["queued", "running"].includes(job.status));
   const collapsedJobs = [
@@ -3095,6 +3160,7 @@ function renderDiscoveryJobs() {
       </article>
     `;
   }).join("") : `<p class="empty">暂无云端获客任务。</p>`;
+  renderDiscoveryHistory();
 }
 
 function scheduleIntervalLabel(minutes) {
@@ -3135,6 +3201,7 @@ function renderDiscoverySchedules() {
       </div>
     </article>
   `).join("") : `<p class="empty">暂无定时计划。设置左侧找客户条件后，点击“保存定时抓取计划”。</p>`;
+  renderDiscoveryHistory();
 }
 
 function currentDiscoveryPayload() {
