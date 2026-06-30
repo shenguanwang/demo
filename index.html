@@ -274,7 +274,12 @@
             <div class="finder-history">
               <div class="finder-history-head">
                 <strong>搜索记录</strong>
-                <span id="finderHistoryCount">0 条</span>
+                <div class="finder-history-controls">
+                  <span id="finderHistoryCount">0 条</span>
+                  <button class="ghost compact" id="finderHistoryPrev" type="button" disabled>←</button>
+                  <span id="finderHistoryPage">1 / 1</span>
+                  <button class="ghost compact" id="finderHistoryNext" type="button" disabled>→</button>
+                </div>
               </div>
               <div class="finder-history-grid" id="finderHistoryGrid">
                 <p class="empty">暂无搜索记录。</p>

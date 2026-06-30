@@ -1237,6 +1237,28 @@ textarea {
   font-size: 11px;
 }
 
+.finder-history-controls {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+}
+
+.finder-history-controls .ghost.compact {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+}
+
+#finderHistoryPage {
+  min-width: 42px;
+  color: #44515f;
+  font-weight: 800;
+  text-align: center;
+}
+
 .finder-history-grid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));

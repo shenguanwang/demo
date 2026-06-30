@@ -236,6 +236,8 @@ let discoveryJobsTimer = null;
 let discoveryJobPage = 1;
 const DISCOVERY_JOBS_PAGE_SIZE = 6;
 let discoverySchedules = [];
+let finderHistoryPage = 1;
+const FINDER_HISTORY_PAGE_SIZE = 18;
 let activeDiscoveryJobFilter = "all";
 let reviewSelectedIds = new Set();
 let selectedReviewLeadId = "";
@@ -3134,10 +3136,19 @@ function renderDiscoveryHistory() {
     sourceMode: job.sourceMode,
     result: discoveryJobResultText(job)
   }));
-  const cards = [...jobCards, ...scheduleCards]
-    .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0))
-    .slice(0, 24);
-  if (countLabel) countLabel.textContent = `${cards.length} 条`;
+  const allCards = [...jobCards, ...scheduleCards]
+    .sort((a, b) => new Date(b.time || 0) - new Date(a.time || 0));
+  const pageCount = Math.max(1, Math.ceil(allCards.length / FINDER_HISTORY_PAGE_SIZE));
+  finderHistoryPage = Math.max(1, Math.min(finderHistoryPage, pageCount));
+  const pageStart = (finderHistoryPage - 1) * FINDER_HISTORY_PAGE_SIZE;
+  const cards = allCards.slice(pageStart, pageStart + FINDER_HISTORY_PAGE_SIZE);
+  if (countLabel) countLabel.textContent = `${allCards.length} 条`;
+  const pageLabel = $("#finderHistoryPage");
+  if (pageLabel) pageLabel.textContent = `${finderHistoryPage} / ${pageCount}`;
+  const prev = $("#finderHistoryPrev");
+  const next = $("#finderHistoryNext");
+  if (prev) prev.disabled = finderHistoryPage <= 1;
+  if (next) next.disabled = finderHistoryPage >= pageCount;
   box.innerHTML = cards.length ? cards.map((card) => `
     <article class="finder-history-card ${escapeHtml(card.state || "")} ${card.id && activeDiscoveryJobFilter === card.id ? "active" : ""}" ${card.id ? `data-discovery-history-job="${escapeHtml(card.id)}" role="button" tabindex="0"` : ""}>
       <div>
@@ -3659,6 +3670,18 @@ async function loadDiscoverySourceStatus() {
 }
 
 function bindForms() {
+  $("#finderHistoryPrev")?.addEventListener("click", () => {
+    finderHistoryPage = Math.max(1, finderHistoryPage - 1);
+    renderDiscoveryHistory();
+  });
+
+  $("#finderHistoryNext")?.addEventListener("click", () => {
+    const historyCount = discoveryJobs.length + discoverySchedules.filter((schedule) => !schedule.lastJobId).length;
+    const pageCount = Math.max(1, Math.ceil(historyCount / FINDER_HISTORY_PAGE_SIZE));
+    finderHistoryPage = Math.min(pageCount, finderHistoryPage + 1);
+    renderDiscoveryHistory();
+  });
+
   $("#discoveryPrevPage")?.addEventListener("click", () => {
     discoveryJobPage = Math.max(1, discoveryJobPage - 1);
     renderDiscoveryJobs();
@@ -3730,6 +3753,7 @@ function bindForms() {
     submitButton.disabled = true;
     submitButton.textContent = "正在搜索并自动核验…";
     discoveryJobPage = 1;
+    finderHistoryPage = 1;
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const words = generateKeywords(data.goal, data.country, data.model);
     renderKeywords(words);
