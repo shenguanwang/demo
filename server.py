@@ -394,6 +394,116 @@ def save_workspace_state(workspace_key: str, payload: dict, expected_version: in
     }
 
 
+def lead_tombstone_keys(record: dict) -> set[str]:
+    if not isinstance(record, dict):
+        return set()
+    company = str(record.get("company") or "")
+    country = str(record.get("country") or "")
+    source = str(record.get("customerWebsite") or record.get("sourceUrl") or record.get("source") or "")
+    base_key = f"lead:{company}|{country}|{source}".lower()
+    keys = {base_key, f"lead:id:{base_key}"}
+    record_id = str(record.get("id") or "").strip()
+    if record_id:
+        keys.add(f"lead:id:{record_id}")
+    return {key for key in keys if key}
+
+
+def clear_all_search_data() -> dict:
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    totals = {
+        "workspaces": 0,
+        "reviewLeads": 0,
+        "customers": 0,
+        "rejectedLeads": 0,
+        "deletedRecordsAdded": 0,
+        "discoveryJobs": 0,
+        "discoverySchedules": 0,
+        "socialCaptures": 0,
+    }
+    with STATE_LOCK:
+        initialize_state_store()
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) FROM discovery_jobs")
+                    totals["discoveryJobs"] = int(cursor.fetchone()[0] or 0)
+                    cursor.execute("SELECT COUNT(*) FROM discovery_schedules")
+                    totals["discoverySchedules"] = int(cursor.fetchone()[0] or 0)
+                    cursor.execute("SELECT workspace_key, state FROM workspace_state ORDER BY workspace_key")
+                    rows = cursor.fetchall()
+                    for workspace_key, raw_state in rows:
+                        state = raw_state if isinstance(raw_state, dict) else json.loads(raw_state)
+                        deleted_records = state.get("deletedRecords") if isinstance(state.get("deletedRecords"), list) else []
+                        existing_keys = {item.get("key") for item in deleted_records if isinstance(item, dict)}
+                        removed_records = []
+                        for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+                            items = state.get(bucket) if isinstance(state.get(bucket), list) else []
+                            totals[bucket] += len(items)
+                            removed_records.extend(item for item in items if isinstance(item, dict))
+                            state[bucket] = []
+                        for record in removed_records:
+                            for key in lead_tombstone_keys(record):
+                                if key not in existing_keys:
+                                    deleted_records.insert(0, {"key": key, "type": "searchData", "deletedAt": now})
+                                    existing_keys.add(key)
+                                    totals["deletedRecordsAdded"] += 1
+                        state["deletedRecords"] = deleted_records[:10000]
+                        cursor.execute(
+                            """
+                            UPDATE workspace_state
+                            SET state = %s::jsonb, version = version + 1000, updated_at = NOW()
+                            WHERE workspace_key = %s
+                            """,
+                            (json.dumps(normalize_workspace_state(state), ensure_ascii=False), workspace_key),
+                        )
+                        totals["workspaces"] += 1
+                    cursor.execute("DELETE FROM discovery_jobs")
+                    cursor.execute("DELETE FROM discovery_schedules")
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                totals["discoveryJobs"] = int(connection.execute("SELECT COUNT(*) FROM discovery_jobs").fetchone()[0] or 0)
+                totals["discoverySchedules"] = int(connection.execute("SELECT COUNT(*) FROM discovery_schedules").fetchone()[0] or 0)
+                rows = connection.execute("SELECT workspace_key, state FROM workspace_state ORDER BY workspace_key").fetchall()
+                for workspace_key, raw_state in rows:
+                    state = json.loads(raw_state)
+                    deleted_records = state.get("deletedRecords") if isinstance(state.get("deletedRecords"), list) else []
+                    existing_keys = {item.get("key") for item in deleted_records if isinstance(item, dict)}
+                    removed_records = []
+                    for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+                        items = state.get(bucket) if isinstance(state.get(bucket), list) else []
+                        totals[bucket] += len(items)
+                        removed_records.extend(item for item in items if isinstance(item, dict))
+                        state[bucket] = []
+                    for record in removed_records:
+                        for key in lead_tombstone_keys(record):
+                            if key not in existing_keys:
+                                deleted_records.insert(0, {"key": key, "type": "searchData", "deletedAt": now})
+                                existing_keys.add(key)
+                                totals["deletedRecordsAdded"] += 1
+                    state["deletedRecords"] = deleted_records[:10000]
+                    connection.execute(
+                        """
+                        UPDATE workspace_state
+                        SET state = ?, version = version + 1000, updated_at = ?
+                        WHERE workspace_key = ?
+                        """,
+                        (json.dumps(normalize_workspace_state(state), ensure_ascii=False), now, workspace_key),
+                    )
+                    totals["workspaces"] += 1
+                connection.execute("DELETE FROM discovery_jobs")
+                connection.execute("DELETE FROM discovery_schedules")
+    with SOCIAL_CAPTURE_LOCK:
+        if SOCIAL_CAPTURE_FILE.exists():
+            try:
+                captures = json.loads(SOCIAL_CAPTURE_FILE.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                captures = []
+            if isinstance(captures, list):
+                totals["socialCaptures"] = len(captures)
+            SOCIAL_CAPTURE_FILE.write_text("[]", encoding="utf-8")
+    return totals
+
+
 def create_session_token(username: str) -> str:
     expires_at = int(datetime.now(timezone.utc).timestamp()) + AUTH_MAX_AGE
     payload = f"{username}|{expires_at}"
@@ -5384,6 +5494,20 @@ class Handler(SimpleHTTPRequestHandler):
                 else:
                     user = update_user(username, password=payload.get("password"), status=payload.get("status"))
                     self.send_json(200, {"ok": True, "user": {key: value for key, value in user.items() if key != "passwordHash"}})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/clear-search-data":
+            if not self.require_admin():
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                if payload.get("confirm") != "CLEAR_SEARCH_DATA":
+                    self.send_json(400, {"ok": False, "error": "缺少清洗确认口令"})
+                    return
+                result = clear_all_search_data()
+                self.send_json(200, {"ok": True, **result})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
