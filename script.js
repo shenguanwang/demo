@@ -243,6 +243,7 @@ const FINDER_HISTORY_PAGE_SIZE = 18;
 let activeDiscoveryJobFilter = "all";
 let reviewSelectedIds = new Set();
 let selectedReviewLeadId = "";
+let editingReviewLeadId = "";
 let currentSession = null;
 let adminKpiSnapshot = null;
 let adminKpiLoading = false;
@@ -1320,7 +1321,10 @@ function renderReview() {
       </article>
     `;
   }).join("");
-  const selectedDetailHtml = [selectedRecord].map(({ lead, index, rankIndex }) => `
+  const selectedDetailHtml = [selectedRecord].map(({ lead, index, rankIndex }) => {
+    const editId = `${reviewMode}:${lead.id || index}`;
+    const isEditing = editingReviewLeadId === editId;
+    return `
     <article class="review-card">
       <div class="review-title-row">
         <div>
@@ -1413,8 +1417,10 @@ function renderReview() {
           <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
           <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
           <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
+          <button class="ghost" type="button" data-review-edit="${index}" data-review-edit-id="${escapeHtml(editId)}">编辑</button>
         ` : `<button class="primary" type="button" data-section="crm">回到客户池</button>`}
       </div>
+      ${reviewMode === "pending" && isEditing ? renderLeadEditForm(lead, index, editId) : ""}
       <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}">
         <summary>
           <span>查看全部来源与核验详情</span>
@@ -1426,7 +1432,8 @@ function renderReview() {
         <div class="review-more-content" data-review-detail-content></div>
       </details>
     </article>
-  `).join("");
+  `;
+  }).join("");
   $("#reviewGrid").innerHTML = `
     <div class="review-workbench">
       <aside class="review-workbench-list" aria-label="待审核线索列表">
@@ -1439,6 +1446,139 @@ function renderReview() {
       <section class="review-workbench-detail">${selectedDetailHtml}</section>
     </div>
   `;
+}
+
+function leadEditListValue(values, fallback = "") {
+  const normalized = Array.isArray(values) ? values : [];
+  const rows = normalized
+    .map((item) => String(item?.value || item?.email || item || "").trim())
+    .filter(Boolean);
+  if (fallback) rows.push(String(fallback).trim());
+  return Array.from(new Set(rows.filter(Boolean))).join("\n");
+}
+
+function leadEditTextListValue(values) {
+  return Array.isArray(values) ? values.map((item) => String(item || "").trim()).filter(Boolean).join("\n") : "";
+}
+
+function splitLeadEditLines(value) {
+  return String(value || "")
+    .split(/\r?\n|[;；]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function manualEvidenceSource(lead) {
+  return {
+    url: safeHttpUrl(lead.sourceUrl || lead.source || lead.customerWebsite) || "",
+    name: "人工核验",
+    verified: true,
+    excerpt: "人工查看线索原文后补充"
+  };
+}
+
+function manualValueSources(values, lead) {
+  const source = manualEvidenceSource(lead);
+  return values.map((value) => ({
+    value,
+    sources: source.url ? [source] : [{ ...source, url: "" }]
+  }));
+}
+
+function renderLeadEditForm(lead, index, editId) {
+  return `
+    <form class="lead-edit-panel" data-review-edit-form data-index="${index}" data-edit-id="${escapeHtml(editId)}">
+      <div class="lead-edit-head">
+        <strong>编辑线索信息</strong>
+        <span>人工查看原文后补充的信息，保存后会同步到审核详情和云端。</span>
+      </div>
+      <div class="lead-edit-grid">
+        <label>公司名称
+          <input name="company" value="${escapeHtml(lead.company || "")}">
+        </label>
+        <label>客户官网
+          <input name="customerWebsite" value="${escapeHtml(lead.customerWebsite || "")}" placeholder="https://example.com">
+        </label>
+        <label>联系人
+          <input name="contactName" value="${escapeHtml(lead.contactName || "")}">
+        </label>
+        <label>职位
+          <input name="contactRole" value="${escapeHtml(lead.contactRole || "")}">
+        </label>
+        <label>邮箱（每行一个）
+          <textarea name="emails" rows="3">${escapeHtml(leadEditListValue(lead.emailSources, lead.email))}</textarea>
+        </label>
+        <label>电话（每行一个）
+          <textarea name="phones" rows="3">${escapeHtml(leadEditListValue(lead.phoneSources, lead.phone))}</textarea>
+        </label>
+        <label>WhatsApp（每行一个）
+          <textarea name="whatsapps" rows="3">${escapeHtml(leadEditListValue(lead.whatsappSources, lead.whatsapp))}</textarea>
+        </label>
+        <label>推荐车型（每行一个）
+          <textarea name="recommendedModels" rows="3">${escapeHtml(leadEditTextListValue(lead.recommendedModels || [lead.model]))}</textarea>
+        </label>
+        <label class="lead-edit-wide">机会信号（每行一个）
+          <textarea name="signals" rows="3">${escapeHtml(leadEditTextListValue([...(lead.intentSignals || []), ...(lead.businessSignals || [])]))}</textarea>
+        </label>
+        <label class="lead-edit-wide">推荐联系理由
+          <textarea name="contactReason" rows="4">${escapeHtml(lead.contactReason || lead.reason || "")}</textarea>
+        </label>
+      </div>
+      <div class="lead-edit-actions">
+        <button class="primary" type="submit">保存修改</button>
+        <button class="ghost" type="button" data-review-edit-cancel>取消</button>
+      </div>
+    </form>
+  `;
+}
+
+function saveReviewLeadEdit(index, form) {
+  const lead = reviewLeads[index];
+  if (!lead || !form) return;
+  const data = Object.fromEntries(new FormData(form).entries());
+  const emails = splitLeadEditLines(data.emails).map((item) => item.toLowerCase());
+  const phones = splitLeadEditLines(data.phones);
+  const whatsapps = splitLeadEditLines(data.whatsapps);
+  const recommendedModels = splitLeadEditLines(data.recommendedModels);
+  const signals = splitLeadEditLines(data.signals);
+  const source = manualEvidenceSource(lead);
+  const emailSources = emails.map((email) => ({
+    email,
+    sources: source.url ? [source] : [{ ...source, url: "" }]
+  }));
+  const nextLead = normalizeLead({
+    ...lead,
+    company: String(data.company || lead.company || "").trim() || lead.company,
+    customerWebsite: String(data.customerWebsite || "").trim(),
+    contactName: String(data.contactName || "").trim(),
+    contactRole: String(data.contactRole || "").trim(),
+    email: emails[0] || "",
+    emailSources: mergeEmailSources(emailSources, lead.emailSources || []),
+    phone: phones[0] || "",
+    phoneSources: manualValueSources(phones, lead),
+    whatsapp: whatsapps[0] || "",
+    whatsappSources: manualValueSources(whatsapps, lead),
+    recommendedModels: recommendedModels.length ? recommendedModels : lead.recommendedModels,
+    intentSignals: signals,
+    businessSignals: [],
+    contactReason: String(data.contactReason || "").trim(),
+    manualEditedAt: new Date().toISOString(),
+    sourceCoverage: {
+      ...(lead.sourceCoverage || {}),
+      contactable: Boolean(emails.length || phones.length || whatsapps.length),
+      missingFields: (lead.sourceCoverage?.missingFields || []).filter((field) => {
+        const text = String(field || "");
+        if (emails.length && /邮箱|email/i.test(text)) return false;
+        if ((phones.length || whatsapps.length) && /电话|phone|whatsapp/i.test(text)) return false;
+        if (data.contactName && /联系人|contact/i.test(text)) return false;
+        return true;
+      })
+    }
+  });
+  reviewLeads[index] = nextLead;
+  selectedReviewLeadId = `pending:${nextLead.id || index}`;
+  editingReviewLeadId = "";
+  refreshAllLeadViews();
 }
 
 
@@ -4027,6 +4167,7 @@ function bindForms() {
     const row = event.target.closest("[data-review-lead-row]");
     if (row && !event.target.closest("input, button, a, summary, details")) {
       selectedReviewLeadId = row.dataset.reviewLeadRow;
+      editingReviewLeadId = "";
       closeOpenReviewDetails();
       renderReview();
       return;
@@ -4059,12 +4200,32 @@ function bindForms() {
       researchLead(Number(researchButton.dataset.researchIndex));
       return;
     }
+    const editButton = event.target.closest("[data-review-edit]");
+    if (editButton) {
+      editingReviewLeadId = editButton.dataset.reviewEditId || "";
+      renderReview();
+      return;
+    }
+    const cancelEditButton = event.target.closest("[data-review-edit-cancel]");
+    if (cancelEditButton) {
+      editingReviewLeadId = "";
+      renderReview();
+      return;
+    }
     const button = event.target.closest("[data-review-action]");
     if (!button) return;
     const index = Number(button.dataset.index);
+    editingReviewLeadId = "";
     if (button.dataset.reviewAction === "approve") approveLead(index);
     if (button.dataset.reviewAction === "reject") rejectLead(index);
     if (button.dataset.reviewAction === "delete") deleteReviewLeads([reviewLeads[index]?.id]);
+  });
+
+  $("#reviewGrid").addEventListener("submit", (event) => {
+    const form = event.target.closest("[data-review-edit-form]");
+    if (!form) return;
+    event.preventDefault();
+    saveReviewLeadEdit(Number(form.dataset.index), form);
   });
 
   $("#reviewGrid").addEventListener("change", (event) => {

@@ -2375,6 +2375,78 @@ textarea {
   line-height: 1.65;
 }
 
+.lead-edit-panel {
+  margin: 14px 0 16px;
+  padding: 16px;
+  border: 1px solid #d9e3ee;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.lead-edit-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.lead-edit-head strong {
+  font-size: 14px;
+}
+
+.lead-edit-head span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lead-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lead-edit-grid label {
+  display: grid;
+  gap: 6px;
+  color: #344052;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.lead-edit-grid input,
+.lead-edit-grid textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #18212f;
+  font: inherit;
+  font-size: 12px;
+}
+
+.lead-edit-grid input {
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.lead-edit-grid textarea {
+  resize: vertical;
+  padding: 9px 10px;
+}
+
+.lead-edit-wide {
+  grid-column: 1 / -1;
+}
+
+.lead-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
 .review-more {
   margin: 16px 0 0;
   overflow: hidden;
@@ -3914,6 +3986,20 @@ tbody tr:last-child td {
 
   .score-breakdown .score-dimensions {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .lead-edit-head,
+  .lead-edit-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .lead-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .lead-edit-wide {
+    grid-column: auto;
   }
 
   .workflow > button,
