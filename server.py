@@ -1921,9 +1921,22 @@ STATIC_ASSET_DOMAINS = (
     "dealerinspire.com", "dealer.com", "carsforsale.com",
 )
 
+NON_CUSTOMER_WEBSITE_DOMAINS = (
+    "window.",
+    "player.",
+    "embed.",
+    "widget.",
+    "widgets.",
+    "analytics.",
+    "tracking.",
+    "pixel.",
+    "ads.",
+)
+
 NON_CUSTOMER_WEBSITE_PATHS = (
     "/generate_204", "/gen_204", "/favicon", "/pixel", "/collect",
     "/analytics", "/ads/", "/static/", "/assets/", "/cdn-cgi/",
+    "/embed/", "/iframe/", "/player/", "/watch_fragments",
 )
 
 
@@ -1936,7 +1949,11 @@ def is_business_website_url(url: str) -> bool:
     path = parsed.path.lower()
     if not domain or "." not in domain:
         return False
+    if domain.endswith((".ytplayer", ".js", ".css")) or "ytplayer" in domain or "ytplayer" in normalized.lower():
+        return False
     if any(blocked in domain for blocked in BLOCKED_DOMAINS):
+        return False
+    if any(blocked in domain for blocked in NON_CUSTOMER_WEBSITE_DOMAINS):
         return False
     if domain.startswith(("cdn.", "static.", "assets.", "img.", "images.", "media.")):
         return False
