@@ -62,6 +62,7 @@ ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
 DISCOVERY_MAX_CONCURRENCY = max(1, int(os.environ.get("DISCOVERY_MAX_CONCURRENCY", "2")))
 DISCOVERY_WORKER_SLOTS = threading.BoundedSemaphore(DISCOVERY_MAX_CONCURRENCY)
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
+YOUTUBE_MAX_VIDEO_AGE_DAYS = 365 * 5
 DISCOVERY_SCHEDULER_STOP = threading.Event()
 DISCOVERY_SCHEDULER_STARTED = False
 DISCOVERY_SCHEDULER_STARTED_LOCK = threading.Lock()
@@ -502,6 +503,145 @@ def clear_all_search_data() -> dict:
             if isinstance(captures, list):
                 totals["socialCaptures"] = len(captures)
             SOCIAL_CAPTURE_FILE.write_text("[]", encoding="utf-8")
+    return totals
+
+
+def lead_has_youtube_source(record: dict) -> bool:
+    if not isinstance(record, dict):
+        return False
+    values = [
+        record.get("source"),
+        record.get("sourceUrl"),
+        record.get("customerWebsite"),
+        record.get("origin"),
+        record.get("sourceType"),
+    ]
+    for bucket in ("evidenceSources", "socialProfiles", "socialAccounts"):
+        for item in record.get(bucket) or []:
+            if isinstance(item, dict):
+                values.extend([item.get("url"), item.get("sourceName"), item.get("platform")])
+            else:
+                values.append(item)
+    return any("youtube" in str(value or "").lower() or "youtu.be" in str(value or "").lower() for value in values)
+
+
+def youtube_lead_is_stale(record: dict) -> bool:
+    if not lead_has_youtube_source(record):
+        return False
+    dates = [
+        str(record.get("latestVideoPublishedAt") or ""),
+        str(record.get("publishedAt") or ""),
+    ]
+    for item in record.get("evidenceSources") or []:
+        if isinstance(item, dict):
+            dates.extend([str(item.get("latestVideoPublishedAt") or ""), str(item.get("publishedAt") or "")])
+    latest = latest_iso_date(dates)
+    return not is_recent_youtube_video_date(latest)
+
+
+def remove_stale_youtube_from_state(state: dict, now: str) -> tuple[dict, dict]:
+    totals = {"reviewLeads": 0, "customers": 0, "rejectedLeads": 0, "deletedRecordsAdded": 0}
+    deleted_records = state.get("deletedRecords") if isinstance(state.get("deletedRecords"), list) else []
+    existing_keys = {item.get("key") for item in deleted_records if isinstance(item, dict)}
+    for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+        kept = []
+        items = state.get(bucket) if isinstance(state.get(bucket), list) else []
+        for record in items:
+            if isinstance(record, dict) and youtube_lead_is_stale(record):
+                totals[bucket] += 1
+                for key in lead_tombstone_keys(record):
+                    if key not in existing_keys:
+                        deleted_records.insert(0, {"key": key, "type": "staleYoutubeLead", "deletedAt": now})
+                        existing_keys.add(key)
+                        totals["deletedRecordsAdded"] += 1
+            else:
+                kept.append(record)
+        state[bucket] = kept
+    state["deletedRecords"] = deleted_records[:10000]
+    return state, totals
+
+
+def clean_stale_youtube_leads() -> dict:
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    totals = {
+        "workspaces": 0,
+        "reviewLeads": 0,
+        "customers": 0,
+        "rejectedLeads": 0,
+        "deletedRecordsAdded": 0,
+        "discoveryJobLeads": 0,
+    }
+    with STATE_LOCK:
+        initialize_state_store()
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT workspace_key, state FROM workspace_state ORDER BY workspace_key")
+                    for workspace_key, raw_state in cursor.fetchall():
+                        state = raw_state if isinstance(raw_state, dict) else json.loads(raw_state)
+                        state, removed = remove_stale_youtube_from_state(state, now)
+                        if any(int(removed.get(key, 0)) for key in ("reviewLeads", "customers", "rejectedLeads")):
+                            cursor.execute(
+                                """
+                                UPDATE workspace_state
+                                SET state = %s::jsonb, version = version + 1, updated_at = NOW()
+                                WHERE workspace_key = %s
+                                """,
+                                (json.dumps(normalize_workspace_state(state), ensure_ascii=False), workspace_key),
+                            )
+                            totals["workspaces"] += 1
+                            for key in ("reviewLeads", "customers", "rejectedLeads", "deletedRecordsAdded"):
+                                totals[key] += int(removed.get(key, 0))
+                    cursor.execute("SELECT job_id, result FROM discovery_jobs WHERE result IS NOT NULL")
+                    for job_id, raw_result in cursor.fetchall():
+                        result = raw_result if isinstance(raw_result, dict) else json.loads(raw_result)
+                        leads = result.get("leads") if isinstance(result, dict) else None
+                        if not isinstance(leads, list):
+                            continue
+                        kept = [lead for lead in leads if not (isinstance(lead, dict) and youtube_lead_is_stale(lead))]
+                        removed_count = len(leads) - len(kept)
+                        if removed_count:
+                            result["leads"] = kept
+                            result["count"] = len(kept)
+                            cursor.execute(
+                                "UPDATE discovery_jobs SET result = %s::jsonb, updated_at = NOW() WHERE job_id = %s",
+                                (json.dumps(result, ensure_ascii=False), job_id),
+                            )
+                            totals["discoveryJobLeads"] += removed_count
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                rows = connection.execute("SELECT workspace_key, state FROM workspace_state ORDER BY workspace_key").fetchall()
+                for workspace_key, raw_state in rows:
+                    state = json.loads(raw_state)
+                    state, removed = remove_stale_youtube_from_state(state, now)
+                    if any(int(removed.get(key, 0)) for key in ("reviewLeads", "customers", "rejectedLeads")):
+                        connection.execute(
+                            """
+                            UPDATE workspace_state
+                            SET state = ?, version = version + 1, updated_at = ?
+                            WHERE workspace_key = ?
+                            """,
+                            (json.dumps(normalize_workspace_state(state), ensure_ascii=False), now, workspace_key),
+                        )
+                        totals["workspaces"] += 1
+                        for key in ("reviewLeads", "customers", "rejectedLeads", "deletedRecordsAdded"):
+                            totals[key] += int(removed.get(key, 0))
+                rows = connection.execute("SELECT job_id, result FROM discovery_jobs WHERE result IS NOT NULL").fetchall()
+                for job_id, raw_result in rows:
+                    result = json.loads(raw_result)
+                    leads = result.get("leads") if isinstance(result, dict) else None
+                    if not isinstance(leads, list):
+                        continue
+                    kept = [lead for lead in leads if not (isinstance(lead, dict) and youtube_lead_is_stale(lead))]
+                    removed_count = len(leads) - len(kept)
+                    if removed_count:
+                        result["leads"] = kept
+                        result["count"] = len(kept)
+                        connection.execute(
+                            "UPDATE discovery_jobs SET result = ?, updated_at = ? WHERE job_id = ?",
+                            (json.dumps(result, ensure_ascii=False), now, job_id),
+                        )
+                        totals["discoveryJobLeads"] += removed_count
     return totals
 
 
@@ -2373,8 +2513,32 @@ def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
 
     walk(data)
     results = []
+    latest_video_by_channel: dict[str, dict] = {}
+    for video in video_renderers:
+        owner = video.get("ownerText") or video.get("longBylineText") or {}
+        runs = owner.get("runs") or []
+        if not runs:
+            continue
+        run = runs[0]
+        endpoint = run.get("navigationEndpoint", {}).get("browseEndpoint", {})
+        channel_id = endpoint.get("browseId", "")
+        published_text = text_from_runs(video.get("publishedTimeText"))
+        published_at = extract_published_at(published_text)
+        if not channel_id or not is_recent_youtube_video_date(published_at):
+            continue
+        existing = latest_video_by_channel.get(channel_id)
+        latest_video_by_channel[channel_id] = {
+            "publishedAt": latest_iso_date([published_at, existing.get("publishedAt", "") if existing else ""]),
+            "publishedText": published_text,
+            "videoTitle": text_from_runs(video.get("title")),
+            "snippet": text_from_runs(video.get("descriptionSnippet")),
+        }
+
     for channel in renderers:
         channel_id = channel.get("channelId", "")
+        latest_video = latest_video_by_channel.get(channel_id)
+        if not latest_video:
+            continue
         canonical = (
             channel.get("navigationEndpoint", {})
             .get("browseEndpoint", {})
@@ -2390,8 +2554,10 @@ def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
                 "title": text_from_runs(channel.get("title")) or "YouTube channel",
                 "url": channel_url,
                 "snippet": text_from_runs(channel.get("descriptionSnippet")),
-                "handle": text_from_runs(channel.get("subscriberCountText")),
+                "handle": latest_video.get("publishedAt") or latest_video.get("publishedText") or text_from_runs(channel.get("subscriberCountText")),
                 "channelId": channel_id,
+                "latestVideoPublishedAt": latest_video.get("publishedAt", ""),
+                "latestVideoTitle": latest_video.get("videoTitle", ""),
                 "apiSource": "YouTube public page fallback",
             }
         )
@@ -2407,6 +2573,9 @@ def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
         endpoint = run.get("navigationEndpoint", {}).get("browseEndpoint", {})
         canonical = endpoint.get("canonicalBaseUrl", "")
         channel_id = endpoint.get("browseId", "")
+        latest_video = latest_video_by_channel.get(channel_id)
+        if not latest_video:
+            continue
         channel_url = urllib.parse.urljoin("https://www.youtube.com", canonical) if canonical else (
             f"https://www.youtube.com/channel/{channel_id}" if channel_id else ""
         )
@@ -2420,8 +2589,10 @@ def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
                 "title": text_from_runs(owner) or title or "YouTube channel",
                 "url": channel_url,
                 "snippet": snippet or title,
-                "handle": text_from_runs(video.get("publishedTimeText")),
+                "handle": latest_video.get("publishedAt") or text_from_runs(video.get("publishedTimeText")),
                 "channelId": channel_id,
+                "latestVideoPublishedAt": latest_video.get("publishedAt", ""),
+                "latestVideoTitle": latest_video.get("videoTitle", ""),
                 "apiSource": "YouTube public video fallback",
             }
         )
@@ -2485,6 +2656,22 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
                 except (OSError, ValueError, TimeoutError, http.client.HTTPException, json.JSONDecodeError):
                     # Channel enrichment should not discard otherwise valid search results.
                     continue
+        latest_video_by_channel: dict[str, dict] = {}
+        for item in search_items:
+            item_id = item.get("id") or {}
+            if not item_id.get("videoId"):
+                continue
+            snippet = item.get("snippet") or {}
+            channel_id = snippet.get("channelId", "")
+            published_at = (snippet.get("publishedAt") or "").replace("Z", "+00:00")
+            if not channel_id or not is_recent_youtube_video_date(published_at):
+                continue
+            existing = latest_video_by_channel.get(channel_id)
+            latest_video_by_channel[channel_id] = {
+                "publishedAt": latest_iso_date([published_at, existing.get("publishedAt", "") if existing else ""]),
+                "videoTitle": snippet.get("title", ""),
+                "snippet": snippet.get("description", ""),
+            }
         results = []
         seen_channel_ids = set()
         for item in search_items:
@@ -2495,6 +2682,9 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
                 or ""
             )
             if not channel_id or channel_id in seen_channel_ids:
+                continue
+            latest_video = latest_video_by_channel.get(channel_id)
+            if not latest_video:
                 continue
             seen_channel_ids.add(channel_id)
             detail = details_by_id.get(channel_id, {})
@@ -2511,10 +2701,12 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
                 {
                     "title": detail_snippet.get("title") or snippet.get("channelTitle") or snippet.get("title") or "YouTube channel",
                     "url": channel_url,
-                    "snippet": detail_snippet.get("description") or snippet.get("description", ""),
-                    "handle": snippet.get("publishedAt", ""),
+                    "snippet": detail_snippet.get("description") or latest_video.get("snippet") or snippet.get("description", ""),
+                    "handle": latest_video.get("publishedAt", ""),
                     "channelId": channel_id,
                     "country": branding_channel.get("country", ""),
+                    "latestVideoPublishedAt": latest_video.get("publishedAt", ""),
+                    "latestVideoTitle": latest_video.get("videoTitle", ""),
                     "apiSource": "YouTube Data API v3",
                 }
             )
@@ -2860,10 +3052,35 @@ def extract_published_at(text: str, url: str = "") -> str:
             except ValueError:
                 return ""
         return parsed.date().isoformat()
-    relative = re.search(r"\b(\d+)\s+(hour|day)s?\s+ago\b", value, flags=re.I)
+    relative = re.search(r"\b(\d+)\s+(hour|day|week|month|year)s?\s+ago\b", value, flags=re.I)
     if relative:
         amount = int(relative.group(1))
-        delta = timedelta(hours=amount) if relative.group(2).lower() == "hour" else timedelta(days=amount)
+        unit = relative.group(2).lower()
+        if unit == "hour":
+            delta = timedelta(hours=amount)
+        elif unit == "day":
+            delta = timedelta(days=amount)
+        elif unit == "week":
+            delta = timedelta(days=amount * 7)
+        elif unit == "month":
+            delta = timedelta(days=amount * 30)
+        else:
+            delta = timedelta(days=amount * 365)
+        return (datetime.now(timezone.utc) - delta).date().isoformat()
+    zh_relative = re.search(r"(\d+)\s*(\u5c0f\u65f6|\u5929|\u5468|\u4e2a\u6708|\u6708|\u5e74)\u524d", value)
+    if zh_relative:
+        amount = int(zh_relative.group(1))
+        unit = zh_relative.group(2)
+        if unit == "\u5c0f\u65f6":
+            delta = timedelta(hours=amount)
+        elif unit == "\u5929":
+            delta = timedelta(days=amount)
+        elif unit == "\u5468":
+            delta = timedelta(days=amount * 7)
+        elif unit in {"\u4e2a\u6708", "\u6708"}:
+            delta = timedelta(days=amount * 30)
+        else:
+            delta = timedelta(days=amount * 365)
         return (datetime.now(timezone.utc) - delta).date().isoformat()
     return ""
 
@@ -2879,6 +3096,33 @@ def is_within_freshness(published_at: str, freshness_days: int | None) -> bool:
         return False
     cutoff = (datetime.now(timezone.utc) - timedelta(days=freshness_days)).date()
     return published >= cutoff
+
+
+def is_recent_youtube_video_date(published_at: str) -> bool:
+    return is_within_freshness(published_at, YOUTUBE_MAX_VIDEO_AGE_DAYS)
+
+
+def latest_iso_date(values: list[str]) -> str:
+    latest = ""
+    latest_date = None
+    for value in values:
+        if not value:
+            continue
+        try:
+            current = datetime.fromisoformat(value.replace("Z", "+00:00")).date()
+        except ValueError:
+            parsed = extract_published_at(value)
+            if not parsed:
+                continue
+            try:
+                current = datetime.fromisoformat(parsed).date()
+            except ValueError:
+                continue
+            value = parsed
+        if latest_date is None or current > latest_date:
+            latest_date = current
+            latest = current.isoformat()
+    return latest
 
 
 def source_details(url: str, fallback_origin: str = "公开网页搜索") -> tuple[str, str]:
@@ -5058,6 +5302,10 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"{item.get('snippet', '')} {page_text[:700]}",
             source_url,
         )
+        if item.get("origin") == "YouTube":
+            published_at = item.get("latestVideoPublishedAt") or published_at
+            if not is_recent_youtube_video_date(published_at):
+                continue
         is_long_lived_business_source = (
             source_mode == "all"
             and (
@@ -5268,6 +5516,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "researchAt": "",
                 "researchSummary": "当前只有原始发现来源，建议在线索审核中执行全网补全。",
                 "publishedAt": published_at,
+                "latestVideoPublishedAt": item.get("latestVideoPublishedAt", "") if item.get("origin") == "YouTube" else "",
                 "freshnessDays": freshness_days,
                 "customerWebsite": customer_website,
                 "contactName": contacts["contact_name"],
@@ -5687,6 +5936,20 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json(400, {"ok": False, "error": "缺少清洗确认口令"})
                     return
                 result = clear_all_search_data()
+                self.send_json(200, {"ok": True, **result})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/clean-stale-youtube":
+            if not self.require_admin():
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                if payload.get("confirm") != "CLEAN_STALE_YOUTUBE":
+                    self.send_json(400, {"ok": False, "error": "缺少清理确认口令"})
+                    return
+                result = clean_stale_youtube_leads()
                 self.send_json(200, {"ok": True, **result})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
