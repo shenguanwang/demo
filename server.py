@@ -2038,14 +2038,32 @@ def save_social_capture(payload: dict, owner_username: str) -> dict:
 
 
 def normalize_public_url(value: str) -> str:
-    value = (value or "").strip()
+    value = html.unescape(value or "").strip()
     if not value:
         return ""
     if value.startswith("//"):
-        return "https:" + value
-    if not re.match(r"^https?://", value, flags=re.I):
-        return "https://" + value.lstrip("/")
+        value = "https:" + value
+    elif not re.match(r"^https?://", value, flags=re.I):
+        value = "https://" + value.lstrip("/")
+    try:
+        parsed = urllib.parse.urlparse(value)
+    except ValueError:
+        return ""
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return ""
     return value
+
+
+def safe_urlparse(value: str):
+    try:
+        return urllib.parse.urlparse(normalize_public_url(value))
+    except ValueError:
+        return urllib.parse.urlparse("")
+
+
+def is_valid_http_url(value: str) -> bool:
+    parsed = safe_urlparse(value)
+    return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
 SOCIAL_OR_PLATFORM_DOMAINS = (
@@ -2085,7 +2103,7 @@ def is_business_website_url(url: str) -> bool:
     normalized = normalize_public_url(url)
     if not normalized:
         return False
-    parsed = urllib.parse.urlparse(normalized)
+    parsed = safe_urlparse(normalized)
     domain = parsed.netloc.lower().removeprefix("www.")
     path = parsed.path.lower()
     if not domain or "." not in domain:
@@ -2118,7 +2136,7 @@ def is_noise_source_url(url: str) -> bool:
     normalized = normalize_public_url(url).lower()
     if not normalized:
         return True
-    parsed = urllib.parse.urlparse(normalized)
+    parsed = safe_urlparse(normalized)
     domain = parsed.netloc.lower().removeprefix("www.")
     path = parsed.path.lower()
     if domain in {"window.ytplayer", "about:blank"}:
@@ -2140,7 +2158,7 @@ def unwrap_public_redirect_url(url: str) -> str:
         .replace("\\/", "/")
     )
     normalized = normalize_public_url(url)
-    parsed = urllib.parse.urlparse(normalized)
+    parsed = safe_urlparse(normalized)
     domain = parsed.netloc.lower().removeprefix("www.")
     if not domain:
         return normalized
@@ -2177,7 +2195,7 @@ def extract_business_websites(page: str) -> list[str]:
         flags=re.I,
     ):
         value = html.unescape(value).rstrip(".,;:)]}'\"")
-        domain = urllib.parse.urlparse(normalize_public_url(value)).netloc.lower()
+        domain = safe_urlparse(value).netloc.lower()
         if domain in {"example.com", "example.org", "example.net", "mail.com"}:
             continue
         if is_business_website_url(value):
@@ -2186,7 +2204,7 @@ def extract_business_websites(page: str) -> list[str]:
 
 
 def is_social_profile_url(url: str) -> bool:
-    parsed = urllib.parse.urlparse(url)
+    parsed = safe_urlparse(url)
     domain = parsed.netloc.lower().removeprefix("www.")
     parts = [part for part in parsed.path.split("/") if part]
     if "instagram.com" in domain:
@@ -2241,7 +2259,7 @@ def is_social_profile_url(url: str) -> bool:
 
 def normalize_social_profile_url(url: str) -> str:
     normalized = normalize_public_url(url)
-    parsed = urllib.parse.urlparse(normalized)
+    parsed = safe_urlparse(normalized)
     domain = parsed.netloc.lower().removeprefix("www.")
     parts = [part for part in parsed.path.split("/") if part]
     if domain in {"t.me", "telegram.me", "telegram.dog"} and len(parts) >= 2 and parts[0].lower() == "s":
@@ -2272,7 +2290,7 @@ def parse_meta_tags(page: str) -> dict:
 
 
 def social_platform(url: str) -> str:
-    domain = urllib.parse.urlparse(url).netloc.lower()
+    domain = safe_urlparse(url).netloc.lower()
     if "facebook.com" in domain:
         return "Facebook"
     if "instagram.com" in domain:
@@ -2408,7 +2426,7 @@ def read_social_profile(
 ) -> dict:
     url = normalize_public_url(url)
     platform = social_platform(url)
-    parsed = urllib.parse.urlparse(url)
+    parsed = safe_urlparse(url)
     parts = [part for part in parsed.path.split("/") if part]
     handle = parts[-1] if parts else parsed.netloc
     if platform == "LinkedIn" and parts and parts[0].lower() == "in":
@@ -2445,7 +2463,7 @@ def read_social_profile(
         if platform == "YouTube":
             title = meta.get("og:title") or title
             description = meta.get("og:description") or meta.get("description") or description
-            about_url = final_url.rstrip("/") + "/about" if "/about" not in urllib.parse.urlparse(final_url).path else final_url
+            about_url = final_url.rstrip("/") + "/about" if "/about" not in safe_urlparse(final_url).path else final_url
             try:
                 about_page, about_final_url = fetch_document(about_url, timeout=18)
                 about_contacts = extract_public_contacts(about_page)
@@ -2749,7 +2767,8 @@ def search_bing(query: str, limit: int = 8, freshness_days: int | None = None) -
             title = clean_text(link.group(2))
             snippet_match = re.search(r'<p[^>]*>([\s\S]*?)</p>', block, flags=re.I)
             snippet = clean_text(snippet_match.group(1)) if snippet_match else ""
-            if href.startswith("http") and "bing.com" not in href:
+            href = normalize_public_url(href)
+            if href and "bing.com" not in href and is_valid_http_url(href):
                 items.append({"title": title, "url": href, "snippet": snippet})
             if len(items) >= limit:
                 return items
@@ -2777,7 +2796,10 @@ def search_duckduckgo(query: str, limit: int = 8, freshness_days: int | None = N
         href = html.unescape(link.group(1))
         if href.startswith("//"):
             href = "https:" + href
-        parsed_redirect = urllib.parse.urlparse(href)
+        try:
+            parsed_redirect = urllib.parse.urlparse(href)
+        except ValueError:
+            continue
         redirect_params = urllib.parse.parse_qs(parsed_redirect.query)
         if "uddg" in redirect_params:
             href = redirect_params["uddg"][0]
@@ -2788,7 +2810,8 @@ def search_duckduckgo(query: str, limit: int = 8, freshness_days: int | None = N
             flags=re.I,
         )
         snippet = clean_text(snippet_match.group(1)) if snippet_match else ""
-        if href.startswith("http"):
+        href = normalize_public_url(href)
+        if href and is_valid_http_url(href):
             items.append({"title": title, "url": href, "snippet": snippet})
         if len(items) >= limit:
             break
@@ -2811,7 +2834,8 @@ def search_brave(query: str, limit: int = 8, freshness_days: int | None = None) 
         href = html.unescape(href_match.group(1))
         title = clean_text(html.unescape(title_match.group(1)))
         snippet = clean_text(snippet_match.group(1)) if snippet_match else ""
-        if href.startswith("http") and "search.brave.com" not in href:
+        href = normalize_public_url(href)
+        if href and "search.brave.com" not in href and is_valid_http_url(href):
             items.append({"title": title, "url": href, "snippet": snippet})
         if len(items) >= limit:
             break
@@ -2898,7 +2922,9 @@ def search_telegram_directories(query: str, limit: int = 8) -> list[dict]:
                 continue
             candidate_url = urllib.parse.urljoin(base_url, href)
             candidate_url = normalize_social_profile_url(candidate_url)
-            parsed = urllib.parse.urlparse(candidate_url)
+            if not is_valid_http_url(candidate_url):
+                continue
+            parsed = safe_urlparse(candidate_url)
             domain = parsed.netloc.lower().removeprefix("www.")
             identity = candidate_url.lower().rstrip("/")
             if (
@@ -3126,7 +3152,7 @@ def latest_iso_date(values: list[str]) -> str:
 
 
 def source_details(url: str, fallback_origin: str = "公开网页搜索") -> tuple[str, str]:
-    domain = urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
+    domain = safe_urlparse(url).netloc.lower().removeprefix("www.")
     if "openstreetmap.org" in domain:
         return "OpenStreetMap", "地图与地理商业目录"
     if "instagram.com" in domain:
@@ -3158,7 +3184,7 @@ def source_details(url: str, fallback_origin: str = "公开网页搜索") -> tup
 
 def source_category(url: str, title: str = "", snippet: str = "") -> tuple[str, str]:
     value = f"{url} {title} {snippet}".lower()
-    domain = urllib.parse.urlparse(url).netloc.lower().removeprefix("www.")
+    domain = safe_urlparse(url).netloc.lower().removeprefix("www.")
     if "google.com/maps" in value:
         return "Google Maps", "地图企业资料"
     if "openstreetmap.org" in domain:
@@ -3413,15 +3439,15 @@ def official_site_pages(website: str) -> list[dict]:
         homepage, final_website = fetch_document(website, timeout=12)
     except (OSError, TimeoutError, UnicodeError):
         return []
-    parsed = urllib.parse.urlparse(final_website)
+    parsed = safe_urlparse(final_website)
     root = f"{parsed.scheme}://{parsed.netloc}"
     candidates = [final_website]
     links = re.findall(r'href=["\']([^"\']+)["\']', homepage, flags=re.I)
     preferred = []
     for href in links:
         absolute = urllib.parse.urljoin(final_website, html.unescape(href))
-        path = urllib.parse.urlparse(absolute).path.lower()
-        if urllib.parse.urlparse(absolute).netloc != parsed.netloc:
+        path = safe_urlparse(absolute).path.lower()
+        if safe_urlparse(absolute).netloc != parsed.netloc:
             continue
         if any(word in path for word in ("/contact", "/about", "/team", "/management", "/leadership")):
             if absolute not in preferred:
@@ -3598,7 +3624,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
             seen_urls.add(social_key)
 
     email_domain = contacts["email"].split("@")[-1].lower() if "@" in contacts["email"] else ""
-    website_domain = urllib.parse.urlparse(website).netloc.lower().removeprefix("www.")
+    website_domain = safe_urlparse(website).netloc.lower().removeprefix("www.")
     free_mail_domains = {"gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"}
     if email_domain and email_domain not in free_mail_domains and email_domain != website_domain:
         corporate_pages = official_site_pages(f"https://{email_domain}")
@@ -3849,13 +3875,13 @@ def research_company(params: dict[str, list[str]]) -> dict:
     )
 
     official_domains = {
-        urllib.parse.urlparse(item["url"]).netloc.lower().removeprefix("www.")
+        safe_urlparse(item["url"]).netloc.lower().removeprefix("www.")
         for item in evidence
         if item["sourceType"] == "官方公司页面"
     }
     independent = [
         item for item in evidence
-        if urllib.parse.urlparse(item["url"]).netloc.lower().removeprefix("www.") not in official_domains
+        if safe_urlparse(item["url"]).netloc.lower().removeprefix("www.") not in official_domains
     ]
     source_types = {item["sourceType"] for item in evidence}
     confidence = 15
@@ -3882,7 +3908,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
         for item in evidence
     )
     independent_domains = {
-        urllib.parse.urlparse(item["url"]).netloc.lower().removeprefix("www.")
+        safe_urlparse(item["url"]).netloc.lower().removeprefix("www.")
         for item in evidence
         if item.get("url")
     }
@@ -4745,7 +4771,7 @@ def social_accounts_from_business_websites(
             return []
         meta = extract_meta(page)
         contacts = extract_public_contacts(page, seed.get("tags"))
-        company = clean_text(seed.get("title") or urllib.parse.urlparse(final_url).netloc)[:180]
+        company = clean_text(seed.get("title") or safe_urlparse(final_url).netloc)[:180]
         results = []
         for social_url in contacts.get("social_accounts") or []:
             platform_name = social_platform(social_url)
@@ -5076,7 +5102,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         seen_platform_urls: set[str] = set()
         for item in social_results:
             item_url = normalize_social_profile_url(item.get("url", ""))
-            item_domain = urllib.parse.urlparse(item_url).netloc.lower().removeprefix("www.")
+            item_domain = safe_urlparse(item_url).netloc.lower().removeprefix("www.")
             identity = item_url.lower().rstrip("/")
             if (
                 not item_url
@@ -5093,7 +5119,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             item["source_url"] = item_url
             item["customer_website"] = ""
             item["skip_fetch"] = True
-            path = urllib.parse.urlparse(item_url).path.lower()
+            path = safe_urlparse(item_url).path.lower()
             is_person = (
                 "/in/" in path
                 or account_scope == "person"
@@ -5183,7 +5209,10 @@ def discover(params: dict[str, list[str]]) -> dict:
     for item in raw_results:
         if len(leads) >= result_limit:
             break
-        parsed = urllib.parse.urlparse(item["url"])
+        item["url"] = normalize_public_url(item.get("url", ""))
+        if not is_valid_http_url(item["url"]):
+            continue
+        parsed = safe_urlparse(item["url"])
         domain = parsed.netloc.lower().removeprefix("www.")
         path_lower = parsed.path.lower()
         title_lower = item["title"].lower()
@@ -5540,7 +5569,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                         "title": source_title,
                         "description": source_excerpt[:700],
                         "url": item["url"],
-                        "handle": urllib.parse.urlparse(item["url"]).path.strip("/").split("/")[-1],
+                        "handle": safe_urlparse(item["url"]).path.strip("/").split("/")[-1],
                         "businessSignals": social_analysis.get("businessSignals") or [],
                         "intentSignals": social_analysis.get("intentSignals") or [],
                         "decisionRole": social_analysis.get("decisionRole", ""),
