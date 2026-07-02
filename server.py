@@ -4835,8 +4835,10 @@ def discover(params: dict[str, list[str]]) -> dict:
     freshness_value = (params.get("freshness") or ["all"])[0]
     freshness_days = int(freshness_value) if freshness_value.isdigit() else None
     keywords = (params.get("keywords") or [""])[0].replace("|", " ")
+    long_lived_source_mode = source_mode in {"dealer", "google", "osm"}
+    web_search_freshness_days = None if long_lived_source_mode else freshness_days
     cutoff_query = ""
-    if freshness_days:
+    if freshness_days and not long_lived_source_mode:
         cutoff = (datetime.now(timezone.utc) - timedelta(days=freshness_days)).date().isoformat()
         cutoff_query = f" after:{cutoff}"
     exclude_query = " ".join(
@@ -4952,7 +4954,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         web_results_by_query: list[list[dict]] = []
         with ThreadPoolExecutor(max_workers=min(4, len(search_variants))) as executor:
             futures = [
-                executor.submit(search_web, search_query, per_query_limit, freshness_days)
+                executor.submit(search_web, search_query, per_query_limit, web_search_freshness_days)
                 for search_query in search_variants
             ]
             for future in as_completed(futures):
@@ -5335,6 +5337,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             published_at = item.get("latestVideoPublishedAt") or published_at
             if not is_recent_youtube_video_date(published_at):
                 continue
+        is_dealer_directory_source = source_mode == "dealer" and not is_social_result and bool(item.get("customer_website"))
         is_long_lived_business_source = (
             source_mode == "all"
             and (
@@ -5343,7 +5346,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 or source_type in ("地图与地理商业目录", "Google Maps 企业资料")
             )
         )
-        if not is_long_lived_business_source and not is_within_freshness(published_at, freshness_days):
+        if not (is_long_lived_business_source or is_dealer_directory_source) and not is_within_freshness(published_at, freshness_days):
             continue
         customer_website = item.get("customer_website") or (
             item["url"] if source_type == "车商官网或汽车行业网站" else ""
