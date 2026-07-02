@@ -4424,6 +4424,8 @@ def is_brand_bound_chinese_dealer(text: str) -> bool:
     )
     binding_terms = binding_terms + (
         "franchise dealer", "franchised dealer", "main dealer",
+        "brand or operator:", "listed as a dealer", "listed as a car dealer",
+        "listed on google maps",
         "\u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u044b\u0439 \u0434\u0438\u043b\u0435\u0440", "\u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u043e\u0433\u043e \u0434\u0438\u043b\u0435\u0440\u0430", "\u0430\u0432\u0442\u043e\u0440\u0438\u0437\u043e\u0432\u0430\u043d\u043d\u044b\u0439 \u0434\u0438\u043b\u0435\u0440",
         "\u043e\u0444\u0438\u0446\u0438\u0430\u043b\u044c\u043d\u044b\u0439 \u0441\u0435\u0440\u0432\u0438\u0441", "\u0434\u0438\u043b\u0435\u0440\u0441\u043a\u0438\u0439 \u0446\u0435\u043d\u0442\u0440", "\u0434\u0446 ",
     )
@@ -4923,9 +4925,9 @@ def discover(params: dict[str, list[str]]) -> dict:
             pass
     if source_mode in ("all", "combined", "dealer"):
         search_variants = list(dict.fromkeys(commercial_query_variants))
-        max_web_queries = 72 if source_mode in ("all", "combined") else 96
+        max_web_queries = 36 if source_mode in ("all", "combined") else 12
         search_variants = search_variants[:max_web_queries]
-        per_query_limit = 12 if source_mode in ("all", "combined") else 16
+        per_query_limit = 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
         with ThreadPoolExecutor(max_workers=min(4, len(search_variants))) as executor:
             futures = [
@@ -5193,6 +5195,21 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["youtube_discovery_candidate"] = youtube_discovery_candidate
                 raw_results.append(item)
     raw_results = balance_discovery_sources(raw_results)
+    if source_mode == "dealer":
+        def dealer_source_priority(item: dict) -> tuple:
+            origin = item.get("origin", "")
+            url = normalize_public_url(item.get("url", ""))
+            has_website = bool(item.get("customer_website")) and "openstreetmap.org" not in url
+            trusted_source = origin in ("OpenStreetMap", "Google Maps")
+            has_contact = bool(item.get("contact"))
+            return (
+                -int(has_website),
+                -int(trusted_source),
+                -int(has_contact),
+                str(item.get("title") or ""),
+            )
+
+        raw_results = sorted(raw_results, key=dealer_source_priority)[: max(result_limit, 18)]
     leads = []
     seen_sources = set()
     excluded_brand_bound_dealers = 0
@@ -5252,7 +5269,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         should_fetch_social_page = is_raw_social_or_video_source
         if not item.get("skip_fetch") and (not is_raw_social_or_video_source or should_fetch_social_page):
             try:
-                page = fetch_text(item["url"], timeout=8)
+                page = fetch_text(item["url"], timeout=5 if source_mode == "dealer" else 8)
                 page_text = extract_meta(page)
                 contact = contact or extract_contact(page if should_fetch_social_page else page_text)
             except (OSError, TimeoutError, UnicodeError):
