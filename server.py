@@ -1734,6 +1734,7 @@ BLOCKED_DOMAINS = (
     "youtu.be",
     "ytimg.com",
     "iytimg.com",
+    "ggpht.com",
     "gstatic.com",
     "googleusercontent.com",
     "doubleclick.net",
@@ -1949,7 +1950,12 @@ def is_business_website_url(url: str) -> bool:
     path = parsed.path.lower()
     if not domain or "." not in domain:
         return False
-    if domain.endswith((".ytplayer", ".js", ".css")) or "ytplayer" in domain or "ytplayer" in normalized.lower():
+    if (
+        domain.endswith((".ytplayer", ".js", ".css"))
+        or "ytplayer" in domain
+        or "ytplayer" in normalized.lower()
+        or domain.endswith("ggpht.com")
+    ):
         return False
     if any(blocked in domain for blocked in BLOCKED_DOMAINS):
         return False

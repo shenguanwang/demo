@@ -136,6 +136,15 @@ const IRRELEVANT_REVIEW_LEAD_DOMAINS = [
   "bloomberg.com"
 ];
 
+const NON_CUSTOMER_WEBSITE_DOMAINS = [
+  "ggpht.com",
+  "ytimg.com",
+  "iytimg.com",
+  "googleusercontent.com",
+  "gstatic.com",
+  "googlevideo.com"
+];
+
 const IRRELEVANT_REVIEW_LEAD_PATTERNS = [
   /\bcgtn\b/i,
   /china global television/i,
@@ -158,10 +167,27 @@ const IRRELEVANT_REVIEW_LEAD_PATTERNS = [
 
 function leadHostname(value) {
   try {
-    return new URL(String(value || "")).hostname.replace(/^www\./, "").toLowerCase();
+    const raw = String(value || "").trim();
+    if (!raw) return "";
+    return new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`).hostname.replace(/^www\./, "").toLowerCase();
   } catch {
     return "";
   }
+}
+
+function isNonCustomerWebsiteUrl(value) {
+  const raw = String(value || "").toLowerCase();
+  const hostname = leadHostname(value);
+  if (!hostname) return false;
+  return (
+    raw.includes("window.ytplayer")
+    || raw.includes("ytplayer")
+    || NON_CUSTOMER_WEBSITE_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
+  );
+}
+
+function sanitizeCustomerWebsite(value) {
+  return isNonCustomerWebsiteUrl(value) ? "" : String(value || "").trim();
 }
 
 function isBlockedLeadDomain(value) {
@@ -1742,17 +1768,6 @@ const reviewSourceOptions = [
 ];
 
 function reviewSourceKey(lead) {
-  const value = [
-    lead.discoverySource,
-    lead.sourceMode,
-    lead.platform,
-    lead.origin,
-    lead.sourceType,
-    lead.sourceTitle,
-    lead.source,
-    lead.sourceUrl
-  ].filter(Boolean).join(" ").toLowerCase();
-  if (!value) return "dealer";
   const concreteValue = [
     lead.platform,
     lead.origin,
@@ -1766,12 +1781,26 @@ function reviewSourceKey(lead) {
       source.url
     ])
   ].filter(Boolean).join(" ").toLowerCase();
-  if (concreteValue.includes("google") || concreteValue.includes("maps/search") || concreteValue.includes("place_id")) return "google";
+  if (!concreteValue) return "dealer";
+  if (
+    concreteValue.includes("youtube.com")
+    || concreteValue.includes("youtu.be")
+    || concreteValue.includes("youtube")
+    || concreteValue.includes("yt3.ggpht.com")
+    || concreteValue.includes("ytimg.com")
+  ) return "youtube";
+  if (
+    concreteValue.includes("google maps")
+    || concreteValue.includes("maps.google.")
+    || concreteValue.includes("google.com/maps")
+    || concreteValue.includes("maps/search")
+    || concreteValue.includes("place_id")
+    || concreteValue.includes("places api")
+  ) return "google";
   if (concreteValue.includes("openstreetmap") || concreteValue.includes("overpass") || concreteValue.includes("osm")) return "osm";
   if (concreteValue.includes("instagram.com") || concreteValue.includes("instagram")) return "instagram";
   if (concreteValue.includes("facebook.com") || concreteValue.includes("facebook")) return "facebook";
   if (concreteValue.includes("tiktok.com") || concreteValue.includes("tiktok")) return "tiktok";
-  if (concreteValue.includes("youtube.com") || concreteValue.includes("youtu.be") || concreteValue.includes("youtube")) return "youtube";
   if (concreteValue.includes("linkedin.com") || concreteValue.includes("linkedin")) return "linkedin";
   if (concreteValue.includes("t.me") || concreteValue.includes("telegram")) return "telegram";
   if (concreteValue.includes("x.com") || concreteValue.includes("twitter.com") || concreteValue.includes("twitter")) return "twitter";
@@ -1787,9 +1816,13 @@ function reviewSourceKey(lead) {
     || concreteValue.includes("dealer")
     || concreteValue.includes("showroom")
   ) return "dealer";
+  const value = [
+    lead.discoverySource,
+    lead.sourceMode
+  ].filter(Boolean).join(" ").toLowerCase();
   if (/\bcombined\b|综合搜索/.test(value)) return "dealer";
   if (/\bsocial\b|社媒综合/.test(value)) return "social";
-  if (value.includes("google") || value.includes("maps/search") || value.includes("place_id")) return "google";
+  if (value === "google") return "google";
   if (value.includes("openstreetmap") || value.includes("overpass") || value.includes("osm")) return "osm";
   if (value.includes("instagram.com") || value.includes("instagram")) return "instagram";
   if (value.includes("facebook.com") || value.includes("facebook")) return "facebook";
@@ -2144,7 +2177,7 @@ function normalizeLead(raw) {
     researching: false,
     publishedAt: raw.publishedAt || "",
     freshnessDays: raw.freshnessDays || null,
-    customerWebsite: raw.customerWebsite || "",
+    customerWebsite: sanitizeCustomerWebsite(raw.customerWebsite || ""),
     contactName: raw.contactName || "",
     contactRole: raw.contactRole || "",
     email: raw.email || "",
