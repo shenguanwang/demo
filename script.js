@@ -1992,6 +1992,7 @@ function renderCrm() {
         <div class="crm-actions">
           <button type="button" data-crm-action="email" data-index="${index}">写开发信</button>
           <button type="button" data-crm-action="quote" data-index="${index}">去报价</button>
+          <button type="button" data-crm-action="return-review" data-index="${index}">退回审核</button>
           <button type="button" data-crm-action="delete" data-index="${index}">删除</button>
         </div>
       </td>
@@ -2041,6 +2042,28 @@ function openCustomerInReview(index) {
   selectedReviewLeadId = `approved:${lead.id || index}`;
   showSection("review");
   renderReview();
+}
+
+function returnCustomerToReview(index) {
+  const lead = customers[index];
+  if (!lead) return;
+  if (!confirm(`确认把客户 ${lead.company} 退回到线索审核吗？客户池中将不再显示该客户。`)) return;
+  const [removed] = customers.splice(index, 1);
+  const returnedLead = normalizeLead({
+    ...removed,
+    stage: "待审核",
+    next: "退回审核，等待人工重新判断",
+    returnedToReviewAt: new Date().toISOString(),
+    returnedFromCrm: true,
+    manualApproval: false
+  });
+  reviewLeads = reviewLeads.filter((item) => String(item.id || "") !== String(returnedLead.id || ""));
+  reviewLeads.unshift(returnedLead);
+  selectedReviewLeadId = `pending:${returnedLead.id}`;
+  const statusFilter = $("#reviewStatusFilter");
+  if (statusFilter) statusFilter.value = "pending";
+  refreshAllLeadViews();
+  showSection("review");
 }
 
 function openCustomerInEmail(index) {
@@ -4493,6 +4516,7 @@ function bindForms() {
     if (button.dataset.crmAction === "review") openCustomerInReview(index);
     if (button.dataset.crmAction === "email") openCustomerInEmail(index);
     if (button.dataset.crmAction === "quote") openCustomerInQuote(index);
+    if (button.dataset.crmAction === "return-review") returnCustomerToReview(index);
     if (button.dataset.crmAction === "delete") {
       const lead = customers[index];
       if (!lead || !confirm(`确认删除客户 ${lead.company} 吗？此删除会同步到其他设备。`)) return;

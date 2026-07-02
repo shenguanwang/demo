@@ -5002,6 +5002,31 @@ def discover(params: dict[str, list[str]]) -> dict:
         customer_website = normalize_public_url(customer_website)
         if customer_website and not is_business_website_url(customer_website):
             customer_website = ""
+        social_profile = {}
+        if is_social_result:
+            try:
+                social_profile = read_social_profile(
+                    source_url,
+                    item.get("account_type") or "公司账号",
+                    f"{origin} 公开主页",
+                )
+            except (OSError, ValueError, TimeoutError):
+                social_profile = {}
+            social_websites = [
+                website_url
+                for website_url in (social_profile.get("externalWebsites") or [])
+                if is_business_website_url(website_url)
+            ]
+            if social_websites:
+                customer_website = customer_website or social_websites[0]
+                combined = " ".join(
+                    value for value in (
+                        combined,
+                        social_profile.get("title", ""),
+                        social_profile.get("description", ""),
+                        " ".join(social_websites),
+                    ) if value
+                )
         source_contact_text = f"{item.get('snippet', '')} {item.get('title', '')}"
         contacts = extract_public_contacts(source_contact_text, item.get("tags"))
         if page and (is_raw_social_or_video_source or not any(contacts.get(key) for key in ("email", "phone", "whatsapp"))):
@@ -5159,7 +5184,15 @@ def discover(params: dict[str, list[str]]) -> dict:
                         origin,
                         source_type,
                     )
-                ],
+                ] + ([
+                    evidence_item(
+                        customer_website,
+                        f"{company} 官网",
+                        social_profile.get("description", "") or f"{origin} 主页 Website 外链指向 {customer_website}",
+                        "社媒主页 Website 外链",
+                        "公司官网",
+                    )
+                ] if customer_website and is_social_result and social_profile else []),
                 "researchAt": "",
                 "researchSummary": "当前只有原始发现来源，建议在线索审核中执行全网补全。",
                 "publishedAt": published_at,
