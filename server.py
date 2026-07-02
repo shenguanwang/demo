@@ -4835,12 +4835,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     freshness_value = (params.get("freshness") or ["all"])[0]
     freshness_days = int(freshness_value) if freshness_value.isdigit() else None
     keywords = (params.get("keywords") or [""])[0].replace("|", " ")
-    long_lived_source_mode = source_mode in {"dealer", "google", "osm"}
-    web_search_freshness_days = None if long_lived_source_mode else freshness_days
     cutoff_query = ""
-    if freshness_days and not long_lived_source_mode:
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=freshness_days)).date().isoformat()
-        cutoff_query = f" after:{cutoff}"
     exclude_query = " ".join(
         f'-"{part.strip()}"'
         for part in re.split(r"[,，、;；]+", exclusions)
@@ -4904,23 +4899,7 @@ def discover(params: dict[str, list[str]]) -> dict:
 
     raw_results = []
     notice = ""
-    if source_mode == "google" and freshness_days:
-        return {
-            "ok": True,
-            "count": 0,
-            "leads": [],
-            "notice": "Google Maps 企业资料是长期商家数据，没有消息发布日期。请选择“不限时间”。",
-        }
-    if source_mode == "osm" and freshness_days:
-        return {
-            "ok": True,
-            "count": 0,
-            "leads": [],
-            "notice": "OpenStreetMap 是长期商业地点目录，没有消息发布日期。请选择“不限时间”，或改选官网、Instagram、Facebook、LinkedIn。",
-        }
-    if source_mode in ("all", "combined", "google") and (
-        not freshness_days or source_mode == "all"
-    ):
+    if source_mode in ("all", "combined", "google"):
         try:
             google_city_limit = min(6, max(3, result_limit // max(2, len(cities) * 2)))
             for city in cities:
@@ -4933,11 +4912,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
             if source_mode == "google":
                 notice = f"{exc}。请在本机配置密钥后重试。"
-    if source_mode in ("all", "combined", "osm") and (
-        not freshness_days or source_mode == "all"
-    ) and (
-        source_mode in ("all", "combined", "osm")
-    ):
+    if source_mode in ("all", "combined", "osm"):
         try:
             raw_results += search_osm_dealers(
                 country,
@@ -4954,7 +4929,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         web_results_by_query: list[list[dict]] = []
         with ThreadPoolExecutor(max_workers=min(4, len(search_variants))) as executor:
             futures = [
-                executor.submit(search_web, search_query, per_query_limit, web_search_freshness_days)
+                executor.submit(search_web, search_query, per_query_limit, None)
                 for search_query in search_variants
             ]
             for future in as_completed(futures):
@@ -5346,7 +5321,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 or source_type in ("地图与地理商业目录", "Google Maps 企业资料")
             )
         )
-        if not (is_long_lived_business_source or is_dealer_directory_source) and not is_within_freshness(published_at, freshness_days):
+        if is_social_result and not is_within_freshness(published_at, freshness_days):
             continue
         customer_website = item.get("customer_website") or (
             item["url"] if source_type == "车商官网或汽车行业网站" else ""
@@ -5664,7 +5639,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         )
     if excluded_brand_bound_dealers:
         notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定主机厂的单品牌 4S/授权店。"
-    if freshness_days and not leads and not notice:
+    if freshness_days and source_mode in ("social", "youtube", "instagram", "facebook", "tiktok", "linkedin", "telegram", "twitter", "threads", "pinterest", "reddit", "vk") and not leads and not notice:
         notice = f"没有找到可确认发布日期且在最近 {freshness_days} 天内的线索。可以放宽到 30 天，或更换 Instagram、Facebook、LinkedIn 来源。"
     if source_mode == "google" and not leads and not notice:
         notice = "Google Maps 没有返回符合条件的企业，请调整中文目标描述或目标国家。"
