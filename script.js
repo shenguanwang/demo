@@ -2325,6 +2325,11 @@ async function researchLead(index) {
       country: [lead.city, lead.country].filter(Boolean).join(", "),
       website: lead.customerWebsite || "",
       sourceUrl: lead.sourceUrl || lead.source || "",
+      socialUrls: [
+        ...(lead.socialAccounts || []),
+        ...(lead.socialProfiles || []).map((item) => item.url),
+        ...(lead.evidenceSources || []).map((item) => item.url)
+      ].filter(Boolean).join(" | "),
       model: lead.model || "",
       type: lead.type || ""
     })}`);

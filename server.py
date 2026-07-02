@@ -1974,6 +1974,24 @@ def is_business_website_url(url: str) -> bool:
     return True
 
 
+def is_noise_source_url(url: str) -> bool:
+    normalized = normalize_public_url(url).lower()
+    if not normalized:
+        return True
+    parsed = urllib.parse.urlparse(normalized)
+    domain = parsed.netloc.lower().removeprefix("www.")
+    path = parsed.path.lower()
+    if domain in {"window.ytplayer", "about:blank"}:
+        return True
+    if "ytplayer" in normalized or "youtube-nocookie.com/embed" in normalized:
+        return True
+    if any(part in path for part in ("/embed/", "/iframe/", "/player/")) and (
+        "youtube" in domain or "youtu.be" in domain
+    ):
+        return True
+    return False
+
+
 def unwrap_public_redirect_url(url: str) -> str:
     url = (
         str(url or "")
@@ -2287,6 +2305,25 @@ def read_social_profile(
         if platform == "YouTube":
             title = meta.get("og:title") or title
             description = meta.get("og:description") or meta.get("description") or description
+            about_url = final_url.rstrip("/") + "/about" if "/about" not in urllib.parse.urlparse(final_url).path else final_url
+            try:
+                about_page, about_final_url = fetch_document(about_url, timeout=18)
+                about_contacts = extract_public_contacts(about_page)
+                external_websites = list(dict.fromkeys([
+                    *external_websites,
+                    *(about_contacts.get("websites") or []),
+                ]))
+                about_meta = parse_meta_tags(about_page)
+                title = about_meta.get("og:title") or about_meta.get("twitter:title") or title
+                description = (
+                    about_meta.get("og:description")
+                    or about_meta.get("twitter:description")
+                    or about_meta.get("description")
+                    or description
+                )
+                final_url = about_final_url.replace("/about", "")
+            except (OSError, TimeoutError, UnicodeError):
+                pass
     except (OSError, TimeoutError, UnicodeError):
         pass
     if not description:
@@ -3163,6 +3200,7 @@ def company_domain_candidates(company: str) -> list[str]:
     stop_words = {
         "auto", "autos", "car", "cars", "motor", "motors", "group", "llc",
         "ltd", "inc", "co", "company", "trading", "dealer", "dealership",
+        "sales", "sale", "used", "preowned", "pre", "owned",
     }
     tokens = [
         token.lower()
@@ -3172,11 +3210,17 @@ def company_domain_candidates(company: str) -> list[str]:
     core_tokens = [token for token in tokens if token not in stop_words] or tokens
     if not core_tokens:
         return []
-    joined = "".join(core_tokens[:4])
-    dashed = "-".join(core_tokens[:4])
-    candidates = [f"https://www.{joined}.com", f"https://{joined}.com"]
-    if dashed != joined:
-        candidates.extend([f"https://www.{dashed}.com", f"https://{dashed}.com"])
+    domain_cores = []
+    for count in (2, 3, 4):
+        if len(tokens) >= count:
+            domain_cores.extend(["".join(tokens[:count]), "-".join(tokens[:count])])
+    for count in (2, 3, 4):
+        if len(core_tokens) >= count:
+            domain_cores.extend(["".join(core_tokens[:count]), "-".join(core_tokens[:count])])
+    domain_cores.extend(["".join(core_tokens[:4]), "-".join(core_tokens[:4])])
+    candidates = []
+    for domain_core in dict.fromkeys(core for core in domain_cores if core):
+        candidates.extend([f"https://www.{domain_core}.com", f"https://{domain_core}.com"])
     return list(dict.fromkeys(candidates))
 
 
@@ -3211,6 +3255,15 @@ def research_company(params: dict[str, list[str]]) -> dict:
     lead_type = clean_text((params.get("type") or [""])[0])
     website = normalize_public_url((params.get("website") or [""])[0])
     source_url = normalize_public_url((params.get("sourceUrl") or [""])[0])
+    provided_social_urls = [
+        normalize_social_profile_url(value)
+        for value in re.split(r"\s*\|\s*|\s+", (params.get("socialUrls") or [""])[0])
+        if value.strip()
+    ]
+    provided_social_urls = [
+        url for url in dict.fromkeys(provided_social_urls)
+        if is_social_profile_url(url)
+    ][:12]
     if website and not is_business_website_url(website):
         website = ""
     if not company:
@@ -3238,10 +3291,29 @@ def research_company(params: dict[str, list[str]]) -> dict:
     if not website:
         website, inferred_site_pages = infer_company_website(company)
 
-    if source_url:
+    if source_url and not is_noise_source_url(source_url):
         name, kind = source_category(source_url)
         evidence.append(evidence_item(source_url, company, "原始线索来源", name, kind))
         seen_urls.add(source_url.lower().rstrip("/"))
+
+    for social_url in provided_social_urls:
+        key = social_url.lower().rstrip("/")
+        if social_url not in contacts["social_accounts"]:
+            contacts["social_accounts"].append(social_url)
+        social_relationships[key] = "原线索社媒账号"
+        social_account_types[key] = "公司账号"
+        if key not in seen_urls:
+            social_name, social_type = source_category(social_url)
+            evidence.append(
+                evidence_item(
+                    social_url,
+                    f"{company} 的{social_name}账号",
+                    "该社媒主页来自原线索记录，重新审核时用于查找 Website 外链和联系方式。",
+                    social_name,
+                    social_type,
+                )
+            )
+            seen_urls.add(key)
 
     site_pages = inferred_site_pages or official_site_pages(website)
     official_website_text = " ".join(
