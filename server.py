@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import socket
 import socketserver
 import base64
 import sqlite3
@@ -18,7 +19,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler
 from http.cookies import SimpleCookie
@@ -62,6 +63,9 @@ ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
 DISCOVERY_MAX_CONCURRENCY = max(1, int(os.environ.get("DISCOVERY_MAX_CONCURRENCY", "2")))
 DISCOVERY_WORKER_SLOTS = threading.BoundedSemaphore(DISCOVERY_MAX_CONCURRENCY)
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
+NETWORK_DEFAULT_TIMEOUT = max(5, int(os.environ.get("NETWORK_DEFAULT_TIMEOUT", "12")))
+DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
+DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "900")))
 YOUTUBE_MAX_VIDEO_AGE_DAYS = 365 * 5
 DISCOVERY_SCHEDULER_STOP = threading.Event()
 DISCOVERY_SCHEDULER_STARTED = False
@@ -75,6 +79,8 @@ AUTH_SECRET = os.environ.get("APP_AUTH_SECRET") or secrets.token_hex(32)
 AUTH_COOKIE = "hima_session"
 AUTH_MAX_AGE = 60 * 60 * 24 * 7
 PASSWORD_HASH_ITERATIONS = 210_000
+
+socket.setdefaulttimeout(NETWORK_DEFAULT_TIMEOUT)
 
 
 class WorkspaceVersionConflict(Exception):
@@ -1359,7 +1365,27 @@ def heartbeat_discovery_job(job_id: str, source_mode: str, stop_event: threading
     started_at = time.monotonic()
     while not stop_event.wait(25):
         elapsed = time.monotonic() - started_at
-        progress = min(88, 12 + int(elapsed // 30) * 7)
+        if elapsed > DISCOVERY_JOB_TIMEOUT_SECONDS:
+            update_discovery_job(
+                job_id,
+                skip_statuses=("canceled", "completed", "failed"),
+                status="failed",
+                stage="done",
+                progress=100,
+                message="获客任务超过时间上限，已自动停止。请缩小来源范围或稍后重试。",
+                error=f"Discovery job timed out after {DISCOVERY_JOB_TIMEOUT_SECONDS} seconds.",
+                result={"diagnostics": {
+                    "category": "任务执行超时",
+                    "sourceMode": source_mode,
+                    "error": f"Discovery job timed out after {DISCOVERY_JOB_TIMEOUT_SECONDS} seconds.",
+                    "suggestion": "建议先使用单一来源，例如 Google Maps、OpenStreetMap 或车商官网，再逐步扩大到综合搜索。",
+                    "retryable": True,
+                    "failedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                }},
+            )
+            stop_event.set()
+            return
+        progress = min(75, 12 + int(elapsed // 30) * 5)
         stage = "search" if progress < 35 else "extract" if progress < 68 else "verify"
         update_discovery_job(
             job_id,
@@ -2844,17 +2870,22 @@ def search_brave(query: str, limit: int = 8, freshness_days: int | None = None) 
 
 def search_web(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
     collected: list[dict] = []
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = [
-            executor.submit(search_duckduckgo, query, limit, freshness_days),
-            executor.submit(search_bing, query, limit, freshness_days),
-            executor.submit(search_brave, query, limit, freshness_days),
-        ]
-        for future in as_completed(futures):
+    executor = ThreadPoolExecutor(max_workers=3)
+    futures = [
+        executor.submit(search_duckduckgo, query, limit, freshness_days),
+        executor.submit(search_bing, query, limit, freshness_days),
+        executor.submit(search_brave, query, limit, freshness_days),
+    ]
+    try:
+        for future in as_completed(futures, timeout=DISCOVERY_SEARCH_TIMEOUT):
             try:
-                collected.extend(future.result())
+                collected.extend(future.result(timeout=1))
             except (OSError, ValueError, TimeoutError, urllib.error.URLError):
                 continue
+    except FuturesTimeoutError:
+        pass
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     results: list[dict] = []
     seen: set[str] = set()
     for item in collected:
@@ -4929,16 +4960,21 @@ def discover(params: dict[str, list[str]]) -> dict:
         search_variants = search_variants[:max_web_queries]
         per_query_limit = 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
-        with ThreadPoolExecutor(max_workers=min(4, len(search_variants))) as executor:
-            futures = [
-                executor.submit(search_web, search_query, per_query_limit, None)
-                for search_query in search_variants
-            ]
-            for future in as_completed(futures):
+        executor = ThreadPoolExecutor(max_workers=min(4, len(search_variants)))
+        futures = [
+            executor.submit(search_web, search_query, per_query_limit, None)
+            for search_query in search_variants
+        ]
+        try:
+            for future in as_completed(futures, timeout=max(20, DISCOVERY_SEARCH_TIMEOUT * 2)):
                 try:
-                    web_results_by_query.append(future.result())
+                    web_results_by_query.append(future.result(timeout=1))
                 except (OSError, ValueError, TimeoutError, urllib.error.URLError):
                     continue
+        except FuturesTimeoutError:
+            pass
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         for web_results in web_results_by_query:
             try:
                 for item in web_results:
@@ -5053,31 +5089,41 @@ def discover(params: dict[str, list[str]]) -> dict:
             directory_terms = telegram_directory_terms(market, target_type)
             directory_terms = directory_terms[:3 if source_mode == "telegram" else 2]
             social_search_stats["queries"] += len(directory_terms)
-            with ThreadPoolExecutor(max_workers=min(3, max(1, len(directory_terms)))) as executor:
-                futures = [
-                    executor.submit(search_telegram_directories, directory_query, 6)
-                    for directory_query in directory_terms
-                ]
-                for future in as_completed(futures):
+            executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(directory_terms))))
+            futures = [
+                executor.submit(search_telegram_directories, directory_query, 6)
+                for directory_query in directory_terms
+            ]
+            try:
+                for future in as_completed(futures, timeout=DISCOVERY_SEARCH_TIMEOUT):
                     try:
-                        social_results.extend(future.result())
+                        social_results.extend(future.result(timeout=1))
                     except (OSError, ValueError, TimeoutError, urllib.error.URLError):
                         continue
-        with ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants)))) as executor:
-            futures = [
-                executor.submit(
-                    search_web,
-                    search_query,
-                    4 if source_mode == "combined" else 8,
-                    freshness_days,
-                )
-                for search_query in query_variants
-            ]
-            for future in as_completed(futures):
+            except FuturesTimeoutError:
+                pass
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
+        executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants))))
+        futures = [
+            executor.submit(
+                search_web,
+                search_query,
+                4 if source_mode == "combined" else 8,
+                freshness_days,
+            )
+            for search_query in query_variants
+        ]
+        try:
+            for future in as_completed(futures, timeout=max(20, DISCOVERY_SEARCH_TIMEOUT * 2)):
                 try:
-                    social_results.extend(future.result())
+                    social_results.extend(future.result(timeout=1))
                 except (OSError, ValueError, TimeoutError, urllib.error.URLError):
                     continue
+        except FuturesTimeoutError:
+            pass
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         social_search_stats["rawResults"] += len(social_results)
         expected_domains = {
             "instagram": ("instagram.com",),
