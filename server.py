@@ -4950,6 +4950,19 @@ def discover(params: dict[str, list[str]]) -> dict:
                 pass
     if source_mode == "dealer":
         try:
+            google_dealer_limit = min(18, max(8, result_limit // 2))
+            active_cities = cities[:6] or [""]
+            per_city_google_limit = max(3, google_dealer_limit // max(1, len(active_cities)))
+            for city in active_cities:
+                raw_results += search_google_places(
+                    country,
+                    "car dealer automotive showroom used cars motors official website phone",
+                    limit=per_city_google_limit,
+                    city=city,
+                )
+        except (OSError, ValueError, RuntimeError, TimeoutError):
+            pass
+        try:
             directory_websites = [
                 item
                 for item in search_osm_dealers(country, limit=16, target_type=target_type)
@@ -5445,11 +5458,33 @@ def discover(params: dict[str, list[str]]) -> dict:
             {"value": value, "sources": [{"url": contact_source_url, "name": contact_source_name, "excerpt": contact_source_excerpt[:260]}]}
             for value in contacts.get("whatsapps") or ([contacts["whatsapp"]] if contacts["whatsapp"] else [])
         ]
+        contactable = bool(verified_email_sources or phone_sources or whatsapp_sources)
+        official_source_count = 1 if customer_website else 0
+        evidence_source_count = 1 + (1 if customer_website and is_social_result and social_profile else 0)
+        source_domains = {
+            safe_urlparse(value).netloc.lower().removeprefix("www.")
+            for value in (source_url, customer_website)
+            if value and safe_urlparse(value).netloc
+        }
+        source_decision = (
+            "建议优先联系"
+            if customer_website and contactable
+            else "已确认官网，建议补充联系方式"
+            if customer_website
+            else "待全网核验"
+        )
+        acquisition_priority = (
+            "优先开发"
+            if customer_website and contactable
+            else "补联系方式"
+            if customer_website
+            else "先核实主体"
+        )
         recommended_models = recommend_models(combined, model)
         score, score_breakdown, score_dimensions, score_tier = lead_opportunity_score(
             combined,
             bool(customer_website),
-            bool(verified_email_sources or phone_sources or whatsapp_sources),
+            contactable,
             int(item.get("google_reviews") or 0),
             requested_model=model,
             lead_type=lead_type,
@@ -5566,10 +5601,10 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "confidence": confidence,
                 "confidenceLabel": confidence_label,
                 "sourceCoverage": {
-                    "total": 1,
-                    "official": 0,
-                    "independentDomains": 1,
-                    "contactable": bool(email_sources or phone_sources or whatsapp_sources),
+                    "total": evidence_source_count,
+                    "official": official_source_count,
+                    "independentDomains": max(1, len(source_domains)),
+                    "contactable": contactable,
                     "missingFields": [
                         field
                         for field, present in (
@@ -5581,8 +5616,9 @@ def discover(params: dict[str, list[str]]) -> dict:
                         )
                         if not present
                     ],
-                    "decision": "待全网核验",
+                    "decision": source_decision,
                 },
+                "acquisitionPriority": acquisition_priority,
                 "searchPolicy": {
                     "verificationLevel": verification_level,
                     "minimumIndependentSources": min_sources,
@@ -5657,15 +5693,46 @@ def discover(params: dict[str, list[str]]) -> dict:
             if source.get("url") and not any(item.get("url") == source.get("url") for item in existing_sources):
                 existing_sources.append(source)
         existing["sourceCoverage"]["total"] = len(existing_sources)
-        # Prefer the record with a public contact method or a higher opportunity score.
+        # Prefer the version that is easiest for sales to verify and contact.
         existing_contactable = bool(existing.get("email") or existing.get("phone") or existing.get("whatsapp"))
         lead_contactable = bool(lead.get("email") or lead.get("phone") or lead.get("whatsapp"))
-        if (lead_contactable and not existing_contactable) or int(lead.get("score", 0)) > int(existing.get("score", 0)):
+        existing_has_website = bool(existing.get("customerWebsite"))
+        lead_has_website = bool(lead.get("customerWebsite"))
+        if (
+            (lead_contactable and not existing_contactable)
+            or (lead_has_website and not existing_has_website)
+            or int(lead.get("score", 0)) > int(existing.get("score", 0))
+        ):
             lead["evidenceSources"] = existing_sources
             lead["sourceCoverage"]["total"] = len(existing_sources)
             merged_leads[company_key] = lead
     leads = list(merged_leads.values())
-    leads.sort(key=lambda item: (-int(item.get("score", 0)), item.get("company", "")))
+
+    def lead_sales_priority(item: dict) -> tuple:
+        coverage = item.get("sourceCoverage") or {}
+        evidence_sources = item.get("evidenceSources") or []
+        contactable = bool(
+            item.get("email")
+            or item.get("phone")
+            or item.get("whatsapp")
+            or coverage.get("contactable")
+        )
+        has_website = bool(item.get("customerWebsite"))
+        official_sources = int(coverage.get("official") or 0)
+        source_total = int(coverage.get("total") or len(evidence_sources) or 0)
+        confidence = int(item.get("confidence") or 0)
+        score = int(item.get("score") or 0)
+        return (
+            -int(contactable),
+            -int(has_website),
+            -official_sources,
+            -source_total,
+            -confidence,
+            -score,
+            str(item.get("company") or ""),
+        )
+
+    leads.sort(key=lead_sales_priority)
     return {"ok": True, "count": len(leads), "leads": leads, "notice": notice}
 
 
