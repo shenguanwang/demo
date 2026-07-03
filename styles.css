@@ -4901,9 +4901,9 @@ td {
   .sidebar {
     position: fixed;
     inset: 0 auto 0 0;
-    width: 76px;
+    width: 88px;
     min-height: 100vh;
-    padding: 12px 8px;
+    padding: 10px 7px;
     overflow-x: hidden;
     overflow-y: auto;
     z-index: 30;
@@ -4923,8 +4923,6 @@ td {
   .brand > div:last-child,
   .nav-label,
   .side-note,
-  .logout-button span,
-  .logout-button b,
   .user-management-button span:last-child {
     display: none;
   }
@@ -4940,23 +4938,29 @@ td {
   .nav button,
   .user-management-button,
   .logout-button {
+    display: flex;
+    flex-direction: column;
     justify-content: center;
     width: 100%;
     min-width: 0;
-    min-height: 48px;
-    padding: 0;
-    gap: 0;
+    min-height: 50px;
+    padding: 5px 3px;
+    gap: 3px;
     border-radius: 12px;
     text-align: center;
-    font-size: 0;
+    color: #68717d;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.1;
+    white-space: normal;
   }
 
   .nav button > span,
   .user-management-button span:first-child {
-    width: 34px;
-    height: 34px;
+    width: 28px;
+    height: 24px;
     border-radius: 10px;
-    font-size: 11px;
+    font-size: 10px;
   }
 
   .nav button.active,
@@ -4967,7 +4971,7 @@ td {
   .main {
     width: auto;
     min-width: 0;
-    margin-left: 76px;
+    margin-left: 88px;
     padding: 14px 10px 28px;
     overflow: visible;
   }
@@ -4978,13 +4982,29 @@ td {
   }
 
   .section-head h2 {
-    font-size: 26px;
-    line-height: 1.14;
+    font-size: 22px;
+    line-height: 1.18;
   }
 
   .section-head p {
-    font-size: 13px;
+    font-size: 12px;
     line-height: 1.55;
+  }
+
+  .panel h3,
+  .review-card h3,
+  .review-card h2,
+  .lead-card h3,
+  .task-list h3 {
+    font-size: 16px;
+    line-height: 1.25;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font-size: 12px;
   }
 
   .topbar,
@@ -5080,24 +5100,25 @@ td {
 
 @media (max-width: 420px) {
   .sidebar {
-    width: 68px;
-    padding: 10px 6px;
+    width: 80px;
+    padding: 8px 6px;
   }
 
   .main {
-    margin-left: 68px;
+    margin-left: 80px;
     padding: 12px 8px 24px;
   }
 
   .nav button,
   .user-management-button,
   .logout-button {
-    min-height: 44px;
+    min-height: 48px;
+    font-size: 9px;
   }
 
   .nav button > span,
   .user-management-button span:first-child {
-    width: 31px;
-    height: 31px;
+    width: 26px;
+    height: 22px;
   }
 }
