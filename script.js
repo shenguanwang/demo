@@ -2314,9 +2314,10 @@ function rejectLead(index) {
   refreshAllLeadViews();
 }
 
-async function researchLead(index) {
+async function researchLead(index, options = {}) {
   const lead = reviewLeads[index];
   if (!lead || lead.researching) return;
+  const mode = options.mode || "full";
   lead.researching = true;
   renderReview();
   try {
@@ -2331,7 +2332,8 @@ async function researchLead(index) {
         ...(lead.evidenceSources || []).map((item) => item.url)
       ].filter(Boolean).join(" | "),
       model: lead.model || "",
-      type: lead.type || ""
+      type: lead.type || "",
+      mode
     })}`);
     const result = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -2392,9 +2394,10 @@ async function researchAllLeads() {
     return;
   }
   button.disabled = true;
-  for (let offset = 0; offset < pending.length; offset += 3) {
-    button.textContent = `正在补全 ${Math.min(offset + 3, pending.length)} / ${pending.length}`;
-    await Promise.all(pending.slice(offset, offset + 3).map(({ index }) => researchLead(index)));
+  const batchSize = 4;
+  for (let offset = 0; offset < pending.length; offset += batchSize) {
+    button.textContent = `正在快速补全 ${Math.min(offset + batchSize, pending.length)} / ${pending.length}`;
+    await Promise.all(pending.slice(offset, offset + batchSize).map(({ index }) => researchLead(index, { mode: "fast" })));
   }
   button.disabled = false;
   button.textContent = "全网补全当前线索";
@@ -2402,16 +2405,17 @@ async function researchAllLeads() {
 
 async function autoResearchNewLeads(count, sourceLabel, freshnessLabel) {
   if (!count) return;
-  for (let offset = 0; offset < count; offset += 2) {
-    const end = Math.min(offset + 2, count);
+  const batchSize = 4;
+  for (let offset = 0; offset < count; offset += batchSize) {
+    const end = Math.min(offset + batchSize, count);
     setFinderProgress({
       percent: 62 + (end / count) * 32,
       stage: "verify",
       title: `正在核验 ${end} / ${count}`,
-      message: `${sourceLabel} · ${freshnessLabel}：正在逐条核对官网、联系方式与来源证据。`
+      message: `${sourceLabel} · ${freshnessLabel}：正在快速核对官网、联系方式与来源证据。`
     });
     await Promise.all(
-      Array.from({ length: end - offset }, (_, index) => researchLead(offset + index))
+      Array.from({ length: end - offset }, (_, index) => researchLead(offset + index, { mode: "fast" }))
     );
   }
   const verified = reviewLeads.slice(0, count).filter((lead) => lead.researchAt).length;

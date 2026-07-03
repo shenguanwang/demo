@@ -2449,6 +2449,7 @@ def read_social_profile(
     url: str,
     account_type: str = "公司账号",
     relationship: str = "公开搜索",
+    fetch_remote: bool = True,
 ) -> dict:
     url = normalize_public_url(url)
     platform = social_platform(url)
@@ -2475,6 +2476,8 @@ def read_social_profile(
     final_url = url
     external_websites: list[str] = []
     try:
+        if not fetch_remote:
+            raise TimeoutError("skip remote social fetch")
         page, final_url = fetch_document(url, timeout=18, user_agent=user_agent)
         page_contacts = extract_public_contacts(page)
         external_websites = page_contacts.get("websites") or []
@@ -3554,6 +3557,8 @@ def research_company(params: dict[str, list[str]]) -> dict:
     country = clean_text((params.get("country") or [""])[0])
     requested_model = clean_text((params.get("model") or [""])[0])
     lead_type = clean_text((params.get("type") or [""])[0])
+    research_mode = clean_text((params.get("mode") or ["full"])[0]).lower()
+    fast_mode = research_mode in {"fast", "batch", "quick"}
     website = normalize_public_url((params.get("website") or [""])[0])
     source_url = normalize_public_url((params.get("sourceUrl") or [""])[0])
     provided_social_urls = [
@@ -3564,7 +3569,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
     provided_social_urls = [
         url for url in dict.fromkeys(provided_social_urls)
         if is_social_profile_url(url)
-    ][:12]
+    ][:6 if fast_mode else 12]
     if website and not is_business_website_url(website):
         website = ""
     if not company:
@@ -3709,7 +3714,9 @@ def research_company(params: dict[str, list[str]]) -> dict:
         (f'site:tiktok.com/@ {quoted} {country}', "公开账号（公司/个人待核验）", "TikTok 公开搜索"),
         (f'site:linkedin.com/company {quoted} {country}', "公司账号", "LinkedIn 公开搜索"),
     ]
-    if contacts["contact_name"]:
+    if fast_mode:
+        queries = queries[:2]
+    if contacts["contact_name"] and not fast_mode:
         person = f'"{contacts["contact_name"]}"'
         queries.extend(
             [
@@ -3721,9 +3728,9 @@ def research_company(params: dict[str, list[str]]) -> dict:
             ]
         )
     search_results: list[dict] = []
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    with ThreadPoolExecutor(max_workers=3 if fast_mode else 6) as executor:
         futures = {
-            executor.submit(search_web, query, 5, None): (account_type, relationship)
+            executor.submit(search_web, query, 3 if fast_mode else 5, None): (account_type, relationship)
             for query, account_type, relationship in queries
         }
         for future in as_completed(futures):
@@ -3755,7 +3762,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
         fetched_excerpt = ""
         if not is_social_profile_url(url):
             try:
-                fetched_page, final_url = fetch_document(url, timeout=10)
+                fetched_page, final_url = fetch_document(url, timeout=5 if fast_mode else 10)
                 fetched_contacts = extract_public_contacts(fetched_page)
                 fetched_excerpt = fetched_page
                 url = final_url
@@ -3776,8 +3783,8 @@ def research_company(params: dict[str, list[str]]) -> dict:
         if len(evidence) >= 14:
             break
 
-    youtube_queries = [(f"{company} {country}", "公司账号", "YouTube 频道搜索")]
-    if contacts["contact_name"]:
+    youtube_queries = [] if fast_mode else [(f"{company} {country}", "公司账号", "YouTube 频道搜索")]
+    if contacts["contact_name"] and not fast_mode:
         youtube_queries.append(
             (f'{contacts["contact_name"]} {company}', "个人决策人", "姓名与公司联合搜索")
         )
@@ -3819,9 +3826,9 @@ def research_company(params: dict[str, list[str]]) -> dict:
         + [
             item["url"] for item in evidence if is_social_profile_url(item.get("url", ""))
         ]
-    ))[:16]
+    ))[:4 if fast_mode else 16]
     social_profiles = []
-    with ThreadPoolExecutor(max_workers=5) as executor:
+    with ThreadPoolExecutor(max_workers=3 if fast_mode else 5) as executor:
         futures = {}
         for url in social_urls:
             key = url.lower().rstrip("/")
@@ -3831,6 +3838,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
                     url,
                     social_account_types.get(key, "公司账号"),
                     social_relationships.get(key, "公开搜索"),
+                    fetch_remote=not fast_mode,
                 )
             ] = url
         for future in as_completed(futures):
