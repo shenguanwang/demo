@@ -1480,6 +1480,7 @@ def discovery_params(payload: dict) -> dict[str, list[str]]:
         "sourceMode",
         "accountScope",
         "freshness",
+        "searchDepth",
         "keywords",
         "cityFocus",
         "customerTypes",

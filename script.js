@@ -914,8 +914,7 @@ function chooseMarket(countryName) {
   $("#finderCountry").value = country.name;
   const form = $("#finderForm");
   form.goal.value = `寻找${country.cities.split(" / ")[0]}及周边的${country.targets}，适合销售华为系新能源汽车。`;
-  const words = generateKeywords(form.goal.value, country.name, form.model.value);
-  renderKeywords(words);
+  updateFinderKeywordsFromForm();
   updateSocialProspectingQueries();
   showSection("lead-finder");
 }
@@ -1158,7 +1157,7 @@ function deleteAfterSalesOrder(index) {
 }
 
 function renderKeywords(words = defaultKeywords) {
-  $("#keywords").innerHTML = words.map((word) => `<span>${word}</span>`).join("");
+  $("#keywords").innerHTML = words.slice(0, 6).map((word) => `<span>${word}</span>`).join("");
 }
 
 function discoveryJobLeadMatches(lead, jobId) {
@@ -2433,7 +2432,105 @@ async function autoResearchNewLeads(count, sourceLabel, freshnessLabel) {
   });
 }
 
+function uniqueKeywords(words) {
+  const seen = new Set();
+  return words
+    .map((word) => String(word || "").replace(/\s+/g, " ").trim())
+    .filter((word) => {
+      if (!word) return false;
+      const key = word.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function countrySearchName(country) {
+  return countryKey(country || "UAE");
+}
+
+function countrySearchCities(country) {
+  const key = countrySearchName(country);
+  const configured = countries.find((item) => countryKey(item.name) === key)?.cities || "";
+  const fallback = {
+    UAE: ["Dubai", "Abu Dhabi", "Sharjah"],
+    "Saudi Arabia": ["Riyadh", "Jeddah", "Dammam"],
+    Kazakhstan: ["Almaty", "Astana"],
+    Russia: ["Moscow", "St. Petersburg"],
+    Qatar: ["Doha"],
+    Kuwait: ["Kuwait City", "Shuwaikh", "Hawalli"],
+    Uzbekistan: ["Tashkent"],
+    Azerbaijan: ["Baku"]
+  }[key] || [key];
+  const fromConfig = configured.split("/").map((city) => city.trim()).filter(Boolean);
+  return uniqueKeywords([...fromConfig, ...fallback]).slice(0, 4);
+}
+
+function intentSearchTerms(goal) {
+  const text = String(goal || "");
+  if (/租赁|出租|车队|fleet|rental|chauffeur/i.test(text)) return ["car rental company", "fleet operator", "chauffeur fleet", "fleet procurement"];
+  if (/政府|项目|招标|government|tender/i.test(text)) return ["government vehicle tender", "public fleet procurement", "official vehicle project"];
+  if (/企业|采购|公司用车|corporate|procurement/i.test(text)) return ["corporate fleet procurement", "company vehicle buyer", "business car tender"];
+  if (/求购|正在买|询价|报价|RFQ|wanted|rfq/i.test(text)) return ["vehicle buying request", "car RFQ", "wanted electric SUV", "bulk order"];
+  if (/平行进口|进口|外贸|import|parallel/i.test(text)) return ["parallel import cars", "vehicle importer", "auto trading", "import export"];
+  if (/豪华|高端|展厅|showroom|luxury|premium/i.test(text)) return ["luxury car showroom", "premium car dealer", "high-end auto dealer"];
+  return ["automotive importer", "car dealer showroom", "vehicle distributor"];
+}
+
+function modelSearchTerms(model) {
+  const modelName = productProfiles[model]?.english || model;
+  const lower = String(modelName).toLowerCase();
+  const categoryTerms = /s800|s9/.test(lower)
+    ? ["luxury executive sedan", "premium EV sedan"]
+    : /r7/.test(lower)
+      ? ["electric coupe SUV", "smart EV showroom"]
+      : ["luxury SUV", "premium electric SUV", "Chinese EV SUV"];
+  return [modelName, ...categoryTerms];
+}
+
+function generateSmartKeywords(goal, country, model, options = {}) {
+  const countryName = countrySearchName(country);
+  const cities = countrySearchCities(country);
+  const primaryCity = String(options.cityFocus || "").trim() || cities[0] || countryName;
+  const modelTerms = modelSearchTerms(model);
+  const modelName = modelTerms[0];
+  const intentTerms = intentSearchTerms(goal);
+  const depth = String(options.searchDepth || "standard");
+  const core = [
+    `${primaryCity} automotive importer vehicle distributor`,
+    `${primaryCity} car dealer showroom auto trading`,
+    `${countryName} parallel import car dealer`,
+    `${countryName} vehicle procurement RFQ fleet purchase`,
+    `${countryName} new brand dealership distribution opportunity`,
+    `${countryName} Chinese EV importer distributor`
+  ];
+  const cityTerms = cities.flatMap((city) => [
+    `${city} car dealer`,
+    `${city} auto showroom`,
+    `${city} vehicle importer`
+  ]);
+  const intentQueries = intentTerms.flatMap((term) => [
+    `${primaryCity} ${term}`,
+    `${countryName} ${term}`
+  ]);
+  const modelQueries = modelTerms.flatMap((term) => [
+    `${term} dealer ${countryName}`,
+    `${term} importer ${primaryCity}`,
+    `${modelName} market fit ${primaryCity}`
+  ]);
+  const deepQueries = depth === "deep" ? [
+    `${countryName} authorized car distributor`,
+    `${primaryCity} multi brand car showroom`,
+    `${countryName} luxury SUV importer`,
+    `${primaryCity} Chinese electric vehicle dealer`,
+    `${countryName} automotive group contact email`,
+    `${primaryCity} car showroom WhatsApp`
+  ] : [];
+  return uniqueKeywords([...core, ...cityTerms, ...intentQueries, ...modelQueries, ...deepQueries]).slice(0, depth === "deep" ? 24 : 14);
+}
+
 function generateKeywords(goal, country, model, options = {}) {
+  return generateSmartKeywords(goal, country, model, options);
   const modelName = productProfiles[model]?.english || model;
   const place = country.split(" ")[0];
   const city = String(options.cityFocus || "").trim();
@@ -2454,6 +2551,17 @@ function generateKeywords(goal, country, model, options = {}) {
     `${place} Chinese EV importer distributor`,
     `${modelName} market fit ${city || place}`
   ];
+}
+
+function updateFinderKeywordsFromForm() {
+  const form = $("#finderForm");
+  if (!form || !$("#keywords")) return [];
+  const data = Object.fromEntries(new FormData(form).entries());
+  const words = generateKeywords(data.goal, data.country, data.model, {
+    searchDepth: data.searchDepth
+  });
+  renderKeywords(words);
+  return words;
 }
 
 function updateSocialProspectingQueries() {
@@ -3537,7 +3645,9 @@ function renderDiscoverySchedules() {
 function currentDiscoveryPayload() {
   const form = $("#finderForm");
   const data = Object.fromEntries(new FormData(form).entries());
-  const words = generateKeywords(data.goal, data.country, data.model);
+  const words = generateKeywords(data.goal, data.country, data.model, {
+    searchDepth: data.searchDepth
+  });
   return {
     goal: data.goal,
     country: data.country,
@@ -3545,6 +3655,7 @@ function currentDiscoveryPayload() {
     sourceMode: data.sourceMode,
     accountScope: data.accountScope,
     freshness: data.freshness,
+    searchDepth: data.searchDepth,
     resultLimit: 90,
     keywords: words.join(" | ")
   };
@@ -3828,6 +3939,7 @@ async function runCloudDiscovery(data, words, onProgress) {
       sourceMode: data.sourceMode,
       accountScope: data.accountScope,
       freshness: data.freshness,
+      searchDepth: data.searchDepth,
       resultLimit: 90,
       keywords: words.join(" | ")
     })
@@ -4008,7 +4120,9 @@ function bindForms() {
     discoveryJobPage = 1;
     finderHistoryPage = 1;
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-    const words = generateKeywords(data.goal, data.country, data.model);
+    const words = generateKeywords(data.goal, data.country, data.model, {
+      searchDepth: data.searchDepth
+    });
     renderKeywords(words);
     const searchProgress = startFinderSearchProgress();
     runCloudDiscovery(data, words, (job) => {
@@ -4100,8 +4214,14 @@ function bindForms() {
     showSection("lead-finder");
   });
 
-  $("#finderForm").addEventListener("input", updateSocialProspectingQueries);
-  $("#finderForm").addEventListener("change", updateSocialProspectingQueries);
+  $("#finderForm").addEventListener("input", () => {
+    updateFinderKeywordsFromForm();
+    updateSocialProspectingQueries();
+  });
+  $("#finderForm").addEventListener("change", () => {
+    updateFinderKeywordsFromForm();
+    updateSocialProspectingQueries();
+  });
   $(".social-search-box").addEventListener("click", (event) => {
     const link = event.target.closest("[data-social-platform]");
     if (link) $("#socialLeadForm").platform.value = link.dataset.socialPlatform;
@@ -4809,6 +4929,7 @@ async function init() {
       hydrateCloudState(true).catch(() => undefined);
     }
   }, 30_000);
+  updateFinderKeywordsFromForm();
   updateSocialProspectingQueries();
   loadDiscoverySourceStatus();
   importSocialCaptures();
