@@ -14,7 +14,12 @@ $ErrorActionPreference = "Stop"
 
 function New-Secret([int]$Length = 32) {
   $bytes = New-Object byte[] $Length
-  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($bytes)
+  } finally {
+    $rng.Dispose()
+  }
   return [Convert]::ToBase64String($bytes).TrimEnd("=")
 }
 
