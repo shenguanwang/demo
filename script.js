@@ -3375,6 +3375,30 @@ function applyDiscoveryHistoryFilter(jobId) {
   $("#leadList")?.closest(".panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+function focusDiscoveryJob(jobId) {
+  const index = discoveryJobs.findIndex((job) => String(job.id || "") === String(jobId || ""));
+  if (index >= 0) {
+    discoveryJobPage = Math.floor(index / DISCOVERY_JOBS_PAGE_SIZE) + 1;
+  }
+  renderDiscoveryJobs();
+  $("#discoveryJobList")?.closest(".panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const row = jobId ? document.querySelector(`[data-discovery-job="${CSS.escape(jobId)}"]`) : null;
+  if (row) {
+    row.classList.add("active");
+    window.setTimeout(() => row.classList.remove("active"), 1800);
+  }
+}
+
+function openDiscoveryHistoryJob(jobId) {
+  const job = discoveryJobs.find((item) => String(item.id || "") === String(jobId || ""));
+  if (!job) return;
+  if (job.imported) {
+    applyDiscoveryHistoryFilter(jobId);
+    return;
+  }
+  focusDiscoveryJob(jobId);
+}
+
 function renderDiscoveryJobs() {
   const box = $("#discoveryJobList");
   if (!box) return;
@@ -3416,7 +3440,7 @@ function renderDiscoveryJobs() {
           ? `data-cancel-job="${escapeHtml(job.id)}"`
         : "";
     return `
-      <article class="discovery-job">
+      <article class="discovery-job" data-discovery-job="${escapeHtml(job.id || "")}">
         <div class="discovery-job-main">
           <div class="discovery-job-title">
             <strong>${escapeHtml(job.country || "未指定市场")} · ${escapeHtml(job.model || "未指定车型")}</strong>
@@ -4325,7 +4349,7 @@ function bindForms() {
   $("#finderHistoryGrid")?.addEventListener("click", (event) => {
     const card = event.target.closest("[data-discovery-history-job]");
     if (!card) return;
-    applyDiscoveryHistoryFilter(card.dataset.discoveryHistoryJob);
+    openDiscoveryHistoryJob(card.dataset.discoveryHistoryJob);
   });
 
   $("#finderHistoryGrid")?.addEventListener("keydown", (event) => {
@@ -4333,7 +4357,7 @@ function bindForms() {
     const card = event.target.closest("[data-discovery-history-job]");
     if (!card) return;
     event.preventDefault();
-    applyDiscoveryHistoryFilter(card.dataset.discoveryHistoryJob);
+    openDiscoveryHistoryJob(card.dataset.discoveryHistoryJob);
   });
 
   $("#leadList")?.addEventListener("click", (event) => {
