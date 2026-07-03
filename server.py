@@ -4132,6 +4132,166 @@ def search_google_places(country: str, query_terms: str, limit: int = 12, city: 
     return items
 
 
+def company_identity_tokens(company: str) -> list[str]:
+    stop_words = {
+        "auto", "autos", "car", "cars", "vehicle", "vehicles", "motor", "motors",
+        "dealer", "dealership", "showroom", "sales", "trading", "trade", "llc",
+        "ltd", "limited", "inc", "group", "company", "co", "used", "preowned",
+    }
+    tokens = [
+        token.lower()
+        for token in re.findall(r"[a-z0-9]+", company or "", flags=re.I)
+        if len(token) > 2
+    ]
+    core = [token for token in tokens if token not in stop_words]
+    return core or tokens[:4]
+
+
+def company_name_matches_text(company: str, text: str) -> bool:
+    tokens = company_identity_tokens(company)
+    if not tokens:
+        return False
+    haystack = (text or "").lower()
+    required = 1 if len(tokens) <= 2 else 2
+    return sum(1 for token in tokens[:5] if token in haystack) >= required
+
+
+def add_unique_evidence(evidence: list[dict], item: dict) -> None:
+    url = normalize_public_url(item.get("url", ""))
+    if not url:
+        return
+    if any(normalize_public_url(source.get("url", "")).lower().rstrip("/") == url.lower().rstrip("/") for source in evidence):
+        return
+    evidence.append(item)
+
+
+def reverse_search_company_socials(company: str, country: str, limit_per_platform: int = 2) -> tuple[list[str], list[dict]]:
+    accounts: list[str] = []
+    evidence: list[dict] = []
+
+    def accept_social(url: str, title: str, snippet: str, origin: str, source_type: str) -> None:
+        normalized = normalize_social_profile_url(url)
+        if not normalized or not is_social_profile_url(normalized):
+            return
+        text = f"{title} {snippet} {normalized}"
+        if not company_name_matches_text(company, text):
+            return
+        if normalized not in accounts:
+            accounts.append(normalized)
+        add_unique_evidence(
+            evidence,
+            evidence_item(normalized, title or company, snippet, origin, source_type),
+        )
+
+    try:
+        for item in search_youtube_channels(f"{company} {country}", limit=max(3, limit_per_platform * 2)):
+            published_at = item.get("latestVideoPublishedAt", "")
+            if published_at and not is_recent_youtube_video_date(published_at):
+                continue
+            accept_social(
+                item.get("url", ""),
+                item.get("title", ""),
+                item.get("snippet", ""),
+                "YouTube",
+                "YouTube 公开频道",
+            )
+            if len([url for url in accounts if "youtube." in safe_urlparse(url).netloc.lower()]) >= limit_per_platform:
+                break
+    except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
+        pass
+
+    platform_queries = [
+        ("facebook.com", "Facebook", "Facebook 公开主页"),
+        ("instagram.com", "Instagram", "Instagram 公开主页"),
+        ("linkedin.com/company", "LinkedIn", "LinkedIn 公司主页"),
+    ]
+    for site, origin, source_type in platform_queries:
+        try:
+            results = search_web(f'site:{site} "{company}" {country}', limit=5, freshness_days=None)
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+            continue
+        accepted = 0
+        for result in results:
+            accept_social(
+                result.get("url", ""),
+                result.get("title", ""),
+                result.get("snippet", ""),
+                origin,
+                source_type,
+            )
+            if any(origin.lower().split()[0] in safe_urlparse(url).netloc.lower() for url in accounts[-1:]):
+                accepted += 1
+            if accepted >= limit_per_platform:
+                break
+
+    return accounts[:8], evidence[:10]
+
+
+def enrich_google_place_result(item: dict, country: str) -> dict:
+    """Make a Google Places result carry website contacts and social evidence."""
+    company = clean_text(item.get("title", ""))
+    website = normalize_public_url(item.get("customer_website") or item.get("url") or "")
+    contacts = extract_public_contacts(f"{item.get('snippet', '')} {item.get('contact', '')}", item.get("tags"))
+    evidence: list[dict] = []
+    add_unique_evidence(
+        evidence,
+        evidence_item(
+            item.get("source_url") or item.get("url") or "",
+            company,
+            item.get("snippet", ""),
+            "Google Maps",
+            "Google Maps 企业资料",
+        ),
+    )
+
+    official_pages: list[dict] = []
+    if website and is_business_website_url(website):
+        official_pages = official_site_pages(website)[:4]
+        for page in official_pages:
+            page_text = page.get("text") or clean_text(page.get("html", ""))
+            contacts = merge_public_contacts(contacts, extract_public_contacts(page.get("html", "")))
+            add_unique_evidence(
+                evidence,
+                evidence_item(
+                    page.get("url", ""),
+                    f"{company} official website",
+                    page_text,
+                    "公司官网",
+                    "官方公司页面",
+                ),
+            )
+
+    social_accounts = list(contacts.get("social_accounts") or [])
+    social_evidence: list[dict] = []
+    for account in social_accounts[:8]:
+        add_unique_evidence(
+            social_evidence,
+            evidence_item(
+                account,
+                f"{company} social account",
+                f"Social profile linked from the official website for {company}.",
+                social_platform(account) or "社媒主页",
+                "官网外链社媒账号",
+            ),
+        )
+    reverse_accounts, reverse_evidence = reverse_search_company_socials(company, country, limit_per_platform=1)
+    for account in reverse_accounts:
+        if account not in social_accounts:
+            social_accounts.append(account)
+    for source in [*social_evidence, *reverse_evidence]:
+        add_unique_evidence(evidence, source)
+
+    contacts["social_accounts"] = list(dict.fromkeys(social_accounts))[:10]
+    item["google_public_contacts"] = contacts
+    item["google_evidence"] = evidence[:14]
+    item["google_official_pages"] = official_pages
+    if website and is_business_website_url(website):
+        item["customer_website"] = website
+        item["url"] = website
+        item["skip_fetch"] = False
+    return item
+
+
 def search_osm_dealers(country: str, limit: int = 12, target_type: str = "dealer") -> list[dict]:
     location = next(
         (value for key, value in CITY_COORDS.items() if key.lower() in country.lower()),
@@ -4931,17 +5091,41 @@ def discover(params: dict[str, list[str]]) -> dict:
     )
 
     raw_results = []
+    google_primary_results: list[dict] = []
     notice = ""
     if source_mode in ("all", "combined", "google"):
         try:
-            google_city_limit = min(6, max(3, result_limit // max(2, len(cities) * 2)))
+            google_city_limit = min(10, max(4, result_limit // max(1, len(cities))))
             for city in cities:
-                raw_results += search_google_places(
+                google_primary_results += search_google_places(
                     country,
                     "car dealer automotive importer vehicle distributor electric vehicle showroom",
                     limit=google_city_limit,
                     city=city,
                 )
+            enrich_limit = min(len(google_primary_results), max(4, min(result_limit, 8)))
+            enriched_google_results: list[dict] = []
+            if enrich_limit:
+                executor = ThreadPoolExecutor(max_workers=min(4, enrich_limit))
+                futures = [
+                    executor.submit(enrich_google_place_result, item, country)
+                    for item in google_primary_results[:enrich_limit]
+                ]
+                try:
+                    for future in as_completed(futures, timeout=max(25, DISCOVERY_SEARCH_TIMEOUT * 3)):
+                        try:
+                            enriched_google_results.append(future.result(timeout=1))
+                        except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                            continue
+                except FuturesTimeoutError:
+                    pass
+                finally:
+                    executor.shutdown(wait=False, cancel_futures=True)
+            google_primary_results = [
+                *enriched_google_results,
+                *google_primary_results[enrich_limit:],
+            ]
+            raw_results += google_primary_results
         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
             if source_mode == "google":
                 notice = f"{exc}。请在本机配置密钥后重试。"
@@ -4956,7 +5140,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             pass
     if source_mode in ("all", "combined", "dealer"):
         search_variants = list(dict.fromkeys(commercial_query_variants))
-        max_web_queries = 36 if source_mode in ("all", "combined") else 12
+        max_web_queries = 18 if source_mode in ("all", "combined") and google_primary_results else 36 if source_mode in ("all", "combined") else 12
         search_variants = search_variants[:max_web_queries]
         per_query_limit = 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
@@ -4991,13 +5175,20 @@ def discover(params: dict[str, list[str]]) -> dict:
             google_dealer_limit = min(18, max(8, result_limit // 2))
             active_cities = cities[:6] or [""]
             per_city_google_limit = max(3, google_dealer_limit // max(1, len(active_cities)))
+            dealer_google_results: list[dict] = []
             for city in active_cities:
-                raw_results += search_google_places(
+                dealer_google_results += search_google_places(
                     country,
                     "car dealer automotive showroom used cars motors official website phone",
                     limit=per_city_google_limit,
                     city=city,
                 )
+            for item in dealer_google_results[: min(len(dealer_google_results), 8)]:
+                try:
+                    raw_results.append(enrich_google_place_result(item, country))
+                except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                    raw_results.append(item)
+            raw_results += dealer_google_results[8:]
         except (OSError, ValueError, RuntimeError, TimeoutError):
             pass
         try:
@@ -5432,6 +5623,8 @@ def discover(params: dict[str, list[str]]) -> dict:
                 )
         source_contact_text = f"{item.get('snippet', '')} {item.get('title', '')}"
         contacts = extract_public_contacts(source_contact_text, item.get("tags"))
+        if item.get("google_public_contacts"):
+            contacts = merge_public_contacts(contacts, item.get("google_public_contacts") or {})
         if page and (is_raw_social_or_video_source or not any(contacts.get(key) for key in ("email", "phone", "whatsapp"))):
             contacts = merge_public_contacts(
                 contacts,
@@ -5444,6 +5637,10 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
         official_contact_url = ""
         official_contact_excerpt = ""
+        if item.get("google_official_pages") and any(contacts.get(key) for key in ("email", "phone", "whatsapp")):
+            first_official_page = (item.get("google_official_pages") or [{}])[0]
+            official_contact_url = first_official_page.get("url", "") or customer_website
+            official_contact_excerpt = clean_text(first_official_page.get("html", "") or first_official_page.get("text", ""))[:700]
         if (
             customer_website
             and target_type != "individual"
@@ -5523,7 +5720,29 @@ def discover(params: dict[str, list[str]]) -> dict:
         ]
         contactable = bool(verified_email_sources or phone_sources or whatsapp_sources)
         official_source_count = 1 if customer_website else 0
-        evidence_source_count = 1 + (1 if customer_website and is_social_result and social_profile else 0)
+        lead_evidence = list(item.get("google_evidence") or [])
+        add_unique_evidence(
+            lead_evidence,
+            evidence_item(
+                source_url,
+                source_title,
+                source_excerpt,
+                origin,
+                source_type,
+            ),
+        )
+        if customer_website and is_social_result and social_profile:
+            add_unique_evidence(
+                lead_evidence,
+                evidence_item(
+                    customer_website,
+                    f"{company} 官网",
+                    social_profile.get("description", "") or f"{origin} 主页 Website 外链指向 {customer_website}",
+                    "社媒主页 Website 外链",
+                    "公司官网",
+                ),
+            )
+        evidence_source_count = len(lead_evidence)
         source_domains = {
             safe_urlparse(value).netloc.lower().removeprefix("www.")
             for value in (source_url, customer_website)
@@ -5601,23 +5820,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "sourceTitle": source_title,
                 "sourceUrl": source_url,
                 "sourceExcerpt": source_excerpt[:700],
-                "evidenceSources": [
-                    evidence_item(
-                        source_url,
-                        source_title,
-                        source_excerpt,
-                        origin,
-                        source_type,
-                    )
-                ] + ([
-                    evidence_item(
-                        customer_website,
-                        f"{company} 官网",
-                        social_profile.get("description", "") or f"{origin} 主页 Website 外链指向 {customer_website}",
-                        "社媒主页 Website 外链",
-                        "公司官网",
-                    )
-                ] if customer_website and is_social_result and social_profile else []),
+                "evidenceSources": lead_evidence,
                 "researchAt": "",
                 "researchSummary": "当前只有原始发现来源，建议在线索审核中执行全网补全。",
                 "publishedAt": published_at,
