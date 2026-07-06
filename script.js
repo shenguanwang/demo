@@ -1407,6 +1407,7 @@ function renderFinderProgressList() {
   if (!box) return;
   const stateLabels = discoveryJobStateLabels();
   const jobs = [...discoveryJobs]
+    .filter((job) => ["queued", "running"].includes(job.status))
     .sort((a, b) => new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0))
     .slice(0, FINDER_PROGRESS_LIST_LIMIT);
   box.innerHTML = jobs.length ? jobs.map((job, index) => {
