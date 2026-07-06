@@ -3467,6 +3467,7 @@ function showSection(id) {
   $$(".section").forEach((section) => section.classList.toggle("active", section.id === id));
   $$(".nav button").forEach((button) => button.classList.toggle("active", button.dataset.section === id));
   $("#userManagementNav")?.classList.toggle("active", id === "user-management");
+  $("#systemSettingsNav")?.classList.toggle("active", id === "system-settings");
   if (window.location.hash !== `#${id}`) {
     history.replaceState(null, "", `#${id}`);
   }
@@ -4664,6 +4665,15 @@ function bindForms() {
     $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
   }));
 
+  $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
+  $("#clearAdminSettingsForm")?.addEventListener("click", () => {
+    const form = $("#adminSettingsForm");
+    if (!form) return;
+    form.reset();
+    setAdminSettingsStatus("已清空输入，尚未保存。");
+  });
+  $("#adminSettingsForm")?.addEventListener("submit", saveAdminSettings);
+
   $("#refreshKpiDashboard")?.addEventListener("click", () => {
     adminKpiSnapshot = null;
     renderKpis();
@@ -4904,9 +4914,93 @@ async function loadSession() {
   }
   const userManagementNav = $("#userManagementNav");
   if (userManagementNav) userManagementNav.hidden = session.role !== "admin";
+  const systemSettingsNav = $("#systemSettingsNav");
+  if (systemSettingsNav) systemSettingsNav.hidden = session.role !== "admin";
   const userManagementSection = $("#user-management");
   if (userManagementSection) userManagementSection.hidden = session.role !== "admin";
+  const systemSettingsSection = $("#system-settings");
+  if (systemSettingsSection) systemSettingsSection.hidden = session.role !== "admin";
   return session;
+}
+
+function setAdminSettingsStatus(message = "", type = "") {
+  const status = $("#adminSettingsStatus");
+  if (!status) return;
+  status.className = "form-status";
+  if (type) status.classList.add(type);
+  status.textContent = message;
+}
+
+function renderSecretState(id, value) {
+  const node = $(id);
+  if (!node) return;
+  node.textContent = value?.configured
+    ? `已配置${value.masked ? `（${value.masked}）` : ""}`
+    : "未配置";
+}
+
+function renderAdminSettings(settings = {}) {
+  const values = settings.values || {};
+  const form = $("#adminSettingsForm");
+  if (!form) return;
+  renderSecretState("#googleMapsKeyState", values.GOOGLE_MAPS_API_KEY);
+  renderSecretState("#youtubeKeyState", values.YOUTUBE_API_KEY);
+  renderSecretState("#openaiKeyState", values.OPENAI_API_KEY);
+  ["OPENAI_MODEL", "PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"].forEach((key) => {
+    const input = form.elements[key];
+    if (input) input.value = values[key] || "";
+  });
+  ["GOOGLE_MAPS_API_KEY", "YOUTUBE_API_KEY", "OPENAI_API_KEY"].forEach((key) => {
+    const input = form.elements[key];
+    if (input) input.value = "";
+  });
+  const summary = $("#adminSettingsSummary");
+  if (summary) {
+    const configured = ["GOOGLE_MAPS_API_KEY", "YOUTUBE_API_KEY", "OPENAI_API_KEY"]
+      .filter((key) => values[key]?.configured)
+      .length;
+    summary.textContent = `已配置 ${configured}/3 个 API Key`;
+  }
+}
+
+async function loadAdminSettings() {
+  if (currentSession?.role !== "admin") return;
+  setAdminSettingsStatus("正在读取系统设置…");
+  try {
+    const response = await apiFetch("/api/admin/settings", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    renderAdminSettings(result);
+    setAdminSettingsStatus("设置已读取。密钥输入框留空表示保持不变。", "success");
+  } catch (error) {
+    setAdminSettingsStatus(error.message || "设置读取失败。", "error");
+  }
+}
+
+async function saveAdminSettings(event) {
+  event.preventDefault();
+  if (currentSession?.role !== "admin") return;
+  const form = event.currentTarget;
+  const submit = form.querySelector("button[type='submit']");
+  const data = Object.fromEntries(new FormData(form).entries());
+  submit.disabled = true;
+  setAdminSettingsStatus("正在保存系统设置…");
+  try {
+    const response = await apiFetch("/api/admin/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data)
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    renderAdminSettings(result);
+    loadDiscoverySourceStatus();
+    setAdminSettingsStatus("设置已保存。API Key 立即生效；并发数和网络超时需要重启服务后生效。", "success");
+  } catch (error) {
+    setAdminSettingsStatus(error.message || "设置保存失败。", "error");
+  } finally {
+    submit.disabled = false;
+  }
 }
 
 function renderUsers(users = []) {
@@ -5024,6 +5118,7 @@ async function init() {
   loadUsers().catch((error) => {
     if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
   });
+  loadAdminSettings();
   setInterval(renderBeijingGreeting, 1_000);
   loadDiscoveryJobs().catch((error) => {
     if ($("#discoveryJobList")) {

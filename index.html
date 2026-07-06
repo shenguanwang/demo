@@ -45,6 +45,9 @@
     <button class="user-management-button" id="userManagementNav" data-section="user-management" type="button" hidden>
       <span>♚</span>用户管理
     </button>
+    <button class="user-management-button" id="systemSettingsNav" data-section="system-settings" type="button" hidden>
+      <span>⚙</span>系统设置
+    </button>
   </aside>
 
   <div class="app-settings" id="appSettings" aria-label="快捷设置">
@@ -552,6 +555,60 @@
       </div>
     </section>
 
+    <section class="section" id="system-settings" hidden>
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Super admin</p>
+          <h2>系统设置</h2>
+          <p>仅超级管理员可见。这里配置获客、地图、视频和 AI 能力用到的后台参数。</p>
+        </div>
+      </div>
+      <form class="panel admin-settings-panel" id="adminSettingsForm">
+        <div class="panel-head">
+          <div>
+            <h3>API 与运行参数</h3>
+            <span id="adminSettingsSummary">正在读取配置…</span>
+          </div>
+          <button class="ghost compact" id="reloadAdminSettings" type="button">重新读取</button>
+        </div>
+        <div class="admin-settings-grid">
+          <label>Google Maps Places API Key
+            <input name="GOOGLE_MAPS_API_KEY" type="password" autocomplete="off" placeholder="留空不改；输入新 Key 后保存">
+            <small id="googleMapsKeyState">未读取</small>
+          </label>
+          <label>YouTube Data API Key
+            <input name="YOUTUBE_API_KEY" type="password" autocomplete="off" placeholder="留空不改；输入新 Key 后保存">
+            <small id="youtubeKeyState">未读取</small>
+          </label>
+          <label>OpenAI API Key
+            <input name="OPENAI_API_KEY" type="password" autocomplete="off" placeholder="用于 ChatGPT/AI 审核/开发信">
+            <small id="openaiKeyState">未读取</small>
+          </label>
+          <label>OpenAI 模型
+            <input name="OPENAI_MODEL" autocomplete="off" placeholder="例如 gpt-5.1">
+            <small>后续 AI 功能默认使用这个模型。</small>
+          </label>
+          <label>公开访问地址
+            <input name="PUBLIC_BASE_URL" autocomplete="off" placeholder="https://your-service.example.com">
+            <small>用于生成回调和公开链接，留空则使用当前服务地址。</small>
+          </label>
+          <label>获客并发数
+            <input name="DISCOVERY_MAX_CONCURRENCY" type="number" min="1" max="8" step="1" placeholder="2">
+            <small>控制后台同时跑几个获客任务，保存后重启生效。</small>
+          </label>
+          <label>网络超时秒数
+            <input name="NETWORK_DEFAULT_TIMEOUT" type="number" min="5" max="60" step="1" placeholder="12">
+            <small>外部接口响应慢时可适当调高，保存后重启生效。</small>
+          </label>
+        </div>
+        <p class="form-status" id="adminSettingsStatus" role="status"></p>
+        <div class="result-actions">
+          <button class="ghost" type="button" id="clearAdminSettingsForm">清空输入</button>
+          <button class="primary" type="submit">保存设置</button>
+        </div>
+      </form>
+    </section>
+
     <section class="section" id="crm">
       <div class="section-head">
         <div>
@@ -963,6 +1020,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260706-quicksettings1"></script>
+  <script src="./script.js?v=20260706-adminsettings1"></script>
 </body>
 </html>

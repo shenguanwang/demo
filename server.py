@@ -50,6 +50,7 @@ load_local_env()
 PORT = int(os.environ.get("PORT") or os.environ.get("LEAD_TOOL_PORT", "8815"))
 HOST = os.environ.get("LEAD_TOOL_HOST", "127.0.0.1")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+ADMIN_SETTINGS_FILE = ROOT / "admin_settings.json"
 GOOGLE_MAPS_KEY_FILE = ROOT / "google_maps_api_key.txt"
 SOCIAL_CAPTURE_DIR = ROOT / "social-captures"
 SOCIAL_CAPTURE_FILE = SOCIAL_CAPTURE_DIR / "captures.json"
@@ -81,6 +82,107 @@ AUTH_MAX_AGE = 60 * 60 * 24 * 7
 PASSWORD_HASH_ITERATIONS = 210_000
 
 socket.setdefaulttimeout(NETWORK_DEFAULT_TIMEOUT)
+
+ADMIN_SETTING_DEFINITIONS = {
+    "GOOGLE_MAPS_API_KEY": {"type": "secret", "label": "Google Maps Places API Key"},
+    "YOUTUBE_API_KEY": {"type": "secret", "label": "YouTube Data API Key"},
+    "OPENAI_API_KEY": {"type": "secret", "label": "OpenAI API Key"},
+    "OPENAI_MODEL": {"type": "text", "label": "OpenAI 模型"},
+    "PUBLIC_BASE_URL": {"type": "url", "label": "公开访问地址"},
+    "DISCOVERY_MAX_CONCURRENCY": {"type": "int", "label": "获客并发数", "min": 1, "max": 8},
+    "NETWORK_DEFAULT_TIMEOUT": {"type": "int", "label": "网络超时秒数", "min": 5, "max": 60},
+}
+ADMIN_SETTINGS_LOCK = threading.RLock()
+
+
+def load_admin_settings_file() -> dict:
+    if not ADMIN_SETTINGS_FILE.exists():
+        return {}
+    try:
+        data = json.loads(ADMIN_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_admin_settings_file(settings: dict) -> None:
+    ADMIN_SETTINGS_FILE.write_text(
+        json.dumps(settings, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
+def runtime_setting(key: str, default: str = "") -> str:
+    with ADMIN_SETTINGS_LOCK:
+        value = load_admin_settings_file().get(key)
+    if value is None or value == "":
+        value = os.environ.get(key, default)
+    return str(value or "").strip()
+
+
+def masked_secret(value: str) -> str:
+    if not value:
+        return ""
+    if len(value) <= 8:
+        return "••••"
+    return f"{value[:4]}••••{value[-4:]}"
+
+
+def public_base_url() -> str:
+    return runtime_setting("PUBLIC_BASE_URL", PUBLIC_BASE_URL).rstrip("/")
+
+
+def get_youtube_api_key() -> str:
+    return runtime_setting("YOUTUBE_API_KEY")
+
+
+def admin_settings_payload() -> dict:
+    settings = load_admin_settings_file()
+    values = {}
+    for key, definition in ADMIN_SETTING_DEFINITIONS.items():
+        effective = runtime_setting(key)
+        stored = str(settings.get(key, "") or "").strip()
+        if definition["type"] == "secret":
+            values[key] = {
+                "configured": bool(effective),
+                "stored": bool(stored),
+                "masked": masked_secret(effective),
+            }
+        else:
+            values[key] = stored or os.environ.get(key, "")
+    return {
+        "values": values,
+        "restartRequired": ["DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"],
+    }
+
+
+def normalize_admin_settings(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("设置请求格式无效")
+    current = load_admin_settings_file()
+    next_settings = dict(current)
+    for key, definition in ADMIN_SETTING_DEFINITIONS.items():
+        if key not in payload:
+            continue
+        value = str(payload.get(key) or "").strip()
+        if value == "":
+            if definition["type"] == "secret":
+                continue
+            next_settings.pop(key, None)
+            continue
+        if definition["type"] == "int":
+            number = int(value)
+            min_value = int(definition.get("min", 0))
+            max_value = int(definition.get("max", 9999))
+            if number < min_value or number > max_value:
+                raise ValueError(f"{definition['label']} 必须在 {min_value}-{max_value} 之间")
+            value = str(number)
+        if definition["type"] == "url":
+            value = value.rstrip("/")
+            if value and not re.match(r"^https?://", value, flags=re.I):
+                raise ValueError(f"{definition['label']} 必须以 http:// 或 https:// 开头")
+        next_settings[key] = value
+    return next_settings
 
 
 class WorkspaceVersionConflict(Exception):
@@ -2017,7 +2119,7 @@ def save_social_capture(payload: dict, owner_username: str) -> dict:
             if len(screenshot_bytes) <= 8_000_000:
                 screenshot_path = SOCIAL_CAPTURE_DIR / f"{capture_id}.png"
                 screenshot_path.write_bytes(screenshot_bytes)
-                public_base = PUBLIC_BASE_URL or f"http://127.0.0.1:{PORT}"
+                public_base = public_base_url() or f"http://127.0.0.1:{PORT}"
                 screenshot_url = f"{public_base}/social-captures/{capture_id}.png"
         except (ValueError, OSError):
             screenshot_url = ""
@@ -2651,7 +2753,7 @@ def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
 
 
 def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
-    api_key = os.environ.get("YOUTUBE_API_KEY", "").strip()
+    api_key = get_youtube_api_key()
     if api_key:
         per_type_limit = max(1, min(limit, 50))
         search_items = []
@@ -4056,7 +4158,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
 
 
 def get_google_maps_api_key() -> str:
-    key = os.environ.get("GOOGLE_MAPS_API_KEY", "").strip()
+    key = runtime_setting("GOOGLE_MAPS_API_KEY")
     if key:
         return key
     if not GOOGLE_MAPS_KEY_FILE.exists():
@@ -6076,6 +6178,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if parsed.path == "/admin_settings.json":
+            self.send_json(404, {"ok": False, "error": "Not found"})
+            return
         if parsed.path == "/api/session":
             user = self.current_user()
             self.send_json(
@@ -6092,7 +6197,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_auth(api=True):
                 return
             google_ready = bool(get_google_maps_api_key())
-            youtube_ready = bool(os.environ.get("YOUTUBE_API_KEY", "").strip())
+            youtube_ready = bool(get_youtube_api_key())
             self.send_json(200, {
                 "ok": True,
                 "sources": {
@@ -6126,6 +6231,14 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 self.send_json(200, {"ok": True, **load_admin_kpi_summary()})
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/settings":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                self.send_json(200, {"ok": True, **admin_settings_payload()})
+            except (OSError, ValueError) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/workspace-state":
@@ -6301,6 +6414,19 @@ class Handler(SimpleHTTPRequestHandler):
                 result = clean_stale_youtube_leads()
                 self.send_json(200, {"ok": True, **result})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/settings":
+            if not self.require_admin():
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                next_settings = normalize_admin_settings(payload)
+                with ADMIN_SETTINGS_LOCK:
+                    save_admin_settings_file(next_settings)
+                self.send_json(200, {"ok": True, **admin_settings_payload()})
+            except (ValueError, json.JSONDecodeError, OSError) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/workspace-state":

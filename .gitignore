@@ -4,6 +4,7 @@ __pycache__/
 .env.*
 !.env.example
 google_maps_api_key.txt
+admin_settings.json
 social-captures/
 *.png
 *.zip
