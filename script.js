@@ -123,6 +123,13 @@ const riskProfiles = {
 
 const STORAGE_KEY = "huawei-ev-export-workbench-v3";
 const SOCIAL_CAPTURE_SEEN_KEY = "huawei-ev-social-capture-seen-v1";
+const UI_SETTINGS_KEY = "huawei-ev-workbench-ui-settings-v1";
+const DEFAULT_UI_SETTINGS = {
+  brightness: 100,
+  theme: "gold",
+  density: "comfortable",
+  reduceMotion: false
+};
 
 const IRRELEVANT_REVIEW_LEAD_DOMAINS = [
   "cgtn.com",
@@ -546,6 +553,145 @@ function exportCustomersCsv() {
     `海外客户池-${date}.csv`,
     "text/csv;charset=utf-8"
   );
+}
+
+function loadUiSettings() {
+  try {
+    const raw = localStorage.getItem(UI_SETTINGS_KEY);
+    if (!raw) return { ...DEFAULT_UI_SETTINGS };
+    const parsed = JSON.parse(raw);
+    return {
+      brightness: Math.min(120, Math.max(70, Number(parsed.brightness) || DEFAULT_UI_SETTINGS.brightness)),
+      theme: ["gold", "blue", "green", "red"].includes(parsed.theme) ? parsed.theme : DEFAULT_UI_SETTINGS.theme,
+      density: parsed.density === "compact" ? "compact" : DEFAULT_UI_SETTINGS.density,
+      reduceMotion: Boolean(parsed.reduceMotion)
+    };
+  } catch {
+    return { ...DEFAULT_UI_SETTINGS };
+  }
+}
+
+function persistUiSettings(settings) {
+  localStorage.setItem(UI_SETTINGS_KEY, JSON.stringify(settings));
+}
+
+function setSwitchState(button, active) {
+  if (!button) return;
+  button.setAttribute("aria-pressed", active ? "true" : "false");
+}
+
+function applyBrightness(value) {
+  const brightness = Math.min(120, Math.max(70, Number(value) || 100));
+  if (brightness < 100) {
+    document.documentElement.style.setProperty("--brightness-overlay-color", "0, 0, 0");
+    document.documentElement.style.setProperty("--brightness-overlay-opacity", String((100 - brightness) / 100));
+  } else {
+    document.documentElement.style.setProperty("--brightness-overlay-color", "255, 255, 255");
+    document.documentElement.style.setProperty("--brightness-overlay-opacity", String((brightness - 100) / 100));
+  }
+  const label = $("#brightnessValue");
+  if (label) label.textContent = `${brightness}%`;
+}
+
+function applyUiSettings(settings = loadUiSettings()) {
+  const root = document.documentElement;
+  root.dataset.theme = settings.theme;
+  root.dataset.density = settings.density;
+  root.dataset.reduceMotion = settings.reduceMotion ? "true" : "false";
+  applyBrightness(settings.brightness);
+
+  const brightnessRange = $("#brightnessRange");
+  if (brightnessRange) brightnessRange.value = String(settings.brightness);
+  $$("[data-theme-choice]").forEach((button) => {
+    button.setAttribute("aria-pressed", button.dataset.themeChoice === settings.theme ? "true" : "false");
+  });
+  setSwitchState($("#densityToggle"), settings.density === "compact");
+  setSwitchState($("#motionToggle"), settings.reduceMotion);
+  setSwitchState($("#fullscreenToggle"), Boolean(document.fullscreenElement));
+}
+
+function closeSettingsPanel() {
+  const panel = $("#settingsPanel");
+  const toggle = $("#settingsToggle");
+  if (!panel || !toggle) return;
+  panel.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
+}
+
+function toggleSettingsPanel() {
+  const panel = $("#settingsPanel");
+  const toggle = $("#settingsToggle");
+  if (!panel || !toggle) return;
+  const nextOpen = panel.hidden;
+  panel.hidden = !nextOpen;
+  toggle.setAttribute("aria-expanded", nextOpen ? "true" : "false");
+}
+
+async function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    await document.exitFullscreen();
+  } else {
+    await document.documentElement.requestFullscreen();
+  }
+}
+
+function bindUiSettings() {
+  const toggle = $("#settingsToggle");
+  const panel = $("#settingsPanel");
+  if (!toggle || !panel) return;
+  let settings = loadUiSettings();
+
+  toggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleSettingsPanel();
+  });
+  $("#settingsClose")?.addEventListener("click", closeSettingsPanel);
+  document.addEventListener("click", (event) => {
+    if (!panel.hidden && !event.target.closest("#appSettings")) closeSettingsPanel();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeSettingsPanel();
+  });
+
+  $("#brightnessRange")?.addEventListener("input", (event) => {
+    settings = { ...settings, brightness: Number(event.target.value) };
+    applyUiSettings(settings);
+    persistUiSettings(settings);
+  });
+
+  $$("[data-theme-choice]").forEach((button) => {
+    button.addEventListener("click", () => {
+      settings = { ...settings, theme: button.dataset.themeChoice || DEFAULT_UI_SETTINGS.theme };
+      applyUiSettings(settings);
+      persistUiSettings(settings);
+    });
+  });
+
+  $("#densityToggle")?.addEventListener("click", () => {
+    settings = { ...settings, density: settings.density === "compact" ? "comfortable" : "compact" };
+    applyUiSettings(settings);
+    persistUiSettings(settings);
+  });
+
+  $("#motionToggle")?.addEventListener("click", () => {
+    settings = { ...settings, reduceMotion: !settings.reduceMotion };
+    applyUiSettings(settings);
+    persistUiSettings(settings);
+  });
+
+  $("#fullscreenToggle")?.addEventListener("click", () => {
+    toggleFullscreen().catch((error) => console.error("Fullscreen toggle failed:", error));
+  });
+
+  $("#settingsReset")?.addEventListener("click", () => {
+    settings = { ...DEFAULT_UI_SETTINGS };
+    applyUiSettings(settings);
+    persistUiSettings(settings);
+  });
+
+  document.addEventListener("fullscreenchange", () => {
+    setSwitchState($("#fullscreenToggle"), Boolean(document.fullscreenElement));
+  });
 }
 
 function loadSavedState() {
@@ -4863,6 +5009,8 @@ function renderBeijingGreeting() {
 
 async function init() {
   window.__workbenchInitErrors = [];
+  applyUiSettings();
+  bindUiSettings();
   bindNavigation();
   showRequestedSection();
   window.addEventListener("hashchange", showRequestedSection);

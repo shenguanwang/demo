@@ -47,6 +47,48 @@
     </button>
   </aside>
 
+  <div class="app-settings" id="appSettings">
+    <button class="settings-trigger" id="settingsToggle" type="button" aria-haspopup="dialog" aria-expanded="false">
+      <span class="settings-trigger-icon" aria-hidden="true">⚙</span>
+      <span>设置</span>
+    </button>
+    <section class="settings-panel" id="settingsPanel" aria-label="界面设置" hidden>
+      <div class="settings-panel-head">
+        <div>
+          <strong>界面设置</strong>
+          <span>只保存在当前浏览器</span>
+        </div>
+        <button class="settings-close" id="settingsClose" type="button" aria-label="关闭设置">×</button>
+      </div>
+      <label class="settings-field">
+        <span>网页亮度 <b id="brightnessValue">100%</b></span>
+        <input id="brightnessRange" type="range" min="70" max="120" step="5" value="100">
+      </label>
+      <div class="settings-field">
+        <span>主题颜色</span>
+        <div class="theme-choice-group" id="themeChoiceGroup" role="radiogroup" aria-label="主题颜色">
+          <button type="button" data-theme-choice="gold" aria-pressed="true"><i class="theme-dot gold"></i>金色</button>
+          <button type="button" data-theme-choice="blue" aria-pressed="false"><i class="theme-dot blue"></i>蓝色</button>
+          <button type="button" data-theme-choice="green" aria-pressed="false"><i class="theme-dot green"></i>绿色</button>
+          <button type="button" data-theme-choice="red" aria-pressed="false"><i class="theme-dot red"></i>红色</button>
+        </div>
+      </div>
+      <div class="settings-row">
+        <span>全屏显示</span>
+        <button class="settings-switch" id="fullscreenToggle" type="button" aria-pressed="false"><span></span></button>
+      </div>
+      <div class="settings-row">
+        <span>紧凑布局</span>
+        <button class="settings-switch" id="densityToggle" type="button" aria-pressed="false"><span></span></button>
+      </div>
+      <div class="settings-row">
+        <span>减少动效</span>
+        <button class="settings-switch" id="motionToggle" type="button" aria-pressed="false"><span></span></button>
+      </div>
+      <button class="settings-reset" id="settingsReset" type="button">恢复默认设置</button>
+    </section>
+  </div>
+
   <main class="main">
     <section class="section active" id="overview">
       <header class="topbar">
@@ -943,6 +985,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260627-reviewfilters1"></script>
+  <script src="./script.js?v=20260706-settings1"></script>
 </body>
 </html>
