@@ -1336,7 +1336,8 @@ function showCandidateInReview(leadId) {
 }
 
 const finderStageOrder = ["search", "extract", "verify", "done"];
-const FINDER_PROGRESS_LIST_LIMIT = 6;
+const FINDER_PROGRESS_LIST_LIMIT = 3;
+const MAX_ACTIVE_DISCOVERY_JOBS = 3;
 
 function setFinderProgress({ percent, stage, title, message, elapsed, state = "running" }) {
   const safePercent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
@@ -1364,6 +1365,10 @@ function setFinderProgress({ percent, stage, title, message, elapsed, state = "r
 function setFinderStatus(message) {
   const el = $("#finderStatus");
   if (el) el.textContent = message;
+}
+
+function activeDiscoveryJobs() {
+  return discoveryJobs.filter((job) => ["queued", "running"].includes(job.status));
 }
 
 function normalizedDiscoveryJobProgress(job = {}) {
@@ -1406,8 +1411,7 @@ function renderFinderProgressList() {
   const box = $("#finderProgressList");
   if (!box) return;
   const stateLabels = discoveryJobStateLabels();
-  const jobs = [...discoveryJobs]
-    .filter((job) => ["queued", "running"].includes(job.status))
+  const jobs = activeDiscoveryJobs()
     .sort((a, b) => new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0))
     .slice(0, FINDER_PROGRESS_LIST_LIMIT);
   box.innerHTML = jobs.length ? jobs.map((job, index) => {
@@ -4310,6 +4314,11 @@ function bindForms() {
 
   $("#finderForm").addEventListener("submit", (event) => {
     event.preventDefault();
+    const activeCount = activeDiscoveryJobs().length;
+    if (activeCount >= MAX_ACTIVE_DISCOVERY_JOBS) {
+      window.alert(`当前已有 ${activeCount} 个获客任务正在运行或排队，最多同时运行 ${MAX_ACTIVE_DISCOVERY_JOBS} 个。请等待其中一个完成后再启动新的任务。`);
+      return;
+    }
     const submitButton = event.currentTarget.querySelector('button[type="submit"]');
     submitButton.disabled = true;
     submitButton.textContent = "正在提交获客任务…";

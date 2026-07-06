@@ -93,6 +93,7 @@ DISCOVERY_SCHEDULE_LOCK = threading.RLock()
 ACTIVE_DISCOVERY_WORKERS: set[str] = set()
 ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
 DISCOVERY_MAX_CONCURRENCY = max(1, int(bootstrap_setting("DISCOVERY_MAX_CONCURRENCY", "2")))
+MAX_ACTIVE_DISCOVERY_JOBS_PER_USER = 3
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
@@ -2115,6 +2116,20 @@ def find_matching_active_discovery_job(payload: dict, owner_username: str) -> di
     return None
 
 
+def count_active_discovery_jobs(owner_username: str) -> int:
+    initialize_state_store()
+    query = "SELECT COUNT(*) FROM discovery_jobs WHERE status IN ('queued', 'running') AND owner_username = "
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query + "%s", (owner_username,))
+                row = cursor.fetchone()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            row = connection.execute(query + "?", (owner_username,)).fetchone()
+    return int(row[0] if row else 0)
+
+
 def create_discovery_job(payload: dict, owner_username: str, *, force: bool = False) -> dict:
     cleanup_discovery_jobs()
     params = discovery_params(payload)
@@ -2125,6 +2140,9 @@ def create_discovery_job(payload: dict, owner_username: str, *, force: bool = Fa
             if existing:
                 existing["reused"] = True
                 return discovery_job_public(existing)
+        active_count = count_active_discovery_jobs(owner_username)
+        if active_count >= MAX_ACTIVE_DISCOVERY_JOBS_PER_USER:
+            raise ValueError(f"当前已有 {active_count} 个获客任务正在运行或排队，最多同时运行 {MAX_ACTIVE_DISCOVERY_JOBS_PER_USER} 个。请等待任务完成后再启动新的任务。")
         job_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc)
         job = {
