@@ -1028,7 +1028,14 @@ def authenticate_user(username: str, password: str) -> dict | None:
     return user if valid else None
 
 
-def create_user(username: str, password: str) -> dict:
+def normalize_user_role(role: str | None) -> str:
+    value = str(role or "user").strip().lower()
+    if value not in {"user", "admin"}:
+        raise ValueError("用户角色无效")
+    return value
+
+
+def create_user(username: str, password: str, role: str | None = None) -> dict:
     username = normalize_username(username)
     if username == AUTH_USERNAME:
         raise ValueError("管理员账户为系统内置账户，不能重复创建")
@@ -1036,19 +1043,26 @@ def create_user(username: str, password: str) -> dict:
         raise ValueError("密码至少需要 6 位")
     if get_user(username):
         raise ValueError("用户名已存在")
+    role = normalize_user_role(role)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     password_hash = hash_password(password)
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("INSERT INTO app_users (username, password_hash, role, status, created_at) VALUES (%s, %s, 'user', 'enabled', NOW())", (username, password_hash))
+                cursor.execute(
+                    "INSERT INTO app_users (username, password_hash, role, status, created_at) VALUES (%s, %s, %s, 'enabled', NOW())",
+                    (username, password_hash, role),
+                )
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            connection.execute("INSERT INTO app_users (username, password_hash, role, status, created_at) VALUES (?, ?, 'user', 'enabled', ?)", (username, password_hash, now))
-    return {"username": username, "role": "user", "status": "enabled", "createdAt": now, "builtIn": False}
+            connection.execute(
+                "INSERT INTO app_users (username, password_hash, role, status, created_at) VALUES (?, ?, ?, 'enabled', ?)",
+                (username, password_hash, role, now),
+            )
+    return {"username": username, "role": role, "status": "enabled", "createdAt": now, "builtIn": False}
 
 
-def update_user(username: str, *, password: str | None = None, status: str | None = None) -> dict:
+def update_user(username: str, *, password: str | None = None, status: str | None = None, role: str | None = None) -> dict:
     username = normalize_username(username)
     if username == AUTH_USERNAME:
         raise ValueError("系统内置管理员不可修改或删除")
@@ -1065,6 +1079,9 @@ def update_user(username: str, *, password: str | None = None, status: str | Non
             raise ValueError("用户状态无效")
         updates.append("status = %s" if DATABASE_URL else "status = ?")
         params.append(status)
+    if role is not None:
+        updates.append("role = %s" if DATABASE_URL else "role = ?")
+        params.append(normalize_user_role(role))
     if not updates:
         raise ValueError("没有可更新的字段")
     params.append(username)
@@ -6557,7 +6574,7 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-                user = create_user(str(payload.get("username", "")), str(payload.get("password", "")))
+                user = create_user(str(payload.get("username", "")), str(payload.get("password", "")), payload.get("role"))
                 self.send_json(201, {"ok": True, "user": user})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
@@ -6573,7 +6590,12 @@ class Handler(SimpleHTTPRequestHandler):
                     delete_user(username)
                     self.send_json(200, {"ok": True})
                 else:
-                    user = update_user(username, password=payload.get("password"), status=payload.get("status"))
+                    user = update_user(
+                        username,
+                        password=payload.get("password"),
+                        status=payload.get("status"),
+                        role=payload.get("role"),
+                    )
                     self.send_json(200, {"ok": True, "user": {key: value for key, value in user.items() if key != "passwordHash"}})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})

@@ -540,6 +540,7 @@
         <form class="panel user-form" id="userForm">
           <div class="panel-head"><h3>添加用户</h3><span>初始状态：启用</span></div>
           <label>用户名<input name="username" autocomplete="off" minlength="3" maxlength="32" required placeholder="3-32 位字母、数字或 _ . -"></label>
+          <label>角色<select name="role"><option value="user">普通用户</option><option value="admin">管理员</option></select></label>
           <label>密码<input name="password" type="password" autocomplete="new-password" minlength="6" required placeholder="至少 6 位"></label>
           <label>确认密码<input name="confirmPassword" type="password" autocomplete="new-password" minlength="6" required placeholder="再次输入密码"></label>
           <p class="form-status" id="userFormStatus" role="status"></p>

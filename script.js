@@ -4646,7 +4646,7 @@ function bindForms() {
       const response = await apiFetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: data.username, password: data.password })
+        body: JSON.stringify({ username: data.username, password: data.password, role: data.role || "user" })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -4709,6 +4709,11 @@ function bindForms() {
         const nextStatus = button.dataset.status === "enabled" ? "disabled" : "enabled";
         if (!confirm(`确认${nextStatus === "disabled" ? "禁用" : "启用"}用户 ${username} 吗？`)) return;
         await updateUser(username, { status: nextStatus });
+      }
+      if (button.dataset.userAction === "role") {
+        const nextRole = button.dataset.role === "admin" ? "user" : "admin";
+        if (!confirm(`确认将用户 ${username} 设为${nextRole === "admin" ? "管理员" : "普通用户"}吗？`)) return;
+        await updateUser(username, { role: nextRole });
       }
       if (button.dataset.userAction === "delete") {
         if (!confirm(`确认永久删除用户 ${username} 吗？该用户的线索、客户、报价和获客任务也会一并删除。`)) return;
@@ -5152,6 +5157,7 @@ function renderUsers(users = []) {
       <td><span class="user-status ${user.status === "disabled" ? "disabled" : ""}">${user.status === "disabled" ? "已禁用" : "启用中"}</span></td>
       <td><div class="user-actions">${user.builtIn ? `<span class="meta">受保护</span>` : `
         <button type="button" data-user-action="password" data-username="${escapeHtml(user.username)}">改密码</button>
+        <button type="button" data-user-action="role" data-role="${escapeHtml(user.role)}" data-username="${escapeHtml(user.username)}">${user.role === "admin" ? "设为普通用户" : "设为管理员"}</button>
         <button type="button" data-user-action="status" data-status="${user.status}" data-username="${escapeHtml(user.username)}">${user.status === "disabled" ? "启用" : "禁用"}</button>
         <button class="danger" type="button" data-user-action="delete" data-username="${escapeHtml(user.username)}">删除</button>`}</div></td>
     </tr>`).join("") : `<tr><td colspan="6">暂无普通用户。管理员可通过左侧表单添加。</td></tr>`;

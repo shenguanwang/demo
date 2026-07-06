@@ -2106,7 +2106,8 @@ textarea {
   font-weight: 700;
 }
 
-.user-form input {
+.user-form input,
+.user-form select {
   min-height: 42px;
   padding: 0 12px;
   border: 1px solid var(--line);
