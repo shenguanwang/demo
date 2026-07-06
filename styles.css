@@ -5590,3 +5590,70 @@ td {
   background: #2b313a;
   color: #f4f6f8;
 }
+
+:root[data-theme="dark"] .review-decision .decision-main,
+:root[data-theme="dark"] .review-decision .decision-score,
+:root[data-theme="dark"] .decision-missing,
+:root[data-theme="dark"] .score-dimensions span,
+:root[data-theme="dark"] .score-dimensions .penalty,
+:root[data-theme="dark"] .score-breakdown b,
+:root[data-theme="dark"] .score-breakdown b.negative,
+:root[data-theme="dark"] .score-calibration button,
+:root[data-theme="dark"] .review-recommendation,
+:root[data-theme="dark"] .email-evidence-item,
+:root[data-theme="dark"] .verified-badge,
+:root[data-theme="dark"] .email-source-links a,
+:root[data-theme="dark"] .email-empty,
+:root[data-theme="dark"] .review-more,
+:root[data-theme="dark"] .review-more summary,
+:root[data-theme="dark"] .review-more[open] .review-more-content,
+:root[data-theme="dark"] .review-drawer-head,
+:root[data-theme="dark"] .review-source-badges b,
+:root[data-theme="dark"] .source-evidence > .email-evidence-row,
+:root[data-theme="dark"] .source-evidence > .unverified-email-row,
+:root[data-theme="dark"] .source-original p,
+:root[data-theme="dark"] .button-link,
+:root[data-theme="dark"] .lead-edit-panel {
+  border-color: #343b46;
+  background: #20242b;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .score-dimensions strong,
+:root[data-theme="dark"] .review-decision .decision-score strong,
+:root[data-theme="dark"] .decision-missing strong,
+:root[data-theme="dark"] .review-key-info dd,
+:root[data-theme="dark"] .review-recommendation strong,
+:root[data-theme="dark"] .email-address,
+:root[data-theme="dark"] .source-evidence dd,
+:root[data-theme="dark"] .source-original p strong,
+:root[data-theme="dark"] .lead-edit-head strong,
+:root[data-theme="dark"] .lead-edit-grid label {
+  color: #f7f8fa;
+}
+
+:root[data-theme="dark"] .review-key-info dt,
+:root[data-theme="dark"] .source-evidence dt,
+:root[data-theme="dark"] .score-breakdown > span,
+:root[data-theme="dark"] .score-calibration span,
+:root[data-theme="dark"] .review-more summary small,
+:root[data-theme="dark"] .email-source-links span,
+:root[data-theme="dark"] .unverified-email-row small,
+:root[data-theme="dark"] .lead-edit-head span {
+  color: #aeb6c2;
+}
+
+:root[data-theme="dark"] .score-breakdown b,
+:root[data-theme="dark"] .verified-badge,
+:root[data-theme="dark"] .review-source-badges b {
+  background: #2b313a;
+}
+
+:root[data-theme="dark"] .review-recommendation {
+  border-left-color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .review-card .primary {
+  background: #f4f6f8;
+  color: #111820;
+}
