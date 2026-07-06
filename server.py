@@ -21,6 +21,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from http.cookiejar import CookieJar
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError, as_completed
 from datetime import datetime, timedelta, timezone
 from http.server import SimpleHTTPRequestHandler
@@ -800,6 +801,163 @@ def save_workspace_state(workspace_key: str, payload: dict, expected_version: in
         "version": int(version),
         "updatedAt": updated,
         "storage": "postgres" if DATABASE_URL else "sqlite",
+    }
+
+
+def stable_record_key(record: dict, fallback_prefix: str, index: int) -> str:
+    if not isinstance(record, dict):
+        return f"{fallback_prefix}:{index}"
+    for key in ("id", "sourceUrl", "website", "url", "email", "phone"):
+        value = str(record.get(key, "") or "").strip().lower().rstrip("/")
+        if value:
+            return f"{key}:{value}"
+    company = str(record.get("company", "") or "").strip().lower()
+    country = str(record.get("country", "") or "").strip().lower()
+    city = str(record.get("city", "") or "").strip().lower()
+    if company:
+        return f"company:{company}|{country}|{city}"
+    return f"{fallback_prefix}:{index}:{json.dumps(record, ensure_ascii=False, sort_keys=True)[:200]}"
+
+
+def merge_record_lists(current: list, incoming: list, key_prefix: str, limit: int = 5000) -> tuple[list, int]:
+    merged = list(current) if isinstance(current, list) else []
+    seen = {
+        stable_record_key(item, key_prefix, index)
+        for index, item in enumerate(merged)
+        if isinstance(item, dict)
+    }
+    added = 0
+    for index, item in enumerate(incoming if isinstance(incoming, list) else []):
+        if not isinstance(item, dict):
+            continue
+        key = stable_record_key(item, key_prefix, index)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(item)
+        added += 1
+    return merged[:limit], added
+
+
+def merge_workspace_states(current: dict, incoming: dict) -> tuple[dict, dict]:
+    current = normalize_workspace_state(current or {})
+    incoming = normalize_workspace_state(incoming or {})
+    totals = {}
+    for key in ("reviewLeads", "customers", "rejectedLeads", "quotes", "afterSalesOrders", "deletedRecords"):
+        limit = 10000 if key == "deletedRecords" else 5000
+        current[key], totals[key] = merge_record_lists(current.get(key, []), incoming.get(key, []), key, limit)
+    return current, totals
+
+
+def remote_json_request(opener, base_url: str, path: str, payload: dict | None = None) -> dict:
+    body = None
+    headers = {"Accept": "application/json"}
+    if payload is not None:
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
+    request = urllib.request.Request(
+        urllib.parse.urljoin(base_url.rstrip("/") + "/", path.lstrip("/")),
+        data=body,
+        headers=headers,
+        method="POST" if payload is not None else "GET",
+    )
+    with opener.open(request, timeout=30) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def migrate_from_remote_workbench(base_url: str, username: str, password: str, owner_username: str) -> dict:
+    if not re.match(r"^https?://", base_url or "", flags=re.I):
+        raise ValueError("旧服务器地址必须以 http:// 或 https:// 开头")
+    cookie_jar = CookieJar()
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookie_jar))
+    login = remote_json_request(opener, base_url, "/api/login", {"username": username, "password": password})
+    if not login.get("ok"):
+        raise ValueError("旧服务器登录失败")
+
+    remote_workspace = remote_json_request(opener, base_url, "/api/workspace-state")
+    incoming_state = remote_workspace.get("state") or {}
+    current_workspace = load_workspace_state(owner_username)
+    merged_state, added = merge_workspace_states(current_workspace.get("state", {}), incoming_state)
+    saved = save_workspace_state(owner_username, merged_state)
+
+    jobs_added = 0
+    jobs_skipped = 0
+    try:
+        remote_jobs = remote_json_request(opener, base_url, "/api/discover/jobs").get("jobs") or []
+    except Exception:
+        remote_jobs = []
+    for job in remote_jobs:
+        if not isinstance(job, dict) or not job.get("id"):
+            continue
+        if load_discovery_job(str(job["id"]), owner_username):
+            jobs_skipped += 1
+            continue
+        status = str(job.get("status") or "completed")
+        if status in {"queued", "running"}:
+            status = "canceled"
+        save_discovery_job({
+            "id": str(job["id"]),
+            "payload": job.get("payload") or {
+                "country": job.get("country", ""),
+                "model": job.get("model", ""),
+                "sourceMode": job.get("sourceMode", ""),
+                "goal": job.get("goal", ""),
+            },
+            "status": status,
+            "stage": job.get("stage") or "done",
+            "progress": int(job.get("progress") or 100),
+            "message": job.get("message") or "从旧服务器导入的历史任务。",
+            "result": job.get("result"),
+            "error": job.get("error", ""),
+            "imported": bool(job.get("imported", False)),
+            "createdAt": job.get("createdAt") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "updatedAt": job.get("updatedAt") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "ownerUsername": owner_username,
+        })
+        jobs_added += 1
+
+    schedules_added = 0
+    schedules_skipped = 0
+    try:
+        remote_schedules = remote_json_request(opener, base_url, "/api/discover/schedules").get("schedules") or []
+    except Exception:
+        remote_schedules = []
+    existing_schedule_ids = {item.get("id") for item in list_discovery_schedules(owner_username)}
+    for schedule in remote_schedules:
+        if not isinstance(schedule, dict) or not schedule.get("id"):
+            continue
+        if schedule["id"] in existing_schedule_ids:
+            schedules_skipped += 1
+            continue
+        save_discovery_schedule({
+            "id": str(schedule["id"]),
+            "ownerUsername": owner_username,
+            "payload": schedule.get("payload") or {
+                "country": schedule.get("country", ""),
+                "model": schedule.get("model", ""),
+                "sourceMode": schedule.get("sourceMode", ""),
+                "goal": schedule.get("goal", ""),
+            },
+            "intervalMinutes": int(schedule.get("intervalMinutes") or 1440),
+            "enabled": bool(schedule.get("enabled", False)),
+            "nextRunAt": schedule.get("nextRunAt") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "lastRunAt": schedule.get("lastRunAt") or "",
+            "lastJobId": schedule.get("lastJobId") or "",
+            "createdAt": schedule.get("createdAt") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "updatedAt": schedule.get("updatedAt") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        })
+        schedules_added += 1
+
+    return {
+        "workspace": {
+            "storage": saved.get("storage"),
+            "version": saved.get("version"),
+            "added": added,
+            "remoteCounts": summarize_workspace_for_kpi(incoming_state),
+            "currentCounts": summarize_workspace_for_kpi(saved.get("state", {})),
+        },
+        "jobs": {"added": jobs_added, "skipped": jobs_skipped, "remote": len(remote_jobs)},
+        "schedules": {"added": schedules_added, "skipped": schedules_skipped, "remote": len(remote_schedules)},
     }
 
 
@@ -6771,6 +6929,23 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             self.send_json(200, {"ok": True, "message": "服务器正在重启，请稍后刷新页面"})
             restart_server_process()
+            return
+        if parsed.path == "/api/admin/migrate-legacy":
+            user = self.require_admin()
+            if not user:
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                result = migrate_from_remote_workbench(
+                    str(payload.get("baseUrl") or "https://overseas-lead-workbench.onrender.com"),
+                    str(payload.get("username") or ""),
+                    str(payload.get("password") or ""),
+                    user["username"],
+                )
+                self.send_json(200, {"ok": True, **result})
+            except (ValueError, json.JSONDecodeError, OSError, urllib.error.URLError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/workspace-state":
             try:

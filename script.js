@@ -4687,6 +4687,7 @@ function bindForms() {
     const valueInput = row?.querySelector("[data-custom-api-value]");
     if (valueInput) valueInput.type = selector.value === "text" ? "text" : "password";
   });
+  $("#migrateLegacyData")?.addEventListener("click", migrateLegacyData);
   $("#adminSettingsForm")?.addEventListener("submit", saveAdminSettings);
 
   $("#refreshKpiDashboard")?.addEventListener("click", () => {
@@ -5142,6 +5143,55 @@ async function restartAdminServer() {
   window.setTimeout(() => {
     window.location.reload();
   }, 3500);
+}
+
+async function migrateLegacyData() {
+  if (currentSession?.role !== "admin") return;
+  const button = $("#migrateLegacyData");
+  const status = $("#legacyMigrationStatus");
+  const baseUrl = $("#legacyBaseUrl")?.value?.trim() || "";
+  const username = $("#legacyUsername")?.value?.trim() || "";
+  const password = $("#legacyPassword")?.value || "";
+  if (!baseUrl || !username || !password) {
+    if (status) {
+      status.className = "form-status error";
+      status.textContent = "请填写旧服务器地址、用户名和密码。";
+    }
+    return;
+  }
+  if (!confirm("确认把旧 Render 数据合并到当前新加坡服务器吗？系统会去重追加，不会清空当前数据。")) return;
+  if (button) button.disabled = true;
+  if (status) {
+    status.className = "form-status";
+    status.textContent = "正在迁移旧服务器数据…";
+  }
+  try {
+    const response = await apiFetch("/api/admin/migrate-legacy", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ baseUrl, username, password })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    if (status) {
+      status.className = "form-status success";
+      const added = result.workspace?.added || {};
+      status.textContent =
+        `迁移完成：新增待审核 ${added.reviewLeads || 0}，删除记录 ${added.deletedRecords || 0}，` +
+        `任务 ${result.jobs?.added || 0}，定时计划 ${result.schedules?.added || 0}。`;
+    }
+    await hydrateCloudState(true);
+    await loadDiscoveryJobs();
+    await loadDiscoverySchedules();
+    renderKpis();
+  } catch (error) {
+    if (status) {
+      status.className = "form-status error";
+      status.textContent = error.message || "迁移失败。";
+    }
+  } finally {
+    if (button) button.disabled = false;
+  }
 }
 
 function renderUsers(users = []) {
