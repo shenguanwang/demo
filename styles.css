@@ -5657,3 +5657,197 @@ td {
   background: #f4f6f8;
   color: #111820;
 }
+
+/* Final dark-mode override: keep the late light-theme redesign rules from repainting sections white. */
+:root[data-theme="dark"] body,
+:root[data-theme="dark"] .main,
+:root[data-theme="dark"] .section {
+  background: #0f1115 !important;
+  color: #f4f6f8 !important;
+}
+
+:root[data-theme="dark"] .sidebar {
+  background: #11151b !important;
+  border-right: 1px solid #252b34 !important;
+}
+
+:root[data-theme="dark"] .brand strong,
+:root[data-theme="dark"] .nav button.active,
+:root[data-theme="dark"] .nav button:hover,
+:root[data-theme="dark"] .user-management-button,
+:root[data-theme="dark"] .user-management-button:hover,
+:root[data-theme="dark"] .user-management-button.active {
+  color: #f4f6f8 !important;
+}
+
+:root[data-theme="dark"] .brand > div:last-child span,
+:root[data-theme="dark"] .nav-label,
+:root[data-theme="dark"] .nav button,
+:root[data-theme="dark"] .logout-button,
+:root[data-theme="dark"] .side-note p {
+  color: #aeb6c2 !important;
+}
+
+:root[data-theme="dark"] .brand-mark,
+:root[data-theme="dark"] .nav button > span,
+:root[data-theme="dark"] .side-note,
+:root[data-theme="dark"] .logout-button:hover,
+:root[data-theme="dark"] .user-management-button,
+:root[data-theme="dark"] .nav button:hover,
+:root[data-theme="dark"] .nav button.active {
+  border-color: #2a3038 !important;
+  background: #171a20 !important;
+}
+
+:root[data-theme="dark"] .brand-mark {
+  fill: #f4f6f8 !important;
+}
+
+:root[data-theme="dark"] .brand-mark-accent {
+  fill: #aeb6c2 !important;
+}
+
+:root[data-theme="dark"] .overview-welcome,
+:root[data-theme="dark"] .daily-focus,
+:root[data-theme="dark"] .metric-strip > button,
+:root[data-theme="dark"] .overview-block,
+:root[data-theme="dark"] .cards article,
+:root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .task-list article,
+:root[data-theme="dark"] .lead-card,
+:root[data-theme="dark"] .review-card,
+:root[data-theme="dark"] .discovery-job,
+:root[data-theme="dark"] .social-search-box,
+:root[data-theme="dark"] .extension-install-note,
+:root[data-theme="dark"] .table-wrap,
+:root[data-theme="dark"] .crm-workbench,
+:root[data-theme="dark"] .insight-box,
+:root[data-theme="dark"] .letter-block,
+:root[data-theme="dark"] .quote-result,
+:root[data-theme="dark"] .review-more,
+:root[data-theme="dark"] .evidence-section,
+:root[data-theme="dark"] .social-profile-section,
+:root[data-theme="dark"] .source-availability,
+:root[data-theme="dark"] .source-guide,
+:root[data-theme="dark"] .finder-source-details,
+:root[data-theme="dark"] .kpi-insight > div,
+:root[data-theme="dark"] .quote-summary-grid div,
+:root[data-theme="dark"] .follow-summary span,
+:root[data-theme="dark"] .follow-history,
+:root[data-theme="dark"] .review-decision > div,
+:root[data-theme="dark"] .score-dimensions span,
+:root[data-theme="dark"] #followUpSequence p,
+:root[data-theme="dark"] .muted,
+:root[data-theme="dark"] .review-toolbar,
+:root[data-theme="dark"] .review-workbench-list,
+:root[data-theme="dark"] .review-list-row,
+:root[data-theme="dark"] .review-workbench-list-head,
+:root[data-theme="dark"] .finder-history,
+:root[data-theme="dark"] .finder-history-card,
+:root[data-theme="dark"] .schedule-item,
+:root[data-theme="dark"] .discovery-pager,
+:root[data-theme="dark"] .schedule-pager,
+:root[data-theme="dark"] .source-original,
+:root[data-theme="dark"] .aftersales-card,
+:root[data-theme="dark"] .aftersales-log,
+:root[data-theme="dark"] .review-more[open] .review-more-content,
+:root[data-theme="dark"] .review-drawer-head,
+:root[data-theme="dark"] .email-evidence-item,
+:root[data-theme="dark"] .review-recommendation,
+:root[data-theme="dark"] .score-breakdown b,
+:root[data-theme="dark"] .review-source-badges b,
+:root[data-theme="dark"] .email-source-links a,
+:root[data-theme="dark"] .button-link,
+:root[data-theme="dark"] .lead-edit-panel,
+:root[data-theme="dark"] th,
+:root[data-theme="dark"] tbody tr:hover td {
+  border-color: #2a3038 !important;
+  background: #171a20 !important;
+  color: #f4f6f8 !important;
+  box-shadow: none !important;
+}
+
+:root[data-theme="dark"] .overview-welcome {
+  background:
+    radial-gradient(circle at 35% 10%, rgba(255, 255, 255, 0.07), transparent 30%),
+    linear-gradient(135deg, #171a20 0%, #12151a 62%, #0f1115 100%) !important;
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] .crm-stage,
+:root[data-theme="dark"] .crm-next,
+:root[data-theme="dark"] .follow-entry select,
+:root[data-theme="dark"] .follow-entry input,
+:root[data-theme="dark"] .follow-context input,
+:root[data-theme="dark"] .follow-context select,
+:root[data-theme="dark"] .lead-edit-grid input,
+:root[data-theme="dark"] .lead-edit-grid textarea {
+  border-color: #343b46 !important;
+  background: #11151b !important;
+  color: #f4f6f8 !important;
+}
+
+:root[data-theme="dark"] .section-head h2,
+:root[data-theme="dark"] .topbar h1,
+:root[data-theme="dark"] .block-head h3,
+:root[data-theme="dark"] h2,
+:root[data-theme="dark"] h3,
+:root[data-theme="dark"] h4,
+:root[data-theme="dark"] .letter-block pre,
+:root[data-theme="dark"] .quote-total-card strong,
+:root[data-theme="dark"] .quote-summary-grid strong,
+:root[data-theme="dark"] .crm-customer-link,
+:root[data-theme="dark"] .link-button.crm-customer-link,
+:root[data-theme="dark"] .review-key-info dd,
+:root[data-theme="dark"] .source-evidence dd,
+:root[data-theme="dark"] .score-dimensions strong {
+  color: #f7f8fa !important;
+}
+
+:root[data-theme="dark"] .section-head p,
+:root[data-theme="dark"] .welcome-copy > p,
+:root[data-theme="dark"] .workflow p,
+:root[data-theme="dark"] .cards p,
+:root[data-theme="dark"] .panel p,
+:root[data-theme="dark"] .task-list p,
+:root[data-theme="dark"] td,
+:root[data-theme="dark"] .review-key-info dt,
+:root[data-theme="dark"] .source-evidence dt,
+:root[data-theme="dark"] .quote-total-card span,
+:root[data-theme="dark"] .quote-total-card small,
+:root[data-theme="dark"] .quote-summary-grid span,
+:root[data-theme="dark"] .quote-cost-list dt,
+:root[data-theme="dark"] .quote-disclaimer,
+:root[data-theme="dark"] #followUpSequence p,
+:root[data-theme="dark"] .review-more summary small,
+:root[data-theme="dark"] .score-breakdown > span,
+:root[data-theme="dark"] .score-calibration span {
+  color: #aeb6c2 !important;
+}
+
+:root[data-theme="dark"] .primary,
+:root[data-theme="dark"] .research-button,
+:root[data-theme="dark"] .follow-save-row button,
+:root[data-theme="dark"] .review-card .primary {
+  border-color: #f4f6f8 !important;
+  background: #f4f6f8 !important;
+  color: #111820 !important;
+}
+
+:root[data-theme="dark"] .ghost,
+:root[data-theme="dark"] .danger-button,
+:root[data-theme="dark"] .crm-actions button,
+:root[data-theme="dark"] .task-actions button,
+:root[data-theme="dark"] .quote-row-actions button,
+:root[data-theme="dark"] .quote-delete,
+:root[data-theme="dark"] .score-calibration button,
+:root[data-theme="dark"] .user-actions button,
+:root[data-theme="dark"] .discovery-job-action,
+:root[data-theme="dark"] .discovery-job-delete,
+:root[data-theme="dark"] .schedule-actions button {
+  border-color: #343b46 !important;
+  background: #20242b !important;
+  color: #f4f6f8 !important;
+}
