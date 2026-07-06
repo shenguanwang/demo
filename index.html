@@ -591,29 +591,6 @@
           </div>
           <div class="custom-api-list" id="customApiList"></div>
         </div>
-        <div class="panel admin-api-section">
-          <div class="panel-head">
-            <div><h3>旧 Render 数据迁移</h3><span>把旧服务器的线索、删除记录、获客任务和定时计划合并到当前新加坡服务器</span></div>
-          </div>
-          <div class="admin-settings-grid">
-            <label>旧服务器地址
-              <input id="legacyBaseUrl" value="https://overseas-lead-workbench.onrender.com" autocomplete="off">
-              <small>默认读取旧 Render 服务。</small>
-            </label>
-            <label>旧服务器用户名
-              <input id="legacyUsername" value="admin" autocomplete="off">
-              <small>用于登录旧服务器读取数据。</small>
-            </label>
-            <label>旧服务器密码
-              <input id="legacyPassword" type="password" autocomplete="off" placeholder="输入旧服务器工作台密码">
-              <small>只用于本次迁移，不会保存到页面。</small>
-            </label>
-          </div>
-          <div class="result-actions">
-            <span class="form-status" id="legacyMigrationStatus" role="status"></span>
-            <button class="ghost" id="migrateLegacyData" type="button">导入旧 Render 数据</button>
-          </div>
-        </div>
         <p class="form-status" id="adminSettingsStatus" role="status"></p>
         <div class="result-actions">
           <button class="ghost" type="button" id="clearAdminSettingsForm">清空输入</button>
@@ -1033,6 +1010,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260706-openai1"></script>
+  <script src="./script.js?v=20260706-settings1"></script>
 </body>
 </html>
