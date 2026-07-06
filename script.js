@@ -126,9 +126,7 @@ const SOCIAL_CAPTURE_SEEN_KEY = "huawei-ev-social-capture-seen-v1";
 const UI_SETTINGS_KEY = "huawei-ev-workbench-ui-settings-v1";
 const DEFAULT_UI_SETTINGS = {
   brightness: 100,
-  theme: "gold",
-  density: "comfortable",
-  reduceMotion: false
+  theme: "light"
 };
 
 const IRRELEVANT_REVIEW_LEAD_DOMAINS = [
@@ -562,9 +560,7 @@ function loadUiSettings() {
     const parsed = JSON.parse(raw);
     return {
       brightness: Math.min(120, Math.max(70, Number(parsed.brightness) || DEFAULT_UI_SETTINGS.brightness)),
-      theme: ["gold", "blue", "green", "red"].includes(parsed.theme) ? parsed.theme : DEFAULT_UI_SETTINGS.theme,
-      density: parsed.density === "compact" ? "compact" : DEFAULT_UI_SETTINGS.density,
-      reduceMotion: Boolean(parsed.reduceMotion)
+      theme: parsed.theme === "dark" ? "dark" : DEFAULT_UI_SETTINGS.theme
     };
   } catch {
     return { ...DEFAULT_UI_SETTINGS };
@@ -596,35 +592,12 @@ function applyBrightness(value) {
 function applyUiSettings(settings = loadUiSettings()) {
   const root = document.documentElement;
   root.dataset.theme = settings.theme;
-  root.dataset.density = settings.density;
-  root.dataset.reduceMotion = settings.reduceMotion ? "true" : "false";
   applyBrightness(settings.brightness);
 
   const brightnessRange = $("#brightnessRange");
   if (brightnessRange) brightnessRange.value = String(settings.brightness);
-  $$("[data-theme-choice]").forEach((button) => {
-    button.setAttribute("aria-pressed", button.dataset.themeChoice === settings.theme ? "true" : "false");
-  });
-  setSwitchState($("#densityToggle"), settings.density === "compact");
-  setSwitchState($("#motionToggle"), settings.reduceMotion);
+  setSwitchState($("#themeToggle"), settings.theme === "dark");
   setSwitchState($("#fullscreenToggle"), Boolean(document.fullscreenElement));
-}
-
-function closeSettingsPanel() {
-  const panel = $("#settingsPanel");
-  const toggle = $("#settingsToggle");
-  if (!panel || !toggle) return;
-  panel.hidden = true;
-  toggle.setAttribute("aria-expanded", "false");
-}
-
-function toggleSettingsPanel() {
-  const panel = $("#settingsPanel");
-  const toggle = $("#settingsToggle");
-  if (!panel || !toggle) return;
-  const nextOpen = panel.hidden;
-  panel.hidden = !nextOpen;
-  toggle.setAttribute("aria-expanded", nextOpen ? "true" : "false");
 }
 
 async function toggleFullscreen() {
@@ -636,22 +609,7 @@ async function toggleFullscreen() {
 }
 
 function bindUiSettings() {
-  const toggle = $("#settingsToggle");
-  const panel = $("#settingsPanel");
-  if (!toggle || !panel) return;
   let settings = loadUiSettings();
-
-  toggle.addEventListener("click", (event) => {
-    event.stopPropagation();
-    toggleSettingsPanel();
-  });
-  $("#settingsClose")?.addEventListener("click", closeSettingsPanel);
-  document.addEventListener("click", (event) => {
-    if (!panel.hidden && !event.target.closest("#appSettings")) closeSettingsPanel();
-  });
-  document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape") closeSettingsPanel();
-  });
 
   $("#brightnessRange")?.addEventListener("input", (event) => {
     settings = { ...settings, brightness: Number(event.target.value) };
@@ -659,34 +617,14 @@ function bindUiSettings() {
     persistUiSettings(settings);
   });
 
-  $$("[data-theme-choice]").forEach((button) => {
-    button.addEventListener("click", () => {
-      settings = { ...settings, theme: button.dataset.themeChoice || DEFAULT_UI_SETTINGS.theme };
-      applyUiSettings(settings);
-      persistUiSettings(settings);
-    });
-  });
-
-  $("#densityToggle")?.addEventListener("click", () => {
-    settings = { ...settings, density: settings.density === "compact" ? "comfortable" : "compact" };
-    applyUiSettings(settings);
-    persistUiSettings(settings);
-  });
-
-  $("#motionToggle")?.addEventListener("click", () => {
-    settings = { ...settings, reduceMotion: !settings.reduceMotion };
+  $("#themeToggle")?.addEventListener("click", () => {
+    settings = { ...settings, theme: settings.theme === "dark" ? "light" : "dark" };
     applyUiSettings(settings);
     persistUiSettings(settings);
   });
 
   $("#fullscreenToggle")?.addEventListener("click", () => {
     toggleFullscreen().catch((error) => console.error("Fullscreen toggle failed:", error));
-  });
-
-  $("#settingsReset")?.addEventListener("click", () => {
-    settings = { ...DEFAULT_UI_SETTINGS };
-    applyUiSettings(settings);
-    persistUiSettings(settings);
   });
 
   document.addEventListener("fullscreenchange", () => {
