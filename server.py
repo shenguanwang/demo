@@ -84,14 +84,25 @@ PASSWORD_HASH_ITERATIONS = 210_000
 socket.setdefaulttimeout(NETWORK_DEFAULT_TIMEOUT)
 
 ADMIN_SETTING_DEFINITIONS = {
-    "GOOGLE_MAPS_API_KEY": {"type": "secret", "label": "Google Maps Places API Key"},
-    "YOUTUBE_API_KEY": {"type": "secret", "label": "YouTube Data API Key"},
-    "OPENAI_API_KEY": {"type": "secret", "label": "OpenAI API Key"},
-    "OPENAI_MODEL": {"type": "text", "label": "OpenAI 模型"},
-    "PUBLIC_BASE_URL": {"type": "url", "label": "公开访问地址"},
-    "DISCOVERY_MAX_CONCURRENCY": {"type": "int", "label": "获客并发数", "min": 1, "max": 8},
-    "NETWORK_DEFAULT_TIMEOUT": {"type": "int", "label": "网络超时秒数", "min": 5, "max": 60},
+    "GOOGLE_MAPS_API_KEY": {"type": "secret", "label": "Google Maps Places API Key", "group": "maps", "status": "active", "use": "Google Maps 企业地点搜索"},
+    "YOUTUBE_API_KEY": {"type": "secret", "label": "YouTube Data API Key", "group": "social", "status": "active", "use": "YouTube 官方频道/视频搜索"},
+    "OPENAI_API_KEY": {"type": "secret", "label": "OpenAI API Key", "group": "ai", "status": "ready", "use": "ChatGPT/AI 审核/开发信"},
+    "OPENAI_MODEL": {"type": "text", "label": "OpenAI 模型", "group": "ai", "status": "ready", "use": "AI 默认模型"},
+    "FACEBOOK_ACCESS_TOKEN": {"type": "secret", "label": "Facebook Graph API Token", "group": "social", "status": "reserved", "use": "后续 Facebook 主页/线索接口"},
+    "INSTAGRAM_ACCESS_TOKEN": {"type": "secret", "label": "Instagram Graph API Token", "group": "social", "status": "reserved", "use": "后续 Instagram 商业账号接口"},
+    "TIKTOK_API_KEY": {"type": "secret", "label": "TikTok API Key", "group": "social", "status": "reserved", "use": "后续 TikTok 公开账号/商业接口"},
+    "LINKEDIN_CLIENT_ID": {"type": "text", "label": "LinkedIn Client ID", "group": "social", "status": "reserved", "use": "后续 LinkedIn OAuth 接入"},
+    "LINKEDIN_CLIENT_SECRET": {"type": "secret", "label": "LinkedIn Client Secret", "group": "social", "status": "reserved", "use": "后续 LinkedIn OAuth 接入"},
+    "TELEGRAM_BOT_TOKEN": {"type": "secret", "label": "Telegram Bot Token", "group": "social", "status": "reserved", "use": "后续 Telegram 频道/群组接口"},
+    "X_BEARER_TOKEN": {"type": "secret", "label": "X / Twitter Bearer Token", "group": "social", "status": "reserved", "use": "后续 X 搜索接口"},
+    "REDDIT_CLIENT_ID": {"type": "text", "label": "Reddit Client ID", "group": "social", "status": "reserved", "use": "后续 Reddit 社区接口"},
+    "REDDIT_CLIENT_SECRET": {"type": "secret", "label": "Reddit Client Secret", "group": "social", "status": "reserved", "use": "后续 Reddit 社区接口"},
+    "PUBLIC_BASE_URL": {"type": "url", "label": "公开访问地址", "group": "runtime", "status": "active", "use": "回调/公开链接"},
+    "DISCOVERY_MAX_CONCURRENCY": {"type": "int", "label": "获客并发数", "group": "runtime", "status": "active", "use": "后台任务并发", "min": 1, "max": 8},
+    "NETWORK_DEFAULT_TIMEOUT": {"type": "int", "label": "网络超时秒数", "group": "runtime", "status": "active", "use": "外部接口请求超时", "min": 5, "max": 60},
 }
+ADMIN_RUNTIME_KEYS = {"PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"}
+ADMIN_CUSTOM_APIS_KEY = "_customApis"
 ADMIN_SETTINGS_LOCK = threading.RLock()
 
 
@@ -114,7 +125,13 @@ def save_admin_settings_file(settings: dict) -> None:
 
 def runtime_setting(key: str, default: str = "") -> str:
     with ADMIN_SETTINGS_LOCK:
-        value = load_admin_settings_file().get(key)
+        settings = load_admin_settings_file()
+        value = settings.get(key)
+        if value is None or value == "":
+            for item in settings.get(ADMIN_CUSTOM_APIS_KEY, []):
+                if isinstance(item, dict) and item.get("envKey") == key:
+                    value = item.get("value")
+                    break
     if value is None or value == "":
         value = os.environ.get(key, default)
     return str(value or "").strip()
@@ -139,6 +156,7 @@ def get_youtube_api_key() -> str:
 def admin_settings_payload() -> dict:
     settings = load_admin_settings_file()
     values = {}
+    catalog = []
     for key, definition in ADMIN_SETTING_DEFINITIONS.items():
         effective = runtime_setting(key)
         stored = str(settings.get(key, "") or "").strip()
@@ -150,10 +168,87 @@ def admin_settings_payload() -> dict:
             }
         else:
             values[key] = stored or os.environ.get(key, "")
+        catalog.append({
+            "key": key,
+            "label": definition["label"],
+            "type": definition["type"],
+            "group": definition.get("group", "api"),
+            "status": definition.get("status", "reserved"),
+            "use": definition.get("use", ""),
+            "configured": bool(effective),
+            "masked": masked_secret(effective) if definition["type"] == "secret" else "",
+            "value": "" if definition["type"] == "secret" else values[key],
+            "min": definition.get("min"),
+            "max": definition.get("max"),
+        })
+    custom_apis = []
+    for item in settings.get(ADMIN_CUSTOM_APIS_KEY, []):
+        if not isinstance(item, dict):
+            continue
+        value = str(item.get("value", "") or "")
+        custom_apis.append({
+            "id": item.get("id") or secrets.token_hex(6),
+            "name": item.get("name", ""),
+            "envKey": item.get("envKey", ""),
+            "type": item.get("type", "secret"),
+            "baseUrl": item.get("baseUrl", ""),
+            "notes": item.get("notes", ""),
+            "enabled": bool(item.get("enabled", True)),
+            "configured": bool(value),
+            "masked": masked_secret(value) if item.get("type", "secret") == "secret" else "",
+            "value": "" if item.get("type", "secret") == "secret" else value,
+        })
     return {
         "values": values,
+        "catalog": catalog,
+        "customApis": custom_apis,
         "restartRequired": ["DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"],
     }
+
+
+def normalize_custom_apis(payload_items: list, previous_items: list) -> list[dict]:
+    previous_by_id = {
+        str(item.get("id")): item for item in previous_items
+        if isinstance(item, dict) and item.get("id")
+    }
+    normalized = []
+    for raw in payload_items[:50]:
+        if not isinstance(raw, dict):
+            continue
+        name = clean_text(str(raw.get("name", "")))[:80]
+        env_key = str(raw.get("envKey", "")).strip().upper()
+        if not name and not env_key:
+            continue
+        if not name:
+            raise ValueError("自定义 API 必须填写名称")
+        if not re.match(r"^[A-Z][A-Z0-9_]{2,63}$", env_key):
+            raise ValueError(f"{name} 的配置 Key 只能使用大写字母、数字和下划线")
+        item_id = str(raw.get("id") or secrets.token_hex(6))
+        value_type = "text" if raw.get("type") == "text" else "secret"
+        value = str(raw.get("value", "") or "").strip()
+        if value == "" and item_id in previous_by_id:
+            value = str(previous_by_id[item_id].get("value", "") or "")
+        base_url = str(raw.get("baseUrl", "") or "").strip().rstrip("/")
+        if base_url and not re.match(r"^https?://", base_url, flags=re.I):
+            raise ValueError(f"{name} 的接口地址必须以 http:// 或 https:// 开头")
+        normalized.append({
+            "id": item_id,
+            "name": name,
+            "envKey": env_key,
+            "type": value_type,
+            "value": value,
+            "baseUrl": base_url,
+            "notes": clean_text(str(raw.get("notes", "")))[:240],
+            "enabled": bool(raw.get("enabled", True)),
+        })
+    seen = set()
+    unique = []
+    for item in normalized:
+        if item["envKey"] in seen:
+            raise ValueError(f"自定义 API 配置 Key 重复：{item['envKey']}")
+        seen.add(item["envKey"])
+        unique.append(item)
+    return unique
 
 
 def normalize_admin_settings(payload: dict) -> dict:
@@ -182,6 +277,14 @@ def normalize_admin_settings(payload: dict) -> dict:
             if value and not re.match(r"^https?://", value, flags=re.I):
                 raise ValueError(f"{definition['label']} 必须以 http:// 或 https:// 开头")
         next_settings[key] = value
+    if "customApis" in payload:
+        custom_apis = payload.get("customApis") or []
+        if not isinstance(custom_apis, list):
+            raise ValueError("自定义 API 格式无效")
+        next_settings[ADMIN_CUSTOM_APIS_KEY] = normalize_custom_apis(
+            custom_apis,
+            current.get(ADMIN_CUSTOM_APIS_KEY, []),
+        )
     return next_settings
 
 

@@ -278,6 +278,7 @@ let editingReviewLeadId = "";
 let currentSession = null;
 let adminKpiSnapshot = null;
 let adminKpiLoading = false;
+let adminSettingsSnapshot = null;
 let crmViewFilter = "all";
 let navigationBound = false;
 
@@ -4669,8 +4670,22 @@ function bindForms() {
   $("#clearAdminSettingsForm")?.addEventListener("click", () => {
     const form = $("#adminSettingsForm");
     if (!form) return;
-    form.reset();
+    form.querySelectorAll("[data-admin-setting-key][type='password'], [data-custom-api-value][type='password']").forEach((input) => {
+      input.value = "";
+    });
     setAdminSettingsStatus("已清空输入，尚未保存。");
+  });
+  $("#addCustomApi")?.addEventListener("click", () => addCustomApiRow());
+  $("#customApiList")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-remove-custom-api]");
+    if (button) button.closest("[data-custom-api-row]")?.remove();
+  });
+  $("#customApiList")?.addEventListener("change", (event) => {
+    const selector = event.target.closest("[data-custom-api-type]");
+    if (!selector) return;
+    const row = selector.closest("[data-custom-api-row]");
+    const valueInput = row?.querySelector("[data-custom-api-value]");
+    if (valueInput) valueInput.type = selector.value === "text" ? "text" : "password";
   });
   $("#adminSettingsForm")?.addEventListener("submit", saveAdminSettings);
 
@@ -4931,36 +4946,140 @@ function setAdminSettingsStatus(message = "", type = "") {
   status.textContent = message;
 }
 
-function renderSecretState(id, value) {
-  const node = $(id);
-  if (!node) return;
-  node.textContent = value?.configured
-    ? `已配置${value.masked ? `（${value.masked}）` : ""}`
-    : "未配置";
+function adminApiStatusText(item) {
+  if (item.configured) return item.masked ? `已配置（${item.masked}）` : "已配置";
+  return item.status === "active" ? "未配置，功能会降级" : "未配置，预留接口";
+}
+
+function adminApiStatusClass(item) {
+  if (item.configured) return "ready";
+  if (item.status === "active") return "missing";
+  return "reserved";
+}
+
+function adminGroupLabel(group) {
+  return {
+    maps: "地图/企业数据",
+    social: "社媒平台",
+    ai: "AI 大模型",
+    runtime: "运行参数"
+  }[group] || "其他 API";
+}
+
+function adminApiInputHtml(item) {
+  const type = item.type === "secret" ? "password" : item.type === "int" ? "number" : "text";
+  const attrs = [
+    `type="${type}"`,
+    `data-admin-setting-key="${escapeHtml(item.key)}"`,
+    `data-admin-setting-type="${escapeHtml(item.type || "text")}"`,
+    `name="${escapeHtml(item.key)}"`,
+    `placeholder="${item.type === "secret" ? "留空不改；输入新值后保存" : ""}"`,
+    "autocomplete=\"off\""
+  ];
+  if (item.min !== null && item.min !== undefined) attrs.push(`min="${Number(item.min)}"`);
+  if (item.max !== null && item.max !== undefined) attrs.push(`max="${Number(item.max)}"`);
+  const value = item.type === "secret" ? "" : item.value || "";
+  return `<input ${attrs.join(" ")} value="${escapeHtml(value)}">`;
 }
 
 function renderAdminSettings(settings = {}) {
-  const values = settings.values || {};
-  const form = $("#adminSettingsForm");
-  if (!form) return;
-  renderSecretState("#googleMapsKeyState", values.GOOGLE_MAPS_API_KEY);
-  renderSecretState("#youtubeKeyState", values.YOUTUBE_API_KEY);
-  renderSecretState("#openaiKeyState", values.OPENAI_API_KEY);
-  ["OPENAI_MODEL", "PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"].forEach((key) => {
-    const input = form.elements[key];
-    if (input) input.value = values[key] || "";
-  });
-  ["GOOGLE_MAPS_API_KEY", "YOUTUBE_API_KEY", "OPENAI_API_KEY"].forEach((key) => {
-    const input = form.elements[key];
-    if (input) input.value = "";
-  });
+  adminSettingsSnapshot = settings;
+  const catalog = Array.isArray(settings.catalog) ? settings.catalog : [];
+  const apiList = $("#adminApiList");
+  const runtimeGrid = $("#adminRuntimeGrid");
+  if (apiList) {
+    const apiItems = catalog.filter((item) => item.group !== "runtime");
+    apiList.innerHTML = apiItems.map((item) => `
+      <article class="admin-api-card ${escapeHtml(adminApiStatusClass(item))}">
+        <div class="admin-api-card-head">
+          <div>
+            <strong>${escapeHtml(item.label)}</strong>
+            <span>${escapeHtml(adminGroupLabel(item.group))} · ${escapeHtml(item.key)}</span>
+          </div>
+          <b>${escapeHtml(adminApiStatusText(item))}</b>
+        </div>
+        <p>${escapeHtml(item.use || "保存后进入后台配置池。")}</p>
+        ${adminApiInputHtml(item)}
+      </article>
+    `).join("");
+  }
+  if (runtimeGrid) {
+    runtimeGrid.innerHTML = catalog
+      .filter((item) => item.group === "runtime")
+      .map((item) => `
+        <label>${escapeHtml(item.label)}
+          ${adminApiInputHtml(item)}
+          <small>${escapeHtml(item.use || "")}${["DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"].includes(item.key) ? "，保存后重启生效。" : ""}</small>
+        </label>
+      `).join("");
+  }
+  renderCustomApis(settings.customApis || []);
   const summary = $("#adminSettingsSummary");
   if (summary) {
-    const configured = ["GOOGLE_MAPS_API_KEY", "YOUTUBE_API_KEY", "OPENAI_API_KEY"]
-      .filter((key) => values[key]?.configured)
-      .length;
-    summary.textContent = `已配置 ${configured}/3 个 API Key`;
+    const configured = catalog.filter((item) => item.group !== "runtime" && item.configured).length;
+    const total = catalog.filter((item) => item.group !== "runtime").length;
+    summary.textContent = `已配置 ${configured}/${total} 个 API，支持继续添加自定义 API`;
   }
+}
+
+function customApiRowHtml(item = {}) {
+  const id = item.id || `new-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const type = item.type === "text" ? "text" : "secret";
+  return `
+    <article class="custom-api-row" data-custom-api-row data-custom-api-id="${escapeHtml(id)}">
+      <div class="custom-api-row-head">
+        <strong>${escapeHtml(item.name || "新增 API")}</strong>
+        <button class="danger-button compact" type="button" data-remove-custom-api>删除</button>
+      </div>
+      <div class="admin-settings-grid">
+        <label>API 名称<input data-custom-api-name value="${escapeHtml(item.name || "")}" placeholder="例如 Brave Search API"></label>
+        <label>配置 Key<input data-custom-api-env value="${escapeHtml(item.envKey || "")}" placeholder="例如 BRAVE_SEARCH_API_KEY"></label>
+        <label>保存类型
+          <select data-custom-api-type>
+            <option value="secret" ${type === "secret" ? "selected" : ""}>密钥 / Token</option>
+            <option value="text" ${type === "text" ? "selected" : ""}>普通文本</option>
+          </select>
+        </label>
+        <label>API 值<input data-custom-api-value type="${type === "secret" ? "password" : "text"}" value="${type === "secret" ? "" : escapeHtml(item.value || "")}" placeholder="${type === "secret" ? "留空不改；输入新值后保存" : ""}"></label>
+        <label>接口地址<input data-custom-api-base value="${escapeHtml(item.baseUrl || "")}" placeholder="https://api.example.com"></label>
+        <label>用途说明<input data-custom-api-notes value="${escapeHtml(item.notes || "")}" placeholder="这个 API 用来做什么"></label>
+      </div>
+      <small>${item.configured ? `已配置${item.masked ? `（${escapeHtml(item.masked)}）` : ""}` : "未配置"}</small>
+    </article>
+  `;
+}
+
+function renderCustomApis(items = []) {
+  const list = $("#customApiList");
+  if (!list) return;
+  list.innerHTML = items.length
+    ? items.map((item) => customApiRowHtml(item)).join("")
+    : `<p class="empty">还没有自定义 API。点击“添加 API”后填写名称、配置 Key 和密钥。</p>`;
+}
+
+function addCustomApiRow() {
+  const list = $("#customApiList");
+  if (!list) return;
+  if (list.querySelector(".empty")) list.innerHTML = "";
+  list.insertAdjacentHTML("beforeend", customApiRowHtml());
+}
+
+function collectAdminSettingsPayload(form) {
+  const payload = {};
+  form.querySelectorAll("[data-admin-setting-key]").forEach((input) => {
+    payload[input.dataset.adminSettingKey] = input.value;
+  });
+  payload.customApis = Array.from(form.querySelectorAll("[data-custom-api-row]")).map((row) => ({
+    id: row.dataset.customApiId || "",
+    name: row.querySelector("[data-custom-api-name]")?.value || "",
+    envKey: row.querySelector("[data-custom-api-env]")?.value || "",
+    type: row.querySelector("[data-custom-api-type]")?.value || "secret",
+    value: row.querySelector("[data-custom-api-value]")?.value || "",
+    baseUrl: row.querySelector("[data-custom-api-base]")?.value || "",
+    notes: row.querySelector("[data-custom-api-notes]")?.value || "",
+    enabled: true
+  }));
+  return payload;
 }
 
 async function loadAdminSettings() {
@@ -4982,7 +5101,7 @@ async function saveAdminSettings(event) {
   if (currentSession?.role !== "admin") return;
   const form = event.currentTarget;
   const submit = form.querySelector("button[type='submit']");
-  const data = Object.fromEntries(new FormData(form).entries());
+  const data = collectAdminSettingsPayload(form);
   submit.disabled = true;
   setAdminSettingsStatus("正在保存系统设置…");
   try {
