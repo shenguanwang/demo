@@ -49,15 +49,21 @@
 
   <div class="app-settings" id="appSettings" aria-label="快捷设置">
     <button class="quick-setting-button" id="fullscreenToggle" type="button" aria-label="全屏" aria-pressed="false" title="全屏">
-      <span aria-hidden="true">⛶</span>
+      <span aria-hidden="true">FS</span>
     </button>
-    <label class="brightness-control" title="亮度调节">
-      <span aria-hidden="true">☀</span>
-      <input id="brightnessRange" type="range" min="70" max="120" step="5" value="100" aria-label="亮度调节">
-      <b id="brightnessValue">100%</b>
-    </label>
-    <button class="quick-setting-button theme-toggle" id="themeToggle" type="button" aria-label="黑白主题切换" aria-pressed="false" title="黑白主题切换">
-      <span aria-hidden="true">◐</span>
+    <div class="brightness-menu" id="brightnessMenu">
+      <button class="quick-setting-button" id="brightnessToggle" type="button" aria-label="亮度调节" aria-expanded="false" title="亮度调节">
+        <span aria-hidden="true">BR</span>
+      </button>
+      <div class="brightness-popover" id="brightnessPopover" hidden>
+        <label>
+          <span>亮度 <b id="brightnessValue">100%</b></span>
+          <input id="brightnessRange" type="range" min="70" max="120" step="5" value="100" aria-label="亮度调节">
+        </label>
+      </div>
+    </div>
+    <button class="quick-setting-button theme-toggle" id="themeToggle" type="button" aria-label="切换黑夜模式" aria-pressed="false" title="白天 / 黑夜">
+      <span id="themeToggleText" aria-hidden="true">夜</span>
     </button>
   </div>
 

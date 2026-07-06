@@ -576,6 +576,23 @@ function setSwitchState(button, active) {
   button.setAttribute("aria-pressed", active ? "true" : "false");
 }
 
+function closeBrightnessPopover() {
+  const popover = $("#brightnessPopover");
+  const toggle = $("#brightnessToggle");
+  if (!popover || !toggle) return;
+  popover.hidden = true;
+  toggle.setAttribute("aria-expanded", "false");
+}
+
+function toggleBrightnessPopover() {
+  const popover = $("#brightnessPopover");
+  const toggle = $("#brightnessToggle");
+  if (!popover || !toggle) return;
+  const open = popover.hidden;
+  popover.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
 function applyBrightness(value) {
   const brightness = Math.min(120, Math.max(70, Number(value) || 100));
   if (brightness < 100) {
@@ -598,6 +615,8 @@ function applyUiSettings(settings = loadUiSettings()) {
   if (brightnessRange) brightnessRange.value = String(settings.brightness);
   setSwitchState($("#themeToggle"), settings.theme === "dark");
   setSwitchState($("#fullscreenToggle"), Boolean(document.fullscreenElement));
+  const themeLabel = $("#themeToggleText");
+  if (themeLabel) themeLabel.textContent = settings.theme === "dark" ? "日" : "夜";
 }
 
 async function toggleFullscreen() {
@@ -610,6 +629,11 @@ async function toggleFullscreen() {
 
 function bindUiSettings() {
   let settings = loadUiSettings();
+
+  $("#brightnessToggle")?.addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleBrightnessPopover();
+  });
 
   $("#brightnessRange")?.addEventListener("input", (event) => {
     settings = { ...settings, brightness: Number(event.target.value) };
@@ -629,6 +653,14 @@ function bindUiSettings() {
 
   document.addEventListener("fullscreenchange", () => {
     setSwitchState($("#fullscreenToggle"), Boolean(document.fullscreenElement));
+  });
+
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#brightnessMenu")) closeBrightnessPopover();
+  });
+
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeBrightnessPopover();
   });
 }
 
