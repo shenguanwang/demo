@@ -56,6 +56,21 @@ ADMIN_SETTINGS_FILE = ROOT / "admin_settings.json"
 
 
 def bootstrap_setting(key: str, default: str = "") -> str:
+    sqlite_state_file = Path(os.environ.get("STATE_DATABASE_PATH") or (ROOT / "workbench-state.db"))
+    if sqlite_state_file.exists():
+        try:
+            with sqlite3.connect(sqlite_state_file) as connection:
+                row = connection.execute(
+                    "SELECT settings FROM app_settings WHERE settings_key = ?",
+                    ("admin",),
+                ).fetchone()
+            if row:
+                settings = json.loads(row[0])
+                value = settings.get(key) if isinstance(settings, dict) else None
+                if value is not None and value != "":
+                    return str(value)
+        except (OSError, sqlite3.Error, json.JSONDecodeError):
+            pass
     try:
         data = json.loads(ADMIN_SETTINGS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -148,6 +163,25 @@ DISCOVERY_WORKER_GATE = DynamicConcurrencyGate(DISCOVERY_MAX_CONCURRENCY)
 
 
 def load_admin_settings_file() -> dict:
+    try:
+        initialize_state_store()
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT settings FROM app_settings WHERE settings_key = %s", ("admin",))
+                    row = cursor.fetchone()
+                    if row:
+                        return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                row = connection.execute(
+                    "SELECT settings FROM app_settings WHERE settings_key = ?",
+                    ("admin",),
+                ).fetchone()
+                if row:
+                    return json.loads(row[0])
+    except (OSError, RuntimeError, sqlite3.Error, json.JSONDecodeError):
+        pass
     if not ADMIN_SETTINGS_FILE.exists():
         return {}
     try:
@@ -158,10 +192,33 @@ def load_admin_settings_file() -> dict:
 
 
 def save_admin_settings_file(settings: dict) -> None:
-    ADMIN_SETTINGS_FILE.write_text(
-        json.dumps(settings, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    encoded = json.dumps(settings, ensure_ascii=False)
+    initialize_state_store()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO app_settings (settings_key, settings, updated_at)
+                    VALUES (%s, %s::jsonb, NOW())
+                    ON CONFLICT (settings_key) DO UPDATE SET
+                        settings = EXCLUDED.settings,
+                        updated_at = NOW()
+                    """,
+                    ("admin", encoded),
+                )
+        return
+    with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+        connection.execute(
+            """
+            INSERT INTO app_settings (settings_key, settings, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(settings_key) DO UPDATE SET
+                settings = excluded.settings,
+                updated_at = excluded.updated_at
+            """,
+            ("admin", encoded, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+        )
 
 
 def runtime_setting(key: str, default: str = "") -> str:
@@ -391,6 +448,38 @@ def postgres_connection():
     return psycopg.connect(DATABASE_URL)
 
 
+def migrate_admin_settings_file_to_database() -> None:
+    if not ADMIN_SETTINGS_FILE.exists():
+        return
+    try:
+        settings = json.loads(ADMIN_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(settings, dict):
+        return
+    encoded = json.dumps(settings, ensure_ascii=False)
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT settings_key FROM app_settings WHERE settings_key = %s", ("admin",))
+                if cursor.fetchone() is None:
+                    cursor.execute(
+                        "INSERT INTO app_settings (settings_key, settings, updated_at) VALUES (%s, %s::jsonb, NOW())",
+                        ("admin", encoded),
+                    )
+        return
+    with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+        exists = connection.execute(
+            "SELECT settings_key FROM app_settings WHERE settings_key = ?",
+            ("admin",),
+        ).fetchone()
+        if not exists:
+            connection.execute(
+                "INSERT INTO app_settings (settings_key, settings, updated_at) VALUES (?, ?, ?)",
+                ("admin", encoded, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+            )
+
+
 def initialize_state_store() -> None:
     if DATABASE_URL:
         with postgres_connection() as connection:
@@ -413,6 +502,15 @@ def initialize_state_store() -> None:
                         role TEXT NOT NULL DEFAULT 'user',
                         status TEXT NOT NULL DEFAULT 'enabled',
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS app_settings (
+                        settings_key TEXT PRIMARY KEY,
+                        settings JSONB NOT NULL,
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                     """
                 )
@@ -450,6 +548,7 @@ def initialize_state_store() -> None:
                     )
                     """
                 )
+        migrate_admin_settings_file_to_database()
         return
     SQLITE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(SQLITE_STATE_FILE) as connection:
@@ -471,6 +570,15 @@ def initialize_state_store() -> None:
                 role TEXT NOT NULL DEFAULT 'user',
                 status TEXT NOT NULL DEFAULT 'enabled',
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_settings (
+                settings_key TEXT PRIMARY KEY,
+                settings TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             )
             """
         )
@@ -510,6 +618,7 @@ def initialize_state_store() -> None:
             )
             """
         )
+    migrate_admin_settings_file_to_database()
 
 
 def empty_workspace_state() -> dict:
