@@ -13,6 +13,7 @@ import socket
 import socketserver
 import base64
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -52,6 +53,19 @@ PORT = int(os.environ.get("PORT") or os.environ.get("LEAD_TOOL_PORT", "8815"))
 HOST = os.environ.get("LEAD_TOOL_HOST", "127.0.0.1")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 ADMIN_SETTINGS_FILE = ROOT / "admin_settings.json"
+
+
+def bootstrap_setting(key: str, default: str = "") -> str:
+    try:
+        data = json.loads(ADMIN_SETTINGS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return os.environ.get(key, default)
+    value = data.get(key) if isinstance(data, dict) else None
+    if value is None or value == "":
+        return os.environ.get(key, default)
+    return str(value)
+
+
 GOOGLE_MAPS_KEY_FILE = ROOT / "google_maps_api_key.txt"
 SOCIAL_CAPTURE_DIR = ROOT / "social-captures"
 SOCIAL_CAPTURE_FILE = SOCIAL_CAPTURE_DIR / "captures.json"
@@ -62,10 +76,10 @@ DISCOVERY_CREATE_LOCK = threading.Lock()
 DISCOVERY_SCHEDULE_LOCK = threading.RLock()
 ACTIVE_DISCOVERY_WORKERS: set[str] = set()
 ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
-DISCOVERY_MAX_CONCURRENCY = max(2, int(os.environ.get("DISCOVERY_MAX_CONCURRENCY", "2")))
+DISCOVERY_MAX_CONCURRENCY = max(1, int(bootstrap_setting("DISCOVERY_MAX_CONCURRENCY", "2")))
 DISCOVERY_WORKER_SLOTS = threading.BoundedSemaphore(DISCOVERY_MAX_CONCURRENCY)
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
-NETWORK_DEFAULT_TIMEOUT = max(5, int(os.environ.get("NETWORK_DEFAULT_TIMEOUT", "12")))
+NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
 DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "900")))
 YOUTUBE_MAX_VIDEO_AGE_DAYS = 365 * 5
@@ -290,9 +304,46 @@ def normalize_admin_settings(payload: dict) -> dict:
 
 
 def restart_server_process(delay_seconds: float = 0.8) -> None:
+    restart_env = os.environ.copy()
+    settings = load_admin_settings_file()
+    for key, value in settings.items():
+        if key == ADMIN_CUSTOM_APIS_KEY or value is None or isinstance(value, (dict, list)):
+            continue
+        restart_env[key] = str(value)
+    for item in settings.get(ADMIN_CUSTOM_APIS_KEY, []):
+        if isinstance(item, dict) and item.get("envKey") and item.get("value") is not None:
+            restart_env[str(item["envKey"])] = str(item["value"])
+    args = [sys.executable, *sys.argv]
+
     def restart() -> None:
-        time.sleep(delay_seconds)
-        os.execv(sys.executable, [sys.executable, *sys.argv])
+        try:
+            if os.name == "nt":
+                env_file = ROOT / f"restart-env-{os.getpid()}.json"
+                env_file.write_text(json.dumps(restart_env), encoding="utf-8")
+                helper = (
+                    "import json, os, pathlib, subprocess, time; "
+                    f"env_file = pathlib.Path({str(env_file)!r}); "
+                    f"time.sleep({float(delay_seconds)!r}); "
+                    "env = json.loads(env_file.read_text(encoding='utf-8')); "
+                    "env_file.unlink(missing_ok=True); "
+                    f"subprocess.Popen({args!r}, cwd={str(ROOT)!r}, env=env)"
+                )
+                creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
+                subprocess.Popen(
+                    [sys.executable, "-c", helper],
+                    cwd=str(ROOT),
+                    close_fds=True,
+                    creationflags=creationflags,
+                )
+                time.sleep(0.2)
+                os._exit(0)
+            time.sleep(delay_seconds)
+            os.execve(sys.executable, args, restart_env)
+        except Exception as exc:
+            try:
+                (ROOT / "restart-error.log").write_text(str(exc), encoding="utf-8")
+            finally:
+                os._exit(1)
 
     threading.Thread(target=restart, daemon=True).start()
 
