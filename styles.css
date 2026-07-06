@@ -5466,3 +5466,127 @@ td {
 :root[data-theme="dark"] a {
   color: #9cc4ff;
 }
+
+:root[data-theme="dark"] .source-availability,
+:root[data-theme="dark"] .source-availability.ready,
+:root[data-theme="dark"] .source-availability.warning,
+:root[data-theme="dark"] .source-guide,
+:root[data-theme="dark"] .finder-advanced,
+:root[data-theme="dark"] .required-fields b,
+:root[data-theme="dark"] .quality-mode-badge,
+:root[data-theme="dark"] .extension-install-note,
+:root[data-theme="dark"] .finder-history,
+:root[data-theme="dark"] .finder-history-card,
+:root[data-theme="dark"] .schedule-item,
+:root[data-theme="dark"] .discovery-job,
+:root[data-theme="dark"] .discovery-pager,
+:root[data-theme="dark"] .schedule-pager,
+:root[data-theme="dark"] .insight-box,
+:root[data-theme="dark"] .finder-progress-track,
+:root[data-theme="dark"] .progress-step,
+:root[data-theme="dark"] .job-diagnostics,
+:root[data-theme="dark"] .job-diagnostics p,
+:root[data-theme="dark"] .source-original,
+:root[data-theme="dark"] .quote-summary-grid div,
+:root[data-theme="dark"] .quote-result,
+:root[data-theme="dark"] .aftersales-card,
+:root[data-theme="dark"] .aftersales-log {
+  border-color: #2a3038;
+  background: #171a20;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .source-guide div,
+:root[data-theme="dark"] .finder-history-card,
+:root[data-theme="dark"] .schedule-item,
+:root[data-theme="dark"] .discovery-job,
+:root[data-theme="dark"] .progress-step,
+:root[data-theme="dark"] .required-fields b {
+  background: #20242b;
+}
+
+:root[data-theme="dark"] .finder-advanced summary,
+:root[data-theme="dark"] .source-guide h4,
+:root[data-theme="dark"] .platform-search-title b,
+:root[data-theme="dark"] .finder-progress-head strong,
+:root[data-theme="dark"] .finder-history-head strong,
+:root[data-theme="dark"] .finder-history-card strong,
+:root[data-theme="dark"] .discovery-job-title strong,
+:root[data-theme="dark"] .schedule-title strong,
+:root[data-theme="dark"] .quote-total-card strong,
+:root[data-theme="dark"] .quote-summary-grid strong,
+:root[data-theme="dark"] .quote-cost-head,
+:root[data-theme="dark"] .quote-cost-list dd,
+:root[data-theme="dark"] .aftersales-card dd {
+  color: #f7f8fa;
+}
+
+:root[data-theme="dark"] .finder-advanced summary small,
+:root[data-theme="dark"] .required-fields > span,
+:root[data-theme="dark"] .verification-rules > div,
+:root[data-theme="dark"] .source-guide span,
+:root[data-theme="dark"] .finder-history-head span,
+:root[data-theme="dark"] .finder-history-card span,
+:root[data-theme="dark"] .finder-history-card p,
+:root[data-theme="dark"] .finder-history-card footer,
+:root[data-theme="dark"] .discovery-task-controls > span,
+:root[data-theme="dark"] .discovery-job-title span,
+:root[data-theme="dark"] .discovery-job-meta span,
+:root[data-theme="dark"] .discovery-job-status p,
+:root[data-theme="dark"] .job-diagnostics p,
+:root[data-theme="dark"] .job-diagnostics small,
+:root[data-theme="dark"] .schedule-title span,
+:root[data-theme="dark"] .schedule-item p,
+:root[data-theme="dark"] .schedule-item small,
+:root[data-theme="dark"] .quote-total-card span,
+:root[data-theme="dark"] .quote-total-card small,
+:root[data-theme="dark"] .quote-summary-grid span,
+:root[data-theme="dark"] .quote-cost-list dt,
+:root[data-theme="dark"] .quote-disclaimer,
+:root[data-theme="dark"] .aftersales-card-head span,
+:root[data-theme="dark"] .aftersales-card dt,
+:root[data-theme="dark"] .aftersales-log small {
+  color: #aeb6c2 !important;
+}
+
+:root[data-theme="dark"] .finder-history-card[data-discovery-history-job]:hover,
+:root[data-theme="dark"] .finder-history-card[data-discovery-history-job]:focus-visible,
+:root[data-theme="dark"] .finder-history-card.active,
+:root[data-theme="dark"] .discovery-job.active,
+:root[data-theme="dark"] .discovery-job:hover {
+  border-color: #3a424d;
+  background: #252a32;
+}
+
+:root[data-theme="dark"] .finder-progress-track {
+  background: #2b313a;
+}
+
+:root[data-theme="dark"] .finder-progress-track > div {
+  background: #f4f6f8;
+}
+
+:root[data-theme="dark"] .discovery-pager .ghost.compact,
+:root[data-theme="dark"] .schedule-pager .ghost.compact,
+:root[data-theme="dark"] .discovery-job-action,
+:root[data-theme="dark"] .discovery-job-delete,
+:root[data-theme="dark"] .schedule-actions button,
+:root[data-theme="dark"] .quote-row-actions button,
+:root[data-theme="dark"] .quote-delete {
+  border-color: #343b46;
+  background: #20242b;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .job-state.running,
+:root[data-theme="dark"] .job-state.queued,
+:root[data-theme="dark"] .job-state.completed,
+:root[data-theme="dark"] .job-state.failed,
+:root[data-theme="dark"] .job-state.canceled,
+:root[data-theme="dark"] .schedule-status,
+:root[data-theme="dark"] .schedule-title .enabled,
+:root[data-theme="dark"] .schedule-title .paused {
+  border-color: #3a424d;
+  background: #2b313a;
+  color: #f4f6f8;
+}
