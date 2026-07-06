@@ -402,6 +402,7 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin-right: 150px;
   color: var(--muted);
   font-size: 12px;
 }
@@ -5346,4 +5347,122 @@ td {
 :root[data-theme="dark"] .follow-save-row button {
   background: #fff;
   color: #111820;
+}
+
+:root[data-theme="dark"] body {
+  background: #0f1115;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .topbar h1,
+:root[data-theme="dark"] .section-head h2,
+:root[data-theme="dark"] .welcome-copy h2,
+:root[data-theme="dark"] .welcome-copy h2 em,
+:root[data-theme="dark"] .block-head h3,
+:root[data-theme="dark"] .review-list-main strong,
+:root[data-theme="dark"] .review-workbench-list-head strong,
+:root[data-theme="dark"] .review-title-row h3 {
+  color: #f7f8fa;
+}
+
+:root[data-theme="dark"] .topbar-status,
+:root[data-theme="dark"] .section-head p,
+:root[data-theme="dark"] .welcome-copy > p,
+:root[data-theme="dark"] .block-head > span,
+:root[data-theme="dark"] .workflow > button p,
+:root[data-theme="dark"] .metric-strip small,
+:root[data-theme="dark"] .metric-strip em,
+:root[data-theme="dark"] .review-title-row p,
+:root[data-theme="dark"] .review-list-main span,
+:root[data-theme="dark"] .review-list-badges span,
+:root[data-theme="dark"] .review-list-meta span {
+  color: #aeb6c2;
+}
+
+:root[data-theme="dark"] .overview-welcome,
+:root[data-theme="dark"] .overview-block,
+:root[data-theme="dark"] .metric-strip > button,
+:root[data-theme="dark"] .review-toolbar,
+:root[data-theme="dark"] .review-workbench-list,
+:root[data-theme="dark"] .review-card,
+:root[data-theme="dark"] .cards article,
+:root[data-theme="dark"] .panel,
+:root[data-theme="dark"] .task-list article {
+  border-color: #2a3038;
+  background: #171a20;
+  color: #f4f6f8;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.28);
+}
+
+:root[data-theme="dark"] .overview-welcome {
+  background:
+    radial-gradient(circle at 35% 10%, rgba(255, 255, 255, 0.07), transparent 30%),
+    linear-gradient(135deg, #171a20 0%, #12151a 62%, #0f1115 100%);
+}
+
+:root[data-theme="dark"] .daily-focus {
+  border-left: 1px solid #2a3038;
+  background: #101318;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .daily-focus button,
+:root[data-theme="dark"] .workflow > button,
+:root[data-theme="dark"] .review-list-row,
+:root[data-theme="dark"] .review-workbench-list-head,
+:root[data-theme="dark"] .review-decision > div,
+:root[data-theme="dark"] .review-key-info > div,
+:root[data-theme="dark"] .source-evidence > div,
+:root[data-theme="dark"] .follow-summary span,
+:root[data-theme="dark"] .keyword-list span,
+:root[data-theme="dark"] .follow-history {
+  border-color: #2a3038;
+  background: #20242b;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .daily-focus button:hover,
+:root[data-theme="dark"] .workflow > button:hover,
+:root[data-theme="dark"] .review-list-row:hover,
+:root[data-theme="dark"] .review-list-row.active,
+:root[data-theme="dark"] .metric-strip > button:hover,
+:root[data-theme="dark"] .review-card:hover {
+  border-color: #3a424d;
+  background: #252a32;
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea,
+:root[data-theme="dark"] .review-filter-group select {
+  border-color: #343b46;
+  background: #11151b;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .ghost,
+:root[data-theme="dark"] .danger-button,
+:root[data-theme="dark"] .user-actions button {
+  border-color: #343b46;
+  background: #20242b;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .status-pill,
+:root[data-theme="dark"] .tag,
+:root[data-theme="dark"] .workflow-icon,
+:root[data-theme="dark"] .metric-icon,
+:root[data-theme="dark"] .review-list-badges b,
+:root[data-theme="dark"] .review-list-meta span {
+  background: #2b313a;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .review-card > .split-actions {
+  border-color: #2a3038;
+  background: rgba(16, 19, 24, 0.96);
+}
+
+:root[data-theme="dark"] a {
+  color: #9cc4ff;
 }
