@@ -3526,6 +3526,124 @@ tbody tr:last-child td {
   line-height: 1.65;
 }
 
+.finder-progress-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.finder-progress-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.finder-progress-card.running {
+  border-color: rgba(184, 134, 34, 0.34);
+  background: #fffdf7;
+}
+
+.finder-progress-card.error {
+  border-color: rgba(201, 75, 75, 0.35);
+  background: #fff8f8;
+}
+
+.finder-progress-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.finder-progress-card-head > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.finder-progress-card-head span,
+.finder-progress-card-head small,
+.finder-progress-card p small {
+  color: #7b8491;
+  font-size: 11px;
+}
+
+.finder-progress-card-head strong {
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.finder-progress-card-head b {
+  color: #9a6b10;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.finder-progress-track.compact {
+  height: 6px;
+  margin-top: 10px;
+}
+
+.finder-progress-mini-steps {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.finder-progress-mini-steps span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #8b95a1;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.finder-progress-mini-steps i {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  border: 1px solid #d8dce2;
+  border-radius: 50%;
+  background: #fff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.finder-progress-mini-steps .active,
+.finder-progress-mini-steps .complete {
+  color: #252b33;
+  font-weight: 700;
+}
+
+.finder-progress-mini-steps .active i {
+  border-color: #c79a3d;
+  background: #fff7e4;
+  color: #9a6b10;
+}
+
+.finder-progress-mini-steps .complete i {
+  border-color: #a67a23;
+  background: #a67a23;
+  color: #fff;
+}
+
+.finder-progress-card p {
+  display: grid;
+  gap: 3px;
+  margin: 10px 0 0;
+  color: #586272;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
 @keyframes finder-progress-shimmer {
   from { background-position: 100% 0; }
   to { background-position: -100% 0; }
@@ -5609,6 +5727,7 @@ td {
 :root[data-theme="dark"] .extension-install-note,
 :root[data-theme="dark"] .finder-history,
 :root[data-theme="dark"] .finder-history-card,
+:root[data-theme="dark"] .finder-progress-card,
 :root[data-theme="dark"] .schedule-item,
 :root[data-theme="dark"] .discovery-job,
 :root[data-theme="dark"] .discovery-pager,
@@ -5630,6 +5749,7 @@ td {
 
 :root[data-theme="dark"] .source-guide div,
 :root[data-theme="dark"] .finder-history-card,
+:root[data-theme="dark"] .finder-progress-card,
 :root[data-theme="dark"] .schedule-item,
 :root[data-theme="dark"] .discovery-job,
 :root[data-theme="dark"] .progress-step,
@@ -5641,6 +5761,9 @@ td {
 :root[data-theme="dark"] .source-guide h4,
 :root[data-theme="dark"] .platform-search-title b,
 :root[data-theme="dark"] .finder-progress-head strong,
+:root[data-theme="dark"] .finder-progress-card-head strong,
+:root[data-theme="dark"] .finder-progress-mini-steps .active,
+:root[data-theme="dark"] .finder-progress-mini-steps .complete,
 :root[data-theme="dark"] .finder-history-head strong,
 :root[data-theme="dark"] .finder-history-card strong,
 :root[data-theme="dark"] .discovery-job-title strong,
@@ -5661,6 +5784,11 @@ td {
 :root[data-theme="dark"] .finder-history-card span,
 :root[data-theme="dark"] .finder-history-card p,
 :root[data-theme="dark"] .finder-history-card footer,
+:root[data-theme="dark"] .finder-progress-card p,
+:root[data-theme="dark"] .finder-progress-card p small,
+:root[data-theme="dark"] .finder-progress-card-head span,
+:root[data-theme="dark"] .finder-progress-card-head small,
+:root[data-theme="dark"] .finder-progress-mini-steps span,
 :root[data-theme="dark"] .discovery-task-controls > span,
 :root[data-theme="dark"] .discovery-job-title span,
 :root[data-theme="dark"] .discovery-job-meta span,
@@ -5696,6 +5824,22 @@ td {
 
 :root[data-theme="dark"] .finder-progress-track > div {
   background: #f4f6f8;
+}
+
+:root[data-theme="dark"] .finder-progress-card.running {
+  border-color: rgba(217, 166, 63, 0.45);
+  background: #1f1b12;
+}
+
+:root[data-theme="dark"] .finder-progress-card.error {
+  border-color: rgba(248, 113, 113, 0.38);
+  background: #211617;
+}
+
+:root[data-theme="dark"] .finder-progress-mini-steps i {
+  border-color: #374151;
+  background: #10141a;
+  color: #9ca6b3;
 }
 
 :root[data-theme="dark"] .discovery-pager .ghost.compact,

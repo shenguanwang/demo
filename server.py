@@ -1942,7 +1942,7 @@ def discovery_progress_message(source_mode: str, stage: str) -> str:
 
 def heartbeat_discovery_job(job_id: str, source_mode: str, stop_event: threading.Event) -> None:
     started_at = time.monotonic()
-    while not stop_event.wait(25):
+    while not stop_event.wait(8):
         elapsed = time.monotonic() - started_at
         if elapsed > DISCOVERY_JOB_TIMEOUT_SECONDS:
             update_discovery_job(
@@ -1964,8 +1964,16 @@ def heartbeat_discovery_job(job_id: str, source_mode: str, stop_event: threading
             )
             stop_event.set()
             return
-        progress = min(75, 12 + int(elapsed // 30) * 5)
-        stage = "search" if progress < 35 else "extract" if progress < 68 else "verify"
+        if elapsed < 20:
+            progress = 12 + int(elapsed // 4) * 3
+        elif elapsed < 90:
+            progress = 27 + int((elapsed - 20) // 7) * 3
+        elif elapsed < 240:
+            progress = 57 + int((elapsed - 90) // 15) * 2
+        else:
+            progress = 77 + int((elapsed - 240) // 30) * 2
+        progress = min(92, progress)
+        stage = "search" if progress < 36 else "extract" if progress < 70 else "verify"
         update_discovery_job(
             job_id,
             skip_statuses=("canceled", "completed", "failed"),

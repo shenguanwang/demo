@@ -1336,6 +1336,7 @@ function showCandidateInReview(leadId) {
 }
 
 const finderStageOrder = ["search", "extract", "verify", "done"];
+const FINDER_PROGRESS_LIST_LIMIT = 6;
 
 function setFinderProgress({ percent, stage, title, message, elapsed, state = "running" }) {
   const safePercent = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
@@ -1363,6 +1364,78 @@ function setFinderProgress({ percent, stage, title, message, elapsed, state = "r
 function setFinderStatus(message) {
   const el = $("#finderStatus");
   if (el) el.textContent = message;
+}
+
+function normalizedDiscoveryJobProgress(job = {}) {
+  const raw = Math.max(0, Math.min(100, Number(job.progress || 0)));
+  if (job.status === "completed" || job.imported) return { percent: 100, stage: "done", state: "complete" };
+  if (job.status === "failed" || job.status === "canceled") return { percent: 100, stage: "done", state: "error" };
+  if (job.status === "queued") return { percent: Math.max(5, Math.min(raw || 5, 12)), stage: "search", state: "running" };
+  const stage = finderStageOrder.includes(job.stage) ? job.stage : "search";
+  const stageMinimum = { search: 12, extract: 36, verify: 70, done: 100 }[stage] || 12;
+  const stageMaximum = { search: 35, extract: 69, verify: 94, done: 100 }[stage] || 94;
+  return {
+    percent: Math.max(stageMinimum, Math.min(raw || stageMinimum, stageMaximum)),
+    stage,
+    state: "running"
+  };
+}
+
+function discoveryJobElapsedText(job = {}) {
+  const start = new Date(job.createdAt || job.updatedAt || "");
+  if (Number.isNaN(start.getTime())) return job.status === "queued" ? "等待执行" : "";
+  if (["completed", "failed", "canceled"].includes(job.status)) {
+    return formatJobTime(job.updatedAt || job.createdAt);
+  }
+  const seconds = Math.max(0, Math.floor((Date.now() - start.getTime()) / 1000));
+  if (seconds < 60) return `已用时 ${seconds} 秒`;
+  return `已用时 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`;
+}
+
+function renderJobProgressSteps(job = {}, progress = normalizedDiscoveryJobProgress(job)) {
+  const activeIndex = finderStageOrder.indexOf(progress.stage);
+  return finderStageOrder.map((stage, index) => {
+    const labels = { search: "搜索", extract: "提取", verify: "核验", done: "保存" };
+    const complete = activeIndex > index || (progress.stage === "done" && progress.percent === 100 && index <= activeIndex);
+    const active = index === activeIndex && !complete && progress.state === "running";
+    return `<span class="${complete ? "complete" : active ? "active" : ""}"><i>${complete ? "✓" : index + 1}</i>${escapeHtml(labels[stage])}</span>`;
+  }).join("");
+}
+
+function renderFinderProgressList() {
+  const box = $("#finderProgressList");
+  if (!box) return;
+  const stateLabels = discoveryJobStateLabels();
+  const jobs = [...discoveryJobs]
+    .sort((a, b) => new Date(b.createdAt || b.updatedAt || 0) - new Date(a.createdAt || a.updatedAt || 0))
+    .slice(0, FINDER_PROGRESS_LIST_LIMIT);
+  box.innerHTML = jobs.length ? jobs.map((job, index) => {
+    const progress = normalizedDiscoveryJobProgress(job);
+    const count = Number(job.result?.count || job.result?.leads?.length || 0);
+    const title = `${job.country || "未指定市场"} · ${job.model || "未指定车型"}`;
+    const resultText = job.status === "completed"
+      ? (job.imported ? `已导入 ${count} 条` : `发现 ${count} 条`)
+      : stateLabels[job.status] || job.status || "处理中";
+    return `
+      <article class="finder-progress-card ${escapeHtml(progress.state)} ${escapeHtml(job.status || "")}" data-finder-progress-job="${escapeHtml(job.id || "")}">
+        <div class="finder-progress-card-head">
+          <div>
+            <span>#${index + 1} · ${escapeHtml(discoverySourceLabel(job.sourceMode))}</span>
+            <strong>${escapeHtml(title)}</strong>
+          </div>
+          <div>
+            <b>${progress.percent}%</b>
+            <small>${escapeHtml(resultText)}</small>
+          </div>
+        </div>
+        <div class="finder-progress-track compact" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percent}">
+          <div style="width:${progress.percent}%"></div>
+        </div>
+        <div class="finder-progress-mini-steps">${renderJobProgressSteps(job, progress)}</div>
+        <p>${escapeHtml(job.error || job.message || "任务已进入云端队列。")}<small>${escapeHtml(discoveryJobElapsedText(job))}</small></p>
+      </article>
+    `;
+  }).join("") : "";
 }
 
 function startFinderSearchProgress() {
@@ -3706,6 +3779,7 @@ function renderDiscoveryJobs() {
       </article>
     `;
   }).join("") : `<p class="empty">暂无云端获客任务。</p>`;
+  renderFinderProgressList();
   renderDiscoveryHistory();
 }
 
@@ -3865,12 +3939,13 @@ async function loadDiscoveryJobs() {
   renderReviewFilterOptions();
   const active = discoveryJobs.find((job) => ["queued", "running"].includes(job.status));
   if (active) {
+    const progress = normalizedDiscoveryJobProgress(active);
     setFinderProgress({
-      percent: Math.max(5, Number(active.progress || 5)),
-      stage: active.stage || "search",
-      state: "running",
-      title: "已恢复云端获客任务",
-      elapsed: "后台持续运行",
+      percent: progress.percent,
+      stage: progress.stage,
+      state: progress.state,
+      title: "云端获客任务运行中",
+      elapsed: discoveryJobElapsedText(active) || "后台持续运行",
       message: active.message || "任务仍在云端执行，可以关闭当前页面。"
     });
   }
@@ -4066,10 +4141,12 @@ async function runCloudDiscovery(data, words, onProgress) {
   if (!startResponse.ok || !startResult.ok || !startResult.job?.id) {
     throw new Error(startResult.error || `云端任务创建失败（HTTP ${startResponse.status}）`);
   }
-  if (typeof onProgress === "function" && startResult.job.reused) {
+  if (typeof onProgress === "function") {
     onProgress({
       ...startResult.job,
-      message: "检测到相同搜索正在运行，已接入现有任务，未重复创建。"
+      message: startResult.job.reused
+        ? "检测到相同搜索正在运行，已接入现有任务，未重复创建。"
+        : (startResult.job.message || "云端获客任务已创建，正在等待执行。")
     });
   }
 
@@ -4234,7 +4311,11 @@ function bindForms() {
     event.preventDefault();
     const submitButton = event.currentTarget.querySelector('button[type="submit"]');
     submitButton.disabled = true;
-    submitButton.textContent = "正在搜索并自动核验…";
+    submitButton.textContent = "正在提交获客任务…";
+    window.setTimeout(() => {
+      submitButton.disabled = false;
+      submitButton.textContent = "一键获客到待审核";
+    }, 1500);
     discoveryJobPage = 1;
     finderHistoryPage = 1;
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
@@ -4244,7 +4325,16 @@ function bindForms() {
     renderKeywords(words);
     const searchProgress = startFinderSearchProgress();
     runCloudDiscovery(data, words, (job) => {
-      setFinderStatus(job.message || "云端正在检索公开商业来源，无需启动本地工作台。");
+      searchProgress.stop();
+      const progress = normalizedDiscoveryJobProgress(job);
+      setFinderProgress({
+        percent: progress.percent,
+        stage: progress.stage,
+        state: progress.state,
+        title: job.reused ? "已接入已有获客任务" : "云端获客任务运行中",
+        elapsed: discoveryJobElapsedText(job) || "后台持续运行",
+        message: job.message || "云端正在检索公开商业来源，无需启动本地工作台。"
+      });
       loadDiscoveryJobs().catch(() => undefined);
     })
       .then(async (result) => {
