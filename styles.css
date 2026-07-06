@@ -1416,7 +1416,7 @@ textarea {
 .finder-history-card {
   display: grid;
   gap: 5px;
-  min-height: 86px;
+  min-height: 92px;
   padding: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -3532,7 +3532,14 @@ tbody tr:last-child td {
   margin-top: 12px;
 }
 
+.finder-progress-list-inline {
+  margin-top: 12px;
+}
+
 .finder-progress-card {
+  display: grid;
+  align-content: start;
+  min-height: 123px;
   padding: 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
