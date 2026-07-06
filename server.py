@@ -116,8 +116,6 @@ socket.setdefaulttimeout(NETWORK_DEFAULT_TIMEOUT)
 ADMIN_SETTING_DEFINITIONS = {
     "GOOGLE_MAPS_API_KEY": {"type": "secret", "label": "Google Maps Places API Key", "group": "maps", "status": "active", "use": "Google Maps 企业地点搜索"},
     "YOUTUBE_API_KEY": {"type": "secret", "label": "YouTube Data API Key", "group": "social", "status": "active", "use": "YouTube 官方频道/视频搜索"},
-    "OPENAI_API_KEY": {"type": "secret", "label": "OpenAI API Key", "group": "ai", "status": "ready", "use": "ChatGPT/AI 审核/开发信"},
-    "OPENAI_MODEL": {"type": "text", "label": "OpenAI 模型", "group": "ai", "status": "ready", "use": "AI 默认模型"},
     "FACEBOOK_ACCESS_TOKEN": {"type": "secret", "label": "Facebook Graph API Token", "group": "social", "status": "reserved", "use": "后续 Facebook 主页/线索接口"},
     "INSTAGRAM_ACCESS_TOKEN": {"type": "secret", "label": "Instagram Graph API Token", "group": "social", "status": "reserved", "use": "后续 Instagram 商业账号接口"},
     "TIKTOK_API_KEY": {"type": "secret", "label": "TikTok API Key", "group": "social", "status": "reserved", "use": "后续 TikTok 公开账号/商业接口"},
@@ -250,177 +248,6 @@ def public_base_url() -> str:
 
 def get_youtube_api_key() -> str:
     return runtime_setting("YOUTUBE_API_KEY")
-
-
-def get_openai_api_key() -> str:
-    return runtime_setting("OPENAI_API_KEY")
-
-
-def get_openai_model() -> str:
-    return runtime_setting("OPENAI_MODEL", "gpt-5.5") or "gpt-5.5"
-
-
-def response_output_text(response: dict) -> str:
-    if isinstance(response.get("output_text"), str):
-        return response["output_text"]
-    parts: list[str] = []
-    for item in response.get("output", []) if isinstance(response.get("output"), list) else []:
-        for content in item.get("content", []) if isinstance(item, dict) else []:
-            if not isinstance(content, dict):
-                continue
-            text = content.get("text") or content.get("output_text")
-            if isinstance(text, str):
-                parts.append(text)
-    return "\n".join(parts).strip()
-
-
-def parse_json_from_text(text: str) -> dict:
-    value = (text or "").strip()
-    if value.startswith("```"):
-        value = re.sub(r"^```(?:json)?\s*", "", value, flags=re.IGNORECASE)
-        value = re.sub(r"\s*```$", "", value)
-    try:
-        parsed = json.loads(value)
-    except json.JSONDecodeError:
-        match = re.search(r"\{[\s\S]*\}", value)
-        if not match:
-            raise
-        parsed = json.loads(match.group(0))
-    if not isinstance(parsed, dict):
-        raise ValueError("AI response must be a JSON object")
-    return parsed
-
-
-def call_openai_json(task: str, payload: dict) -> dict:
-    api_key = get_openai_api_key()
-    if not api_key:
-        raise ValueError("OpenAI API Key is not configured")
-    model = get_openai_model()
-    system_prompt = (
-        "You are an overseas automotive export sales assistant for HIMA smart EVs. "
-        "Return only valid JSON. Do not include Markdown. "
-        "Use concise Chinese for analysis fields and practical English for outbound copy."
-    )
-    request_body = {
-        "model": model,
-        "input": [
-            {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": json.dumps({"task": task, "data": payload}, ensure_ascii=False),
-            },
-        ],
-    }
-    request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
-        data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=max(30, NETWORK_DEFAULT_TIMEOUT)) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"OpenAI API failed: HTTP {exc.code} {detail[:300]}")
-    text = response_output_text(result)
-    if not text:
-        raise RuntimeError("OpenAI API returned an empty response")
-    parsed = parse_json_from_text(text)
-    parsed["_model"] = model
-    return parsed
-
-
-def ai_generate_email(payload: dict) -> dict:
-    fields = {
-        "company": str(payload.get("company", ""))[:300],
-        "contactName": str(payload.get("contactName", ""))[:160],
-        "recipientEmail": str(payload.get("recipientEmail", ""))[:240],
-        "website": str(payload.get("website", ""))[:600],
-        "websiteText": str(payload.get("websiteText", ""))[:6000],
-        "model": str(payload.get("model", ""))[:120],
-        "channel": str(payload.get("channel", ""))[:80],
-    }
-    instruction = {
-        "requiredJsonShape": {
-            "insight": "Chinese lead judgment, 1-2 sentences",
-            "english": "Outbound message in English. Include Subject: line when channel is Email.",
-            "chinese": "Chinese explanation of the English message",
-            "followUps": [{"day": "Day 2", "text": "English follow-up message"}],
-        },
-        "rules": [
-            "Focus on HIMA smart EV export from China.",
-            "Do not claim partnership or inventory unless provided.",
-            "Ask for permission to send colors, specs, and dealer CIF quotation.",
-        ],
-        **fields,
-    }
-    result = call_openai_json("generate_outbound_message", instruction)
-    follow_ups = result.get("followUps")
-    if not isinstance(follow_ups, list):
-        follow_ups = []
-    return {
-        "insight": str(result.get("insight", ""))[:1200],
-        "english": str(result.get("english", ""))[:5000],
-        "chinese": str(result.get("chinese", ""))[:1600],
-        "followUps": [
-            {"day": str(item.get("day", ""))[:80], "text": str(item.get("text", ""))[:1000]}
-            for item in follow_ups[:5]
-            if isinstance(item, dict)
-        ],
-        "model": result.get("_model"),
-    }
-
-
-def ai_review_lead(payload: dict) -> dict:
-    lead = payload.get("lead") if isinstance(payload.get("lead"), dict) else payload
-    compact = {
-        key: lead.get(key)
-        for key in (
-            "company", "country", "city", "type", "source", "sourceUrl", "customerWebsite",
-            "contactName", "contactRole", "email", "phone", "whatsapp", "model",
-            "researchSummary", "reason", "contactReason", "businessSignals",
-            "intentSignals", "evidenceSources", "socialProfiles", "score",
-        )
-        if key in lead
-    }
-    instruction = {
-        "requiredJsonShape": {
-            "score": "integer 0-100",
-            "scoreTier": "A/B/C/D",
-            "confidence": "integer 0-100",
-            "decision": "Chinese decision label",
-            "contactReason": "Chinese reason to contact",
-            "next": "Chinese next action",
-            "recommendedModels": ["HIMA model names"],
-            "scoreBreakdown": [{"label": "Chinese short reason", "points": 0}],
-        },
-        "businessRule": "Prioritize overseas car importers, premium EV dealers, parallel-import dealers, fleet buyers, and reachable companies.",
-        "lead": compact,
-    }
-    result = call_openai_json("review_sales_lead", instruction)
-    score = max(0, min(100, int(result.get("score", 0) or 0)))
-    confidence = max(0, min(100, int(result.get("confidence", 0) or 0)))
-    return {
-        "score": score,
-        "scoreTier": str(result.get("scoreTier") or ("A" if score >= 85 else "B" if score >= 70 else "C" if score >= 55 else "D"))[:20],
-        "confidence": confidence,
-        "confidenceLabel": "AI",
-        "sourceCoverage": {
-            **(lead.get("sourceCoverage") if isinstance(lead.get("sourceCoverage"), dict) else {}),
-            "decision": str(result.get("decision", ""))[:300],
-        },
-        "contactReason": str(result.get("contactReason", ""))[:1000],
-        "reason": str(result.get("contactReason", ""))[:1000],
-        "next": str(result.get("next", ""))[:500],
-        "recommendedModels": result.get("recommendedModels") if isinstance(result.get("recommendedModels"), list) else [],
-        "scoreBreakdown": result.get("scoreBreakdown") if isinstance(result.get("scoreBreakdown"), list) else [],
-        "aiReviewedAt": datetime.now(timezone.utc).isoformat(),
-        "aiModel": result.get("_model"),
-    }
 
 
 def admin_settings_payload() -> dict:
@@ -7116,22 +6943,6 @@ class Handler(SimpleHTTPRequestHandler):
                 )
                 self.send_json(200, {"ok": True, **result})
             except (ValueError, json.JSONDecodeError, OSError, urllib.error.URLError, RuntimeError, sqlite3.Error) as exc:
-                self.send_json(400, {"ok": False, "error": str(exc)})
-            return
-        if parsed.path == "/api/ai/generate-email":
-            try:
-                content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
-                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
-                self.send_json(200, {"ok": True, **ai_generate_email(payload)})
-            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, urllib.error.URLError) as exc:
-                self.send_json(400, {"ok": False, "error": str(exc)})
-            return
-        if parsed.path == "/api/ai/review-lead":
-            try:
-                content_length = min(int(self.headers.get("Content-Length", "0")), 262_144)
-                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
-                self.send_json(200, {"ok": True, "leadPatch": ai_review_lead(payload)})
-            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, urllib.error.URLError) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/workspace-state":

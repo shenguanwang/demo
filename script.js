@@ -1556,7 +1556,6 @@ function renderReview() {
           ? `<a class="button-link ghost" href="${escapeHtml(safeHttpUrl(lead.sourceUrl || lead.source))}" target="_blank" rel="noopener noreferrer">查看线索原文</a>`
           : `<button class="ghost" type="button" disabled title="该线索没有可打开的原始网址">查看线索原文</button>`}
         ${reviewMode === "pending" ? `
-          <button class="ghost" type="button" data-ai-review-index="${index}">AI审核</button>
           <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
           <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
           <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
@@ -3056,84 +3055,6 @@ function generateLetter(data) {
   return { insight, english, chinese, followUps };
 }
 
-function normalizeGeneratedLetter(result, fallbackData = {}) {
-  const fallback = generateLetter(fallbackData);
-  return {
-    insight: result?.insight || fallback.insight,
-    english: result?.english || fallback.english,
-    chinese: result?.chinese || fallback.chinese,
-    followUps: Array.isArray(result?.followUps) && result.followUps.length ? result.followUps : fallback.followUps,
-    model: result?.model || ""
-  };
-}
-
-function renderGeneratedLetter(result) {
-  $("#leadInsight").textContent = result.insight || "";
-  $("#englishLetter").textContent = result.english || "";
-  $("#chineseMeaning").textContent = result.chinese || "";
-  $("#followUpSequence").innerHTML = (Array.isArray(result.followUps) ? result.followUps : []).map((item) =>
-    `<p><strong>${escapeHtml(item.day || "")}</strong>${escapeHtml(item.text || "")}</p>`
-  ).join("");
-}
-
-async function generateAiLetter(data) {
-  const response = await apiFetch("/api/ai/generate-email", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data)
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-  return normalizeGeneratedLetter(result, data);
-}
-
-async function generateAndRenderLetter(data, options = {}) {
-  const status = $("#outlookDraftStatus");
-  if (status) status.textContent = "AI 正在生成开发信...";
-  try {
-    const result = await generateAiLetter(data);
-    renderGeneratedLetter(result);
-    if (status) status.textContent = `AI 已生成开发信${result.model ? ` · ${result.model}` : ""}`;
-    if (options.openOutlook) openOutlookDraft(data);
-    return result;
-  } catch (error) {
-    const fallback = normalizeGeneratedLetter(null, data);
-    renderGeneratedLetter(fallback);
-    if (status) status.textContent = `AI 暂不可用，已使用本地模板：${error.message}`;
-    if (options.openOutlook) openOutlookDraft(data);
-    return fallback;
-  }
-}
-
-async function aiReviewLead(index) {
-  const lead = reviewLeads[index];
-  if (!lead) return;
-  const button = document.querySelector(`[data-ai-review-index="${CSS.escape(String(index))}"]`);
-  if (button) {
-    button.disabled = true;
-    button.textContent = "AI审核中";
-  }
-  try {
-    const response = await apiFetch("/api/ai/review-lead", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ lead })
-    });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    reviewLeads[index] = normalizeLead({ ...lead, ...(result.leadPatch || {}) });
-    selectedReviewLeadId = `pending:${reviewLeads[index].id || index}`;
-    saveState();
-    refreshAllLeadViews();
-  } catch (error) {
-    alert(`AI审核失败：${error.message}`);
-    if (button) {
-      button.disabled = false;
-      button.textContent = "AI审核";
-    }
-  }
-}
-
 function emailDraftFromGeneratedText(text, data = {}) {
   const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
   const subjectIndex = lines.findIndex((line) => /^subject\s*:/i.test(line.trim()));
@@ -4517,18 +4438,32 @@ function bindForms() {
     status.textContent = `已保存 ${data.company}，请到线索审核执行全网补全。`;
   });
 
-  $("#emailForm").addEventListener("submit", async (event) => {
+  $("#emailForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-    await generateAndRenderLetter(data, { openOutlook: true });
+    const result = generateLetter(data);
+    $("#leadInsight").textContent = result.insight;
+    $("#englishLetter").textContent = result.english;
+    $("#chineseMeaning").textContent = result.chinese;
+    $("#followUpSequence").innerHTML = result.followUps.map((item) =>
+      `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
+    ).join("");
+    openOutlookDraft(data);
   });
 
-  $("#fillLeadFromCrm").addEventListener("click", async () => {
+  $("#fillLeadFromCrm").addEventListener("click", () => {
     const index = Number($("#leadSelect").value || 0);
     if (!customers[index]) return;
     openCustomerInEmail(index);
     const form = $("#emailForm");
-    await generateAndRenderLetter(Object.fromEntries(new FormData(form).entries()), { openOutlook: true });
+    const result = generateLetter(Object.fromEntries(new FormData(form).entries()));
+    $("#leadInsight").textContent = result.insight;
+    $("#englishLetter").textContent = result.english;
+    $("#chineseMeaning").textContent = result.chinese;
+    $("#followUpSequence").innerHTML = result.followUps.map((item) =>
+      `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
+    ).join("");
+    openOutlookDraft(Object.fromEntries(new FormData(form).entries()));
   });
 
   $("#leadForm").addEventListener("submit", (event) => {
@@ -4602,11 +4537,6 @@ function bindForms() {
     if (cancelEditButton) {
       editingReviewLeadId = "";
       renderReview();
-      return;
-    }
-    const aiReviewButton = event.target.closest("[data-ai-review-index]");
-    if (aiReviewButton) {
-      aiReviewLead(Number(aiReviewButton.dataset.aiReviewIndex));
       return;
     }
     const button = event.target.closest("[data-review-action]");
