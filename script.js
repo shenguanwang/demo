@@ -5114,12 +5114,29 @@ async function saveAdminSettings(event) {
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderAdminSettings(result);
     loadDiscoverySourceStatus();
-    setAdminSettingsStatus("设置已保存。API Key 立即生效；并发数和网络超时需要重启服务后生效。", "success");
+    if (result.restartRequiredChanged) {
+      setAdminSettingsStatus("设置已保存。并发数或网络超时已变更，需要重启服务器后生效。", "success");
+      if (confirm("设置已保存，但获客并发数/网络超时需要重启服务器后生效。现在重启服务器吗？")) {
+        await restartAdminServer();
+      }
+    } else {
+      setAdminSettingsStatus("设置已保存。API Key 已进入后台配置池。", "success");
+    }
   } catch (error) {
     setAdminSettingsStatus(error.message || "设置保存失败。", "error");
   } finally {
     submit.disabled = false;
   }
+}
+
+async function restartAdminServer() {
+  setAdminSettingsStatus("正在重启服务器，页面可能会短暂断开…", "success");
+  const response = await apiFetch("/api/admin/restart", { method: "POST" });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  window.setTimeout(() => {
+    window.location.reload();
+  }, 3500);
 }
 
 function renderUsers(users = []) {

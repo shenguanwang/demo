@@ -13,6 +13,7 @@ import socket
 import socketserver
 import base64
 import sqlite3
+import sys
 import threading
 import time
 import urllib.error
@@ -286,6 +287,14 @@ def normalize_admin_settings(payload: dict) -> dict:
             current.get(ADMIN_CUSTOM_APIS_KEY, []),
         )
     return next_settings
+
+
+def restart_server_process(delay_seconds: float = 0.8) -> None:
+    def restart() -> None:
+        time.sleep(delay_seconds)
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+
+    threading.Thread(target=restart, daemon=True).start()
 
 
 class WorkspaceVersionConflict(Exception):
@@ -6525,12 +6534,24 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                current_settings = load_admin_settings_file()
                 next_settings = normalize_admin_settings(payload)
+                restart_changed = any(
+                    str(current_settings.get(key, os.environ.get(key, "")) or "").strip()
+                    != str(next_settings.get(key, os.environ.get(key, "")) or "").strip()
+                    for key in ("DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT")
+                )
                 with ADMIN_SETTINGS_LOCK:
                     save_admin_settings_file(next_settings)
-                self.send_json(200, {"ok": True, **admin_settings_payload()})
+                self.send_json(200, {"ok": True, **admin_settings_payload(), "restartRequiredChanged": restart_changed})
             except (ValueError, json.JSONDecodeError, OSError) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/restart":
+            if not self.require_admin():
+                return
+            self.send_json(200, {"ok": True, "message": "服务器正在重启，请稍后刷新页面"})
+            restart_server_process()
             return
         if parsed.path == "/api/workspace-state":
             try:
