@@ -5009,7 +5009,7 @@ function renderAdminSettings(settings = {}) {
       .map((item) => `
         <label>${escapeHtml(item.label)}
           ${adminApiInputHtml(item)}
-          <small>${escapeHtml(item.use || "")}${["DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"].includes(item.key) ? "，保存后重启生效。" : ""}</small>
+          <small>${escapeHtml(item.use || "")}${item.key === "DISCOVERY_MAX_CONCURRENCY" ? "，保存后立即生效。" : item.key === "NETWORK_DEFAULT_TIMEOUT" ? "，保存后重启生效。" : ""}</small>
         </label>
       `).join("");
   }
@@ -5115,12 +5115,12 @@ async function saveAdminSettings(event) {
     renderAdminSettings(result);
     loadDiscoverySourceStatus();
     if (result.restartRequiredChanged) {
-      setAdminSettingsStatus("设置已保存。并发数或网络超时已变更，需要重启服务器后生效。", "success");
-      if (confirm("设置已保存，但获客并发数/网络超时需要重启服务器后生效。现在重启服务器吗？")) {
+      setAdminSettingsStatus("设置已保存。网络超时已变更，需要重启服务器后生效；获客并发数已立即生效。", "success");
+      if (confirm("设置已保存，但网络超时需要重启服务器后生效。现在重启服务器吗？")) {
         await restartAdminServer();
       }
     } else {
-      setAdminSettingsStatus("设置已保存。API Key 已进入后台配置池。", "success");
+      setAdminSettingsStatus("设置已保存。API Key 已进入后台配置池；获客并发数已立即生效。", "success");
     }
   } catch (error) {
     setAdminSettingsStatus(error.message || "设置保存失败。", "error");

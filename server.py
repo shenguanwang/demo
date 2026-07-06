@@ -77,7 +77,6 @@ DISCOVERY_SCHEDULE_LOCK = threading.RLock()
 ACTIVE_DISCOVERY_WORKERS: set[str] = set()
 ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
 DISCOVERY_MAX_CONCURRENCY = max(1, int(bootstrap_setting("DISCOVERY_MAX_CONCURRENCY", "2")))
-DISCOVERY_WORKER_SLOTS = threading.BoundedSemaphore(DISCOVERY_MAX_CONCURRENCY)
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
@@ -119,6 +118,33 @@ ADMIN_SETTING_DEFINITIONS = {
 ADMIN_RUNTIME_KEYS = {"PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"}
 ADMIN_CUSTOM_APIS_KEY = "_customApis"
 ADMIN_SETTINGS_LOCK = threading.RLock()
+
+
+class DynamicConcurrencyGate:
+    def __init__(self, limit: int):
+        self.limit = max(1, int(limit))
+        self.active = 0
+        self.condition = threading.Condition()
+
+    def set_limit(self, limit: int) -> None:
+        with self.condition:
+            self.limit = max(1, int(limit))
+            self.condition.notify_all()
+
+    def __enter__(self):
+        with self.condition:
+            while self.active >= self.limit:
+                self.condition.wait()
+            self.active += 1
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        with self.condition:
+            self.active = max(0, self.active - 1)
+            self.condition.notify_all()
+
+
+DISCOVERY_WORKER_GATE = DynamicConcurrencyGate(DISCOVERY_MAX_CONCURRENCY)
 
 
 def load_admin_settings_file() -> dict:
@@ -217,7 +243,8 @@ def admin_settings_payload() -> dict:
         "values": values,
         "catalog": catalog,
         "customApis": custom_apis,
-        "restartRequired": ["DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"],
+        "dynamicRuntime": ["DISCOVERY_MAX_CONCURRENCY"],
+        "restartRequired": ["NETWORK_DEFAULT_TIMEOUT"],
     }
 
 
@@ -1666,7 +1693,7 @@ def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
     heartbeat_stop = threading.Event()
     heartbeat_thread: threading.Thread | None = None
     try:
-        with DISCOVERY_WORKER_SLOTS:
+        with DISCOVERY_WORKER_GATE:
             source_mode = (params.get("sourceMode") or ["combined"])[0]
             started = update_discovery_job(
                 job_id,
@@ -6590,11 +6617,21 @@ class Handler(SimpleHTTPRequestHandler):
                 restart_changed = any(
                     str(current_settings.get(key, os.environ.get(key, "")) or "").strip()
                     != str(next_settings.get(key, os.environ.get(key, "")) or "").strip()
-                    for key in ("DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT")
+                    for key in ("NETWORK_DEFAULT_TIMEOUT",)
                 )
                 with ADMIN_SETTINGS_LOCK:
                     save_admin_settings_file(next_settings)
-                self.send_json(200, {"ok": True, **admin_settings_payload(), "restartRequiredChanged": restart_changed})
+                if "DISCOVERY_MAX_CONCURRENCY" in next_settings:
+                    DISCOVERY_WORKER_GATE.set_limit(int(next_settings["DISCOVERY_MAX_CONCURRENCY"]))
+                self.send_json(
+                    200,
+                    {
+                        "ok": True,
+                        **admin_settings_payload(),
+                        "restartRequiredChanged": restart_changed,
+                        "runtimeUpdated": ["DISCOVERY_MAX_CONCURRENCY"],
+                    },
+                )
             except (ValueError, json.JSONDecodeError, OSError) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
