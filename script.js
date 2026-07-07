@@ -312,6 +312,7 @@ let currentSession = null;
 let adminKpiSnapshot = null;
 let adminKpiLoading = false;
 let adminSettingsSnapshot = null;
+let loginEventsShowAll = false;
 let crmViewFilter = "all";
 let navigationBound = false;
 
@@ -4857,6 +4858,10 @@ function bindForms() {
 
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
   $("#reloadLoginEvents")?.addEventListener("click", () => loadLoginEvents());
+  $("#toggleLoginEvents")?.addEventListener("click", () => {
+    loginEventsShowAll = !loginEventsShowAll;
+    loadLoginEvents();
+  });
   $("#clearAdminSettingsForm")?.addEventListener("click", () => {
     const form = $("#adminSettingsForm");
     if (!form) return;
@@ -5249,31 +5254,51 @@ function renderLoginEvents(data = {}) {
   const summary = $("#loginEventsSummary");
   if (!list) return;
   const events = Array.isArray(data.events) ? data.events : [];
+  const accounts = Array.isArray(data.accounts) ? data.accounts : [];
   if (summary) {
-    summary.textContent = events.length
-      ? `当前账号 ${data.username || currentSession?.username || ""}，最近 ${events.length} 次登录，${data.uniqueIpCount || 0} 个 IP`
-      : "暂无登录记录";
+    summary.textContent = accounts.length
+      ? `${accounts.length} 个账号，${data.onlineCount || 0} 个在线，最近显示 ${events.length} 条登录`
+      : "暂无账号在线记录";
   }
-  list.innerHTML = events.length ? `
+  list.innerHTML = `
     <div class="table-wrap"><table>
-      <thead><tr><th>登录时间</th><th>IP 地址</th><th>设备 / 浏览器</th></tr></thead>
+      <thead><tr><th>账号</th><th>在线</th><th>最后活跃</th><th>最近 IP</th><th>设备 / 浏览器</th></tr></thead>
       <tbody>
-        ${events.map((event) => `
+        ${accounts.length ? accounts.map((account) => `
+          <tr>
+            <td>${escapeHtml(account.username || "")}</td>
+            <td><span class="user-status ${account.online ? "" : "disabled"}">${account.online ? "在线" : "离线"}</span></td>
+            <td>${escapeHtml(account.lastSeenAt ? formatJobTime(account.lastSeenAt) : "暂无")}</td>
+            <td>${escapeHtml(account.ip || "unknown")}</td>
+            <td title="${escapeHtml(account.userAgent || "")}">${escapeHtml(compactUserAgent(account.userAgent))}</td>
+          </tr>
+        `).join("") : `<tr><td colspan="5">暂无在线记录</td></tr>`}
+      </tbody>
+    </table></div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>登录时间</th><th>账号</th><th>IP 地址</th><th>设备 / 浏览器</th></tr></thead>
+      <tbody>
+        ${events.length ? events.map((event) => `
           <tr>
             <td>${escapeHtml(formatJobTime(event.createdAt || ""))}</td>
+            <td>${escapeHtml(event.username || "")}</td>
             <td>${escapeHtml(event.ip || "unknown")}</td>
             <td title="${escapeHtml(event.userAgent || "")}">${escapeHtml(compactUserAgent(event.userAgent))}</td>
           </tr>
-        `).join("")}
+        `).join("") : `<tr><td colspan="4">暂无登录记录。下次登录后会显示 IP、时间和浏览器。</td></tr>`}
       </tbody>
     </table></div>
-  ` : `<p class="empty">暂无登录记录。下次登录后会显示 IP、时间和浏览器。</p>`;
+  `;
+  const toggle = $("#toggleLoginEvents");
+  if (toggle) toggle.textContent = loginEventsShowAll ? "收起" : "查看全部";
 }
 
 async function loadLoginEvents() {
   if (currentSession?.role !== "admin") return;
   try {
-    const response = await apiFetch("/api/admin/login-events", { cache: "no-store" });
+    const params = new URLSearchParams();
+    if (loginEventsShowAll) params.set("all", "1");
+    const response = await apiFetch(`/api/admin/login-events${params.size ? `?${params}` : ""}`, { cache: "no-store" });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderLoginEvents(result);

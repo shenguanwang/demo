@@ -589,7 +589,10 @@
         <div class="panel admin-api-section">
           <div class="panel-head">
             <div><h3>账号登录记录</h3><span id="loginEventsSummary">正在读取登录 IP…</span></div>
-            <button class="ghost compact" id="reloadLoginEvents" type="button">刷新记录</button>
+            <div class="inline-actions">
+              <button class="ghost compact" id="toggleLoginEvents" type="button">查看全部</button>
+              <button class="ghost compact" id="reloadLoginEvents" type="button">刷新记录</button>
+            </div>
           </div>
           <div class="login-events-list" id="loginEventsList"></div>
         </div>

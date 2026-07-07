@@ -546,6 +546,16 @@ def initialize_state_store() -> None:
                 )
                 cursor.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS user_presence (
+                        username TEXT PRIMARY KEY,
+                        last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        ip_address TEXT NOT NULL DEFAULT '',
+                        user_agent TEXT NOT NULL DEFAULT ''
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS discovery_jobs (
                         job_id TEXT PRIMARY KEY,
                         payload JSONB NOT NULL,
@@ -620,6 +630,16 @@ def initialize_state_store() -> None:
                 ip_address TEXT NOT NULL,
                 user_agent TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_presence (
+                username TEXT PRIMARY KEY,
+                last_seen_at TEXT NOT NULL,
+                ip_address TEXT NOT NULL DEFAULT '',
+                user_agent TEXT NOT NULL DEFAULT ''
             )
             """
         )
@@ -1323,47 +1343,154 @@ def record_login_event(username: str, ip_address: str, user_agent: str) -> None:
                 "DELETE FROM login_events WHERE event_id = ?",
                 [(row[0],) for row in old_rows],
             )
+    touch_user_presence(username, ip_address, user_agent)
 
 
-def list_login_events(username: str, limit: int = 30) -> list[dict]:
+def touch_user_presence(username: str, ip_address: str, user_agent: str) -> None:
+    if not username:
+        return
     initialize_state_store()
-    limit = max(1, min(80, int(limit or 30)))
+    ip_address = sanitize_client_ip(ip_address) or "unknown"
+    user_agent = clean_text(str(user_agent or ""))[:500]
+    now = datetime.now(timezone.utc).isoformat()
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT event_id, username, ip_address, user_agent, created_at
-                    FROM login_events
-                    WHERE username = %s
-                    ORDER BY created_at DESC
-                    LIMIT %s
+                    INSERT INTO user_presence (username, last_seen_at, ip_address, user_agent)
+                    VALUES (%s, NOW(), %s, %s)
+                    ON CONFLICT (username) DO UPDATE SET
+                        last_seen_at = EXCLUDED.last_seen_at,
+                        ip_address = EXCLUDED.ip_address,
+                        user_agent = EXCLUDED.user_agent
                     """,
-                    (username, limit),
+                    (username, ip_address, user_agent),
                 )
+        return
+    with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+        connection.execute(
+            """
+            INSERT INTO user_presence (username, last_seen_at, ip_address, user_agent)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(username) DO UPDATE SET
+                last_seen_at = excluded.last_seen_at,
+                ip_address = excluded.ip_address,
+                user_agent = excluded.user_agent
+            """,
+            (username, now, ip_address, user_agent),
+        )
+
+
+def parse_timestamp(value: str) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def login_event_row(row) -> dict:
+    return {
+        "id": row[0],
+        "username": row[1],
+        "ip": row[2],
+        "userAgent": row[3],
+        "createdAt": str(row[4]),
+    }
+
+
+def list_login_events(username: str = "", limit: int = 30) -> list[dict]:
+    initialize_state_store()
+    limit = max(1, min(80, int(limit or 30)))
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                if username:
+                    cursor.execute(
+                        """
+                        SELECT event_id, username, ip_address, user_agent, created_at
+                        FROM login_events
+                        WHERE username = %s
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                        """,
+                        (username, limit),
+                    )
+                else:
+                    cursor.execute(
+                        """
+                        SELECT event_id, username, ip_address, user_agent, created_at
+                        FROM login_events
+                        ORDER BY created_at DESC
+                        LIMIT %s
+                        """,
+                        (limit,),
+                    )
                 rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            rows = connection.execute(
-                """
-                SELECT event_id, username, ip_address, user_agent, created_at
-                FROM login_events
-                WHERE username = ?
-                ORDER BY created_at DESC
-                LIMIT ?
-                """,
-                (username, limit),
-            ).fetchall()
-    return [
-        {
-            "id": row[0],
-            "username": row[1],
-            "ip": row[2],
-            "userAgent": row[3],
-            "createdAt": str(row[4]),
-        }
-        for row in rows
-    ]
+            if username:
+                rows = connection.execute(
+                    """
+                    SELECT event_id, username, ip_address, user_agent, created_at
+                    FROM login_events
+                    WHERE username = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (username, limit),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    """
+                    SELECT event_id, username, ip_address, user_agent, created_at
+                    FROM login_events
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
+    return [login_event_row(row) for row in rows]
+
+
+def list_account_presence() -> list[dict]:
+    initialize_state_store()
+    users = {user["username"]: user for user in list_users()}
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT username, last_seen_at, ip_address, user_agent FROM user_presence")
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute("SELECT username, last_seen_at, ip_address, user_agent FROM user_presence").fetchall()
+    now = datetime.now(timezone.utc)
+    presence_by_user = {row[0]: row for row in rows}
+    for username in presence_by_user:
+        users.setdefault(username, {"username": username, "role": "user", "status": "enabled", "builtIn": False})
+    accounts = []
+    for username, user in users.items():
+        row = presence_by_user.get(username)
+        last_seen = str(row[1]) if row else ""
+        last_seen_dt = parse_timestamp(last_seen)
+        online = bool(last_seen_dt and (now - last_seen_dt) <= timedelta(minutes=10))
+        accounts.append({
+            "username": username,
+            "role": user.get("role", "user"),
+            "status": user.get("status", "enabled"),
+            "online": online,
+            "lastSeenAt": last_seen,
+            "ip": row[2] if row else "",
+            "userAgent": row[3] if row else "",
+        })
+    accounts.sort(key=lambda item: (not item["online"], item.get("username", "")))
+    return accounts
 
 
 def hash_password(password: str) -> str:
@@ -7215,7 +7342,12 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(body)
 
     def require_auth(self, api=False):
-        if self.is_authenticated():
+        user = self.current_user()
+        if user:
+            try:
+                touch_user_presence(user["username"], self.client_ip(), self.headers.get("User-Agent", ""))
+            except (OSError, RuntimeError, sqlite3.Error, ValueError):
+                pass
             return True
         if api:
             self.send_json(401, {"ok": False, "error": "请先登录"})
@@ -7243,6 +7375,11 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/session":
             user = self.current_user()
+            if user:
+                try:
+                    touch_user_presence(user["username"], self.client_ip(), self.headers.get("User-Agent", ""))
+                except (OSError, RuntimeError, sqlite3.Error, ValueError):
+                    pass
             self.send_json(
                 200,
                 {
@@ -7327,11 +7464,16 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_auth(api=True) or not self.require_admin():
                 return
             try:
-                username = self.current_user()["username"]
-                events = list_login_events(username)
+                query = urllib.parse.parse_qs(parsed.query)
+                show_all = (query.get("all") or ["0"])[0] == "1"
+                events = list_login_events("", 80 if show_all else 3)
+                accounts = list_account_presence()
                 self.send_json(200, {
                     "ok": True,
-                    "username": username,
+                    "eventsLimit": 80 if show_all else 3,
+                    "showAll": show_all,
+                    "accounts": accounts,
+                    "onlineCount": sum(1 for account in accounts if account.get("online")),
                     "events": events,
                     "uniqueIpCount": len({event.get("ip") for event in events if event.get("ip")}),
                 })
