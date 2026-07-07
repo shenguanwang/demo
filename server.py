@@ -2338,6 +2338,10 @@ OBVIOUS_IRRELEVANT_LEAD_PATTERNS = (
     r"\b(service center|service centre|maintenance|mechanic|garage|body shop|paint shop|collision repair)\b",
     r"\b(car wash|auto wash|detailing|car detailing|window tint|wrapping|car wrap|ceramic coating)\b",
     r"\b(tyre|tyres|tire|tires|battery replacement|oil change|spare parts|auto parts|car parts)\b",
+    r"\b(podcast|disruptors|wealth|money matrix|financial freedom|crypto|bitcoin|trading course)\b",
+    r"\b(motivational speaker|business coach|life coach|influencer|youtuber|vlogger|vlogs?)\b",
+    r"\b(travel vlog|travel world|food and tours|meals with|gaming|fitness|boxing|mma|politics)\b",
+    r"\b(media production|video production|tv channel|music channel|comedy channel)\b",
     r"(维修|修理|保养|汽修|洗车|汽车美容|贴膜|轮胎|配件|钣金|喷漆)",
 )
 
@@ -2493,6 +2497,21 @@ def is_youtube_automotive_lead(title: str, snippet: str, url: str = "") -> bool:
         re.I,
     ):
         return False
+    if re.search(
+        r"\b(podcast|disruptors|wealth|money matrix|financial freedom|crypto|bitcoin|"
+        r"motivational speaker|business coach|life coach|influencer|youtuber|"
+        r"vlogger|vlogs?|travel vlog|food and tours|meals with|gaming|fitness|"
+        r"boxing|mma|politics|tv channel|music channel|comedy channel)\b",
+        text,
+        re.I,
+    ) and not re.search(
+        r"\b(car dealer|dealership|auto trading|automotive trading|car showroom|"
+        r"used cars|cars for sale|new cars|luxury cars|car importer|vehicle importer|"
+        r"vehicle distributor|fleet sales|vehicle procurement)\b",
+        text,
+        re.I,
+    ):
+        return False
     strong_sales_terms = (
         "car dealer", "cars dealer", "dealership", "car showroom", "motors showroom",
         "auto trading", "automotive trading", "used cars", "cars for sale",
@@ -2622,6 +2641,10 @@ BLOCKED_DOMAINS = (
     "googlevideo.com",
     "schema.org",
     "w3.org",
+    "window.ytplayer",
+    "client-channel.google",
+    "payments.yo",
+    "payments.youtu",
     "cgtn.com",
     "cgtnamerica.com",
     "bing.com",
@@ -2836,6 +2859,10 @@ SCRIPT_PSEUDO_WEBSITE_DOMAINS = (
     "ytcfg.set",
     "ytinitialdata.",
     "ytinitialplayerresponse.",
+    "window.ytplayer",
+    "client-channel.google",
+    "payments.yo",
+    "payments.youtu",
 )
 
 NON_CUSTOMER_WEBSITE_DOMAINS = (
