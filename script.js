@@ -5140,6 +5140,9 @@ function adminGroupLabel(group) {
   return {
     maps: "地图/企业数据",
     social: "社媒平台",
+    search: "搜索 API",
+    email: "邮箱/联系人",
+    company: "公司数据",
     ai: "AI 大模型",
     runtime: "运行参数"
   }[group] || "其他 API";

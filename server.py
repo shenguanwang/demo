@@ -119,6 +119,11 @@ socket.setdefaulttimeout(NETWORK_DEFAULT_TIMEOUT)
 ADMIN_SETTING_DEFINITIONS = {
     "GOOGLE_MAPS_API_KEY": {"type": "secret", "label": "Google Maps Places API Key", "group": "maps", "status": "active", "use": "Google Maps 企业地点搜索"},
     "YOUTUBE_API_KEY": {"type": "secret", "label": "YouTube Data API Key", "group": "social", "status": "active", "use": "YouTube 官方频道/视频搜索"},
+    "BRAVE_SEARCH_API_KEY": {"type": "secret", "label": "Brave Search API Key", "group": "search", "status": "active", "use": "Official Web Search API for websites and directories"},
+    "SERPAPI_API_KEY": {"type": "secret", "label": "SerpApi API Key", "group": "search", "status": "active", "use": "Google Search and Google Maps result enrichment"},
+    "HUNTER_API_KEY": {"type": "secret", "label": "Hunter.io API Key", "group": "email", "status": "active", "use": "Email candidates by company domain"},
+    "APOLLO_API_KEY": {"type": "secret", "label": "Apollo API Key", "group": "email", "status": "reserved", "use": "Reserved for B2B contacts and company enrichment"},
+    "CLEARBIT_API_KEY": {"type": "secret", "label": "Clearbit API Key", "group": "company", "status": "reserved", "use": "Reserved for company/domain enrichment"},
     "FACEBOOK_ACCESS_TOKEN": {"type": "secret", "label": "Facebook Graph API Token", "group": "social", "status": "reserved", "use": "后续 Facebook 主页/线索接口"},
     "INSTAGRAM_ACCESS_TOKEN": {"type": "secret", "label": "Instagram Graph API Token", "group": "social", "status": "reserved", "use": "后续 Instagram 商业账号接口"},
     "TIKTOK_API_KEY": {"type": "secret", "label": "TikTok API Key", "group": "social", "status": "reserved", "use": "后续 TikTok 公开账号/商业接口"},
@@ -251,6 +256,18 @@ def public_base_url() -> str:
 
 def get_youtube_api_key() -> str:
     return runtime_setting("YOUTUBE_API_KEY")
+
+
+def get_brave_search_api_key() -> str:
+    return runtime_setting("BRAVE_SEARCH_API_KEY")
+
+
+def get_serpapi_api_key() -> str:
+    return runtime_setting("SERPAPI_API_KEY")
+
+
+def get_hunter_api_key() -> str:
+    return runtime_setting("HUNTER_API_KEY")
 
 
 def admin_settings_payload() -> dict:
@@ -2594,6 +2611,23 @@ def fetch_document(url: str, timeout: int = 10, user_agent: str = "") -> tuple[s
         return raw.decode(charset, errors="ignore"), response.geturl()
 
 
+def fetch_json(url: str, timeout: int = 10, headers: dict | None = None) -> dict:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124 Safari/537.36",
+            "Accept": "application/json",
+            **(headers or {}),
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        raw = response.read(1_200_000)
+        charset = response.headers.get_content_charset() or "utf-8"
+        data = json.loads(raw.decode(charset, errors="ignore"))
+        return data if isinstance(data, dict) else {}
+
+
 def clean_text(value: str) -> str:
     value = re.sub(r"<script[\s\S]*?</script>", " ", value, flags=re.I)
     value = re.sub(r"<style[\s\S]*?</style>", " ", value, flags=re.I)
@@ -3510,10 +3544,81 @@ def search_brave(query: str, limit: int = 8, freshness_days: int | None = None) 
     return items
 
 
+def search_brave_api(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
+    api_key = get_brave_search_api_key()
+    if not api_key:
+        return []
+    params = {
+        "q": query,
+        "count": max(1, min(20, limit)),
+        "search_lang": "en",
+        "country": "us",
+        "safesearch": "moderate",
+    }
+    if freshness_days:
+        params["freshness"] = "pw" if freshness_days <= 7 else "pm"
+    data = fetch_json(
+        "https://api.search.brave.com/res/v1/web/search?" + urllib.parse.urlencode(params),
+        timeout=DISCOVERY_SEARCH_TIMEOUT,
+        headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
+    )
+    items: list[dict] = []
+    for result in ((data.get("web") or {}).get("results") or []):
+        if not isinstance(result, dict):
+            continue
+        href = normalize_public_url(str(result.get("url") or ""))
+        if href and is_valid_http_url(href):
+            items.append({
+                "title": clean_text(str(result.get("title") or "")),
+                "url": href,
+                "snippet": clean_text(str(result.get("description") or "")),
+                "apiSource": "Brave Search API",
+            })
+        if len(items) >= limit:
+            break
+    return items
+
+
+def search_serpapi(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
+    api_key = get_serpapi_api_key()
+    if not api_key:
+        return []
+    params = {
+        "engine": "google",
+        "q": query,
+        "api_key": api_key,
+        "num": max(1, min(20, limit)),
+        "hl": "en",
+    }
+    if freshness_days:
+        params["tbs"] = "qdr:w" if freshness_days <= 7 else "qdr:m"
+    data = fetch_json(
+        "https://serpapi.com/search.json?" + urllib.parse.urlencode(params),
+        timeout=DISCOVERY_SEARCH_TIMEOUT,
+    )
+    items: list[dict] = []
+    for result in data.get("organic_results") or []:
+        if not isinstance(result, dict):
+            continue
+        href = normalize_public_url(str(result.get("link") or ""))
+        if href and is_valid_http_url(href):
+            items.append({
+                "title": clean_text(str(result.get("title") or "")),
+                "url": href,
+                "snippet": clean_text(str(result.get("snippet") or "")),
+                "apiSource": "SerpApi Google Search",
+            })
+        if len(items) >= limit:
+            break
+    return items
+
+
 def search_web(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
     collected: list[dict] = []
-    executor = ThreadPoolExecutor(max_workers=3)
+    executor = ThreadPoolExecutor(max_workers=5)
     futures = [
+        executor.submit(search_brave_api, query, limit, freshness_days),
+        executor.submit(search_serpapi, query, limit, freshness_days),
         executor.submit(search_duckduckgo, query, limit, freshness_days),
         executor.submit(search_bing, query, limit, freshness_days),
         executor.submit(search_brave, query, limit, freshness_days),
@@ -4102,6 +4207,44 @@ def email_context(text: str, email: str, radius: int = 120) -> str:
     start = max(0, match.start() - radius)
     end = min(len(cleaned), match.end() + radius)
     return cleaned[start:end].strip()
+
+
+def hunter_email_candidates(website: str, company: str = "", limit: int = 5) -> list[dict]:
+    api_key = get_hunter_api_key()
+    if not api_key or not website:
+        return []
+    domain = safe_urlparse(website).netloc.lower().removeprefix("www.")
+    if not domain or not is_business_website_url(f"https://{domain}"):
+        return []
+    params = {
+        "domain": domain,
+        "api_key": api_key,
+        "limit": max(1, min(10, limit)),
+    }
+    if company:
+        params["company"] = company[:80]
+    data = fetch_json(
+        "https://api.hunter.io/v2/domain-search?" + urllib.parse.urlencode(params),
+        timeout=DISCOVERY_SEARCH_TIMEOUT,
+    )
+    emails = []
+    for item in ((data.get("data") or {}).get("emails") or []):
+        if not isinstance(item, dict):
+            continue
+        email = clean_text(str(item.get("value") or "")).lower()
+        if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
+            continue
+        emails.append({
+            "email": email,
+            "confidence": item.get("confidence", 0),
+            "firstName": item.get("first_name") or "",
+            "lastName": item.get("last_name") or "",
+            "position": item.get("position") or "",
+            "sources": item.get("sources") if isinstance(item.get("sources"), list) else [],
+        })
+        if len(emails) >= limit:
+            break
+    return emails
 
 
 def official_site_pages(website: str) -> list[dict]:
@@ -4776,6 +4919,68 @@ def search_google_places(country: str, query_terms: str, limit: int = 12, city: 
                 "skip_fetch": not bool(website),
             }
         )
+    return items
+
+
+def search_serpapi_google_maps(country: str, query_terms: str, limit: int = 12, city: str = "") -> list[dict]:
+    api_key = get_serpapi_api_key()
+    if not api_key:
+        return []
+    city = city or next(
+        (value[0] for key, value in CITY_COORDS.items() if key.lower() in country.lower()),
+        CITY_COORDS["UAE"][0],
+    )
+    params = {
+        "engine": "google_maps",
+        "q": f"{query_terms} in {city}",
+        "api_key": api_key,
+        "hl": "en",
+        "type": "search",
+    }
+    data = fetch_json(
+        "https://serpapi.com/search.json?" + urllib.parse.urlencode(params),
+        timeout=DISCOVERY_SEARCH_TIMEOUT,
+    )
+    items: list[dict] = []
+    for place in data.get("local_results") or []:
+        if not isinstance(place, dict):
+            continue
+        name = clean_text(str(place.get("title") or ""))
+        if not name:
+            continue
+        maps_url = (
+            f"https://www.google.com/maps/search/?api=1&query_place_id={place.get('place_id')}"
+            if place.get("place_id")
+            else ""
+        )
+        website = normalize_public_url(str(place.get("website") or ""))
+        phone = clean_text(str(place.get("phone") or ""))
+        snippet_parts = [
+            f"{name} is listed on Google Maps via SerpApi",
+            clean_text(str(place.get("address") or "")),
+            clean_text(str(place.get("type") or "")),
+        ]
+        if phone:
+            snippet_parts.append(f"Phone: {phone}")
+        if place.get("rating"):
+            snippet_parts.append(f"Rating: {place.get('rating')} from {place.get('reviews') or 0} reviews")
+        items.append({
+            "title": name,
+            "url": website or maps_url or f"https://www.google.com/maps/search/{urllib.parse.quote(name)}",
+            "source_url": maps_url or f"https://www.google.com/maps/search/{urllib.parse.quote(name)}",
+            "customer_website": website,
+            "snippet": ". ".join(part for part in snippet_parts if part) + ".",
+            "contact": phone,
+            "origin": "SerpApi Google Maps",
+            "source_type": "Google 地图企业资料",
+            "google_rating": place.get("rating") or 0,
+            "google_reviews": place.get("reviews") or 0,
+            "business_status": "",
+            "apiSource": "SerpApi Google Maps",
+            "skip_fetch": not bool(website),
+        })
+        if len(items) >= limit:
+            break
     return items
 
 
@@ -5744,12 +5949,24 @@ def discover(params: dict[str, list[str]]) -> dict:
         try:
             google_city_limit = min(10, max(4, result_limit // max(1, len(cities))))
             for city in cities:
-                google_primary_results += search_google_places(
-                    country,
-                    "car dealer automotive importer vehicle distributor electric vehicle showroom",
-                    limit=google_city_limit,
-                    city=city,
-                )
+                try:
+                    google_primary_results += search_google_places(
+                        country,
+                        "car dealer automotive importer vehicle distributor electric vehicle showroom",
+                        limit=google_city_limit,
+                        city=city,
+                    )
+                except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError):
+                    pass
+                try:
+                    google_primary_results += search_serpapi_google_maps(
+                        country,
+                        "car dealer automotive importer vehicle distributor electric vehicle showroom",
+                        limit=max(3, min(google_city_limit, 8)),
+                        city=city,
+                    )
+                except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, json.JSONDecodeError):
+                    pass
             enrich_limit = min(len(google_primary_results), max(4, min(result_limit, 8)))
             enriched_google_results: list[dict] = []
             if enrich_limit:
@@ -6352,6 +6569,34 @@ def discover(params: dict[str, list[str]]) -> dict:
             }
             for email in contacts.get("emails") or ([contacts["email"]] if contacts["email"] else [])
         ]
+        if customer_website and target_type != "individual":
+            try:
+                hunter_candidates = hunter_email_candidates(customer_website, company, limit=5)
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError, json.JSONDecodeError):
+                hunter_candidates = []
+            for hunter_item in hunter_candidates:
+                hunter_email = hunter_item.get("email", "")
+                if not hunter_email or any(record.get("email", "").lower() == hunter_email.lower() for record in email_sources):
+                    continue
+                hunter_name = " ".join(
+                    value for value in (hunter_item.get("firstName"), hunter_item.get("lastName")) if value
+                ).strip()
+                hunter_excerpt = " / ".join(
+                    value for value in (
+                        hunter_name,
+                        hunter_item.get("position"),
+                        f"confidence {hunter_item.get('confidence')}" if hunter_item.get("confidence") else "",
+                    ) if value
+                )
+                email_sources.append({
+                    "email": hunter_email,
+                    "sources": [{
+                        "url": customer_website,
+                        "name": "Hunter.io",
+                        "verified": False,
+                        "excerpt": hunter_excerpt or "Hunter.io domain search candidate",
+                    }],
+                })
         verified_email_sources = [
             record for record in email_sources
             if any(source.get("verified") for source in record["sources"])
@@ -6735,6 +6980,9 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             google_ready = bool(get_google_maps_api_key())
             youtube_ready = bool(get_youtube_api_key())
+            brave_ready = bool(get_brave_search_api_key())
+            serpapi_ready = bool(get_serpapi_api_key())
+            hunter_ready = bool(get_hunter_api_key())
             self.send_json(200, {
                 "ok": True,
                 "sources": {
@@ -6743,7 +6991,26 @@ class Handler(SimpleHTTPRequestHandler):
                         "label": "Google Maps Places API",
                         "message": "已连接官方企业数据" if google_ready else "未配置 API Key，综合搜索将跳过 Google Maps"
                     },
-                    "web": {"available": True, "label": "Bing + DuckDuckGo + Brave"},
+                    "web": {
+                        "available": True,
+                        "label": "Bing + DuckDuckGo + Brave",
+                        "message": "Brave Search API / SerpApi 已加入" if (brave_ready or serpapi_ready) else "未配置搜索 API Key，将使用公开搜索兜底"
+                    },
+                    "braveSearch": {
+                        "available": brave_ready,
+                        "label": "Brave Search API",
+                        "message": "已连接官方 Web Search API" if brave_ready else "未配置 BRAVE_SEARCH_API_KEY"
+                    },
+                    "serpapi": {
+                        "available": serpapi_ready,
+                        "label": "SerpApi",
+                        "message": "已连接 Google Search 补充源" if serpapi_ready else "未配置 SERPAPI_API_KEY"
+                    },
+                    "hunter": {
+                        "available": hunter_ready,
+                        "label": "Hunter.io",
+                        "message": "已连接邮箱候选补充" if hunter_ready else "未配置 HUNTER_API_KEY"
+                    },
                     "maps": {"available": True, "label": "OpenStreetMap"},
                     "youtube": {
                         "available": youtube_ready,
