@@ -2342,6 +2342,7 @@ OBVIOUS_IRRELEVANT_LEAD_PATTERNS = (
     r"\b(motivational speaker|business coach|life coach|influencer|youtuber|vlogger|vlogs?)\b",
     r"\b(travel vlog|travel world|food and tours|meals with|gaming|fitness|boxing|mma|politics)\b",
     r"\b(media production|video production|tv channel|music channel|comedy channel)\b",
+    r"\b(real russia uncovered|walks life girls|dubai life|life xl|far from kerala|mr'?s kitchen)\b",
     r"(维修|修理|保养|汽修|洗车|汽车美容|贴膜|轮胎|配件|钣金|喷漆)",
 )
 
@@ -2643,6 +2644,9 @@ BLOCKED_DOMAINS = (
     "w3.org",
     "window.ytplayer",
     "client-channel.google",
+    "client.version",
+    "x22client.version",
+    "channel.about",
     "payments.yo",
     "payments.youtu",
     "cgtn.com",
@@ -2861,6 +2865,9 @@ SCRIPT_PSEUDO_WEBSITE_DOMAINS = (
     "ytinitialplayerresponse.",
     "window.ytplayer",
     "client-channel.google",
+    "client.version",
+    "x22client.version",
+    "channel.about",
     "payments.yo",
     "payments.youtu",
 )
