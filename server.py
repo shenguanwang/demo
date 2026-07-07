@@ -2352,6 +2352,91 @@ CITY_COORDS = {
     "Azerbaijan": ("Baku", 40.4093, 49.8671),
 }
 
+COUNTRY_SEARCH_META = {
+    "UAE": {
+        "code": "ae",
+        "location": "United Arab Emirates",
+        "google_domain": "google.ae",
+        "aliases": ("UAE", "United Arab Emirates", "Emirates", "Dubai", "Abu Dhabi", "Sharjah", "Ajman"),
+    },
+    "Saudi": {
+        "code": "sa",
+        "location": "Saudi Arabia",
+        "google_domain": "google.com.sa",
+        "aliases": ("Saudi", "Saudi Arabia", "Riyadh", "Jeddah", "Dammam", "Khobar"),
+    },
+    "Kazakhstan": {
+        "code": "kz",
+        "location": "Kazakhstan",
+        "google_domain": "google.kz",
+        "aliases": ("Kazakhstan", "Almaty", "Astana", "Aktau"),
+    },
+    "Russia": {
+        "code": "ru",
+        "location": "Russia",
+        "google_domain": "google.ru",
+        "aliases": ("Russia", "Russian Federation", "Moscow", "St. Petersburg"),
+    },
+    "Qatar": {
+        "code": "qa",
+        "location": "Qatar",
+        "google_domain": "google.com.qa",
+        "aliases": ("Qatar", "Doha"),
+    },
+    "Kuwait": {
+        "code": "kw",
+        "location": "Kuwait",
+        "google_domain": "google.com.kw",
+        "aliases": ("Kuwait", "Kuwait City"),
+    },
+    "Uzbekistan": {
+        "code": "uz",
+        "location": "Uzbekistan",
+        "google_domain": "google.co.uz",
+        "aliases": ("Uzbekistan", "Tashkent"),
+    },
+    "Azerbaijan": {
+        "code": "az",
+        "location": "Azerbaijan",
+        "google_domain": "google.az",
+        "aliases": ("Azerbaijan", "Baku"),
+    },
+}
+
+FOREIGN_LOCATION_BLOCKERS = (
+    "united states", "usa", "u.s.", "america", "california", "florida",
+    "texas", "new york", "los angeles", "chicago", "houston", "miami",
+    "dallas", "atlanta", "new jersey", "washington", "ohio", "illinois",
+    "canada", "united kingdom", "uk", "australia",
+)
+
+
+def country_search_meta(country: str) -> dict:
+    for key, value in COUNTRY_SEARCH_META.items():
+        if key.lower() in str(country or "").lower():
+            return value
+    return COUNTRY_SEARCH_META["UAE"]
+
+
+def target_country_aliases(country: str) -> tuple[str, ...]:
+    meta = country_search_meta(country)
+    aliases = [str(country or "").split(" ")[0], meta["location"], *meta["aliases"]]
+    return tuple(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def has_target_country_signal(text: str, country: str) -> bool:
+    value = str(text or "").lower()
+    return any(alias.lower() in value for alias in target_country_aliases(country))
+
+
+def has_foreign_location_conflict(text: str, country: str) -> bool:
+    value = str(text or "").lower()
+    if not value:
+        return False
+    if has_target_country_signal(value, country):
+        return False
+    return any(blocker in value for blocker in FOREIGN_LOCATION_BLOCKERS)
+
 
 def discovery_cities(country: str, city_focus: str = "") -> list[str]:
     cities = [city_focus.strip()] if city_focus.strip() else []
@@ -3322,8 +3407,9 @@ def search_youtube_public_channels(query: str, limit: int = 5) -> list[dict]:
     return results
 
 
-def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
+def search_youtube_channels(query: str, limit: int = 5, country: str = "") -> list[dict]:
     api_key = get_youtube_api_key()
+    country_code = country_search_meta(country)["code"].upper() if country else ""
     if api_key:
         per_type_limit = max(1, min(limit, 50))
         search_items = []
@@ -3336,6 +3422,9 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
                 "fields": "items(id/channelId,id/videoId,snippet(channelId,channelTitle,title,description,publishedAt))",
                 "key": api_key,
             }
+            if country_code:
+                params["regionCode"] = country_code
+                params["relevanceLanguage"] = "en"
             request = urllib.request.Request(
                 "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode(params),
                 headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
@@ -3411,6 +3500,9 @@ def search_youtube_channels(query: str, limit: int = 5) -> list[dict]:
             detail_snippet = detail.get("snippet") or {}
             branding = detail.get("brandingSettings") or {}
             branding_channel = branding.get("channel") or {}
+            channel_country = str(branding_channel.get("country", "") or "").upper()
+            if country_code and channel_country and channel_country != country_code:
+                continue
             custom_url = detail_snippet.get("customUrl", "")
             channel_url = (
                 f"https://www.youtube.com/{custom_url}"
@@ -3544,15 +3636,16 @@ def search_brave(query: str, limit: int = 8, freshness_days: int | None = None) 
     return items
 
 
-def search_brave_api(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
+def search_brave_api(query: str, limit: int = 8, freshness_days: int | None = None, country: str = "") -> list[dict]:
     api_key = get_brave_search_api_key()
     if not api_key:
         return []
+    meta = country_search_meta(country)
     params = {
         "q": query,
         "count": max(1, min(20, limit)),
         "search_lang": "en",
-        "country": "us",
+        "country": meta["code"],
         "safesearch": "moderate",
     }
     if freshness_days:
@@ -3579,16 +3672,20 @@ def search_brave_api(query: str, limit: int = 8, freshness_days: int | None = No
     return items
 
 
-def search_serpapi(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
+def search_serpapi(query: str, limit: int = 8, freshness_days: int | None = None, country: str = "") -> list[dict]:
     api_key = get_serpapi_api_key()
     if not api_key:
         return []
+    meta = country_search_meta(country)
     params = {
         "engine": "google",
         "q": query,
         "api_key": api_key,
         "num": max(1, min(20, limit)),
         "hl": "en",
+        "gl": meta["code"],
+        "google_domain": meta["google_domain"],
+        "location": meta["location"],
     }
     if freshness_days:
         params["tbs"] = "qdr:w" if freshness_days <= 7 else "qdr:m"
@@ -3613,12 +3710,12 @@ def search_serpapi(query: str, limit: int = 8, freshness_days: int | None = None
     return items
 
 
-def search_web(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
+def search_web(query: str, limit: int = 8, freshness_days: int | None = None, country: str = "") -> list[dict]:
     collected: list[dict] = []
     executor = ThreadPoolExecutor(max_workers=5)
     futures = [
-        executor.submit(search_brave_api, query, limit, freshness_days),
-        executor.submit(search_serpapi, query, limit, freshness_days),
+        executor.submit(search_brave_api, query, limit, freshness_days, country),
+        executor.submit(search_serpapi, query, limit, freshness_days, country),
         executor.submit(search_duckduckgo, query, limit, freshness_days),
         executor.submit(search_bing, query, limit, freshness_days),
         executor.submit(search_brave, query, limit, freshness_days),
@@ -3638,6 +3735,11 @@ def search_web(query: str, limit: int = 8, freshness_days: int | None = None) ->
     for item in collected:
         identity = normalize_public_url(item.get("url", "")).lower().rstrip("/")
         if not identity or identity in seen:
+            continue
+        if country and has_foreign_location_conflict(
+            f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",
+            country,
+        ):
             continue
         seen.add(identity)
         results.append(item)
@@ -4512,7 +4614,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
     search_results: list[dict] = []
     with ThreadPoolExecutor(max_workers=3 if fast_mode else 6) as executor:
         futures = {
-            executor.submit(search_web, query, 3 if fast_mode else 5, None): (account_type, relationship)
+            executor.submit(search_web, query, 3 if fast_mode else 5, None, country): (account_type, relationship)
             for query, account_type, relationship in queries
         }
         for future in as_completed(futures):
@@ -4572,7 +4674,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
         )
     for youtube_query, account_type, relationship in youtube_queries:
         try:
-            youtube_results = search_youtube_channels(youtube_query, limit=4)
+            youtube_results = search_youtube_channels(youtube_query, limit=4, country=country)
         except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
             youtube_results = []
         for item in youtube_results:
@@ -4859,9 +4961,10 @@ def search_google_places(country: str, query_terms: str, limit: int = 12, city: 
     )
     body = json.dumps(
         {
-            "textQuery": f"{query_terms} in {city}",
+            "textQuery": f"{query_terms} in {city}, {country_search_meta(country)['location']}",
             "pageSize": min(max(limit, 1), 20),
             "languageCode": "en",
+            "regionCode": country_search_meta(country)["code"].upper(),
         }
     ).encode("utf-8")
     request = urllib.request.Request(
@@ -4932,9 +5035,12 @@ def search_serpapi_google_maps(country: str, query_terms: str, limit: int = 12, 
     )
     params = {
         "engine": "google_maps",
-        "q": f"{query_terms} in {city}",
+        "q": f"{query_terms} in {city}, {country_search_meta(country)['location']}",
         "api_key": api_key,
         "hl": "en",
+        "gl": country_search_meta(country)["code"],
+        "google_domain": country_search_meta(country)["google_domain"],
+        "ll": f"@{CITY_COORDS.get(next((key for key in CITY_COORDS if key.lower() in country.lower()), 'UAE'))[1]},{CITY_COORDS.get(next((key for key in CITY_COORDS if key.lower() in country.lower()), 'UAE'))[2]},12z",
         "type": "search",
     }
     data = fetch_json(
@@ -5036,7 +5142,7 @@ def reverse_search_company_socials(company: str, country: str, limit_per_platfor
         )
 
     try:
-        for item in search_youtube_channels(f"{company} {country}", limit=max(3, limit_per_platform * 2)):
+        for item in search_youtube_channels(f"{company} {country}", limit=max(3, limit_per_platform * 2), country=country):
             published_at = item.get("latestVideoPublishedAt", "")
             if published_at and not is_recent_youtube_video_date(published_at):
                 continue
@@ -5059,7 +5165,7 @@ def reverse_search_company_socials(company: str, country: str, limit_per_platfor
     ]
     for site, origin, source_type in platform_queries:
         try:
-            results = search_web(f'site:{site} "{company}" {country}', limit=5, freshness_days=None)
+            results = search_web(f'site:{site} "{company}" {country}', limit=5, freshness_days=None, country=country)
         except (OSError, ValueError, TimeoutError, urllib.error.URLError):
             continue
         accepted = 0
@@ -6010,7 +6116,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         web_results_by_query: list[list[dict]] = []
         executor = ThreadPoolExecutor(max_workers=min(4, len(search_variants)))
         futures = [
-            executor.submit(search_web, search_query, per_query_limit, None)
+            executor.submit(search_web, search_query, per_query_limit, None, country)
             for search_query in search_variants
         ]
         try:
@@ -6166,6 +6272,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 search_query,
                 4 if source_mode == "combined" else 8,
                 freshness_days,
+                country,
             )
             for search_query in query_variants
         ]
@@ -6254,7 +6361,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         youtube_searches = list(dict.fromkeys(youtube_searches))[:max_youtube_queries]
         for youtube_query, youtube_account_type in youtube_searches:
             try:
-                youtube_items = search_youtube_channels(youtube_query, limit=25)
+                youtube_items = search_youtube_channels(youtube_query, limit=25, country=country)
             except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
                 youtube_items = []
             for item in youtube_items:
@@ -6377,6 +6484,8 @@ def discover(params: dict[str, list[str]]) -> dict:
                 pass
 
         combined = f"{item['title']} {item['snippet']} {page_text} {item.get('url', '')}"
+        if has_foreign_location_conflict(combined, country):
+            continue
         if is_obviously_irrelevant_lead(combined):
             continue
         if not is_social_result and is_brand_bound_chinese_dealer(combined):
