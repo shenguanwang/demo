@@ -588,6 +588,13 @@
         </div>
         <div class="panel admin-api-section">
           <div class="panel-head">
+            <div><h3>账号登录记录</h3><span id="loginEventsSummary">正在读取登录 IP…</span></div>
+            <button class="ghost compact" id="reloadLoginEvents" type="button">刷新记录</button>
+          </div>
+          <div class="login-events-list" id="loginEventsList"></div>
+        </div>
+        <div class="panel admin-api-section">
+          <div class="panel-head">
             <div><h3>自定义 API</h3><span>新增后系统会保存 Key，后续功能可直接读取接入</span></div>
             <button class="ghost compact" id="addCustomApi" type="button">添加 API</button>
           </div>

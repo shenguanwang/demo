@@ -4856,6 +4856,7 @@ function bindForms() {
   }));
 
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
+  $("#reloadLoginEvents")?.addEventListener("click", () => loadLoginEvents());
   $("#clearAdminSettingsForm")?.addEventListener("click", () => {
     const form = $("#adminSettingsForm");
     if (!form) return;
@@ -5219,6 +5220,71 @@ function renderAdminSettings(settings = {}) {
   }
 }
 
+function compactUserAgent(value = "") {
+  const text = String(value || "");
+  if (!text) return "未知浏览器";
+  const browser = text.includes("Edg/")
+    ? "Microsoft Edge"
+    : text.includes("Chrome/")
+      ? "Chrome"
+      : text.includes("Firefox/")
+        ? "Firefox"
+        : text.includes("Safari/")
+          ? "Safari"
+          : "浏览器";
+  const os = text.includes("Windows")
+    ? "Windows"
+    : text.includes("Mac OS")
+      ? "macOS"
+      : text.includes("Android")
+        ? "Android"
+        : text.includes("iPhone") || text.includes("iPad")
+          ? "iOS"
+          : "";
+  return [browser, os].filter(Boolean).join(" / ");
+}
+
+function renderLoginEvents(data = {}) {
+  const list = $("#loginEventsList");
+  const summary = $("#loginEventsSummary");
+  if (!list) return;
+  const events = Array.isArray(data.events) ? data.events : [];
+  if (summary) {
+    summary.textContent = events.length
+      ? `当前账号 ${data.username || currentSession?.username || ""}，最近 ${events.length} 次登录，${data.uniqueIpCount || 0} 个 IP`
+      : "暂无登录记录";
+  }
+  list.innerHTML = events.length ? `
+    <div class="table-wrap"><table>
+      <thead><tr><th>登录时间</th><th>IP 地址</th><th>设备 / 浏览器</th></tr></thead>
+      <tbody>
+        ${events.map((event) => `
+          <tr>
+            <td>${escapeHtml(formatJobTime(event.createdAt || ""))}</td>
+            <td>${escapeHtml(event.ip || "unknown")}</td>
+            <td title="${escapeHtml(event.userAgent || "")}">${escapeHtml(compactUserAgent(event.userAgent))}</td>
+          </tr>
+        `).join("")}
+      </tbody>
+    </table></div>
+  ` : `<p class="empty">暂无登录记录。下次登录后会显示 IP、时间和浏览器。</p>`;
+}
+
+async function loadLoginEvents() {
+  if (currentSession?.role !== "admin") return;
+  try {
+    const response = await apiFetch("/api/admin/login-events", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    renderLoginEvents(result);
+  } catch (error) {
+    const summary = $("#loginEventsSummary");
+    if (summary) summary.textContent = `登录记录读取失败：${error.message}`;
+    const list = $("#loginEventsList");
+    if (list) list.innerHTML = `<p class="empty">登录记录读取失败，请稍后重试。</p>`;
+  }
+}
+
 function customApiRowHtml(item = {}) {
   const id = item.id || `new-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const type = item.type === "text" ? "text" : "secret";
@@ -5287,6 +5353,7 @@ async function loadAdminSettings() {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderAdminSettings(result);
+    loadLoginEvents();
     setAdminSettingsStatus("设置已读取。密钥输入框留空表示保持不变。", "success");
   } catch (error) {
     setAdminSettingsStatus(error.message || "设置读取失败。", "error");

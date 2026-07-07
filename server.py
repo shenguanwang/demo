@@ -535,6 +535,17 @@ def initialize_state_store() -> None:
                 )
                 cursor.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS login_events (
+                        event_id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL,
+                        ip_address TEXT NOT NULL,
+                        user_agent TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS discovery_jobs (
                         job_id TEXT PRIMARY KEY,
                         payload JSONB NOT NULL,
@@ -598,6 +609,17 @@ def initialize_state_store() -> None:
                 settings_key TEXT PRIMARY KEY,
                 settings TEXT NOT NULL,
                 updated_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS login_events (
+                event_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                ip_address TEXT NOT NULL,
+                user_agent TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -1237,6 +1259,111 @@ def create_session_token(username: str) -> str:
         hashlib.sha256,
     ).hexdigest()
     return base64.urlsafe_b64encode(f"{payload}|{signature}".encode("utf-8")).decode("ascii")
+
+
+def sanitize_client_ip(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    # X-Forwarded-For can contain a proxy chain; the first entry is the browser-facing client.
+    text = text.split(",", 1)[0].strip()
+    if len(text) > 80:
+        text = text[:80]
+    return text
+
+
+def record_login_event(username: str, ip_address: str, user_agent: str) -> None:
+    initialize_state_store()
+    event_id = str(uuid.uuid4())
+    ip_address = sanitize_client_ip(ip_address) or "unknown"
+    user_agent = clean_text(str(user_agent or ""))[:500]
+    now = datetime.now(timezone.utc).isoformat()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO login_events (event_id, username, ip_address, user_agent, created_at)
+                    VALUES (%s, %s, %s, %s, NOW())
+                    """,
+                    (event_id, username, ip_address, user_agent),
+                )
+                cursor.execute(
+                    """
+                    DELETE FROM login_events
+                    WHERE event_id IN (
+                        SELECT event_id FROM login_events
+                        WHERE username = %s
+                        ORDER BY created_at DESC
+                        OFFSET 80
+                    )
+                    """,
+                    (username,),
+                )
+        return
+    with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+        connection.execute(
+            """
+            INSERT INTO login_events (event_id, username, ip_address, user_agent, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (event_id, username, ip_address, user_agent, now),
+        )
+        old_rows = connection.execute(
+            """
+            SELECT event_id FROM login_events
+            WHERE username = ?
+            ORDER BY created_at DESC
+            LIMIT -1 OFFSET 80
+            """,
+            (username,),
+        ).fetchall()
+        if old_rows:
+            connection.executemany(
+                "DELETE FROM login_events WHERE event_id = ?",
+                [(row[0],) for row in old_rows],
+            )
+
+
+def list_login_events(username: str, limit: int = 30) -> list[dict]:
+    initialize_state_store()
+    limit = max(1, min(80, int(limit or 30)))
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT event_id, username, ip_address, user_agent, created_at
+                    FROM login_events
+                    WHERE username = %s
+                    ORDER BY created_at DESC
+                    LIMIT %s
+                    """,
+                    (username, limit),
+                )
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute(
+                """
+                SELECT event_id, username, ip_address, user_agent, created_at
+                FROM login_events
+                WHERE username = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (username, limit),
+            ).fetchall()
+    return [
+        {
+            "id": row[0],
+            "username": row[1],
+            "ip": row[2],
+            "userAgent": row[3],
+            "createdAt": str(row[4]),
+        }
+        for row in rows
+    ]
 
 
 def hash_password(password: str) -> str:
@@ -7071,6 +7198,14 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json(403, {"ok": False, "error": "仅管理员可以管理用户"})
         return None
 
+    def client_ip(self):
+        direct_ip = self.client_address[0] if self.client_address else ""
+        return sanitize_client_ip(
+            self.headers.get("X-Forwarded-For")
+            or self.headers.get("X-Real-IP")
+            or direct_ip
+        )
+
     def send_json(self, status, payload):
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
@@ -7188,6 +7323,21 @@ class Handler(SimpleHTTPRequestHandler):
             except (OSError, ValueError) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if parsed.path == "/api/admin/login-events":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                username = self.current_user()["username"]
+                events = list_login_events(username)
+                self.send_json(200, {
+                    "ok": True,
+                    "username": username,
+                    "events": events,
+                    "uniqueIpCount": len({event.get("ip") for event in events if event.get("ip")}),
+                })
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if parsed.path == "/api/workspace-state":
             if not self.require_auth(api=True):
                 return
@@ -7279,6 +7429,10 @@ class Handler(SimpleHTTPRequestHandler):
                 if not user:
                     self.send_json(401, {"ok": False, "error": "账户名或密码错误"})
                     return
+                try:
+                    record_login_event(user["username"], self.client_ip(), self.headers.get("User-Agent", ""))
+                except (OSError, RuntimeError, sqlite3.Error, ValueError):
+                    pass
                 token = create_session_token(user["username"])
                 body = json.dumps({"ok": True, "username": user["username"], "role": user["role"]}, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
