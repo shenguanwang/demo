@@ -2737,6 +2737,8 @@ NON_CUSTOMER_WEBSITE_PATHS = (
     "/embed/", "/iframe/", "/player/", "/watch_fragments",
 )
 
+MAX_LEADS_PER_CUSTOMER_WEBSITE = 5
+
 
 def is_business_website_url(url: str) -> bool:
     normalized = normalize_public_url(url)
@@ -2772,6 +2774,27 @@ def is_business_website_url(url: str) -> bool:
     if re.search(r"\.(?:png|jpe?g|gif|svg|webp|css|js|ico|json|xml|txt|pdf)$", path):
         return False
     return True
+
+
+def customer_website_key(url: str) -> str:
+    if not is_business_website_url(url):
+        return ""
+    parsed = safe_urlparse(url)
+    return parsed.netloc.lower().removeprefix("www.")
+
+
+def limit_duplicate_customer_websites(leads: list[dict], max_per_website: int = MAX_LEADS_PER_CUSTOMER_WEBSITE) -> list[dict]:
+    counts: dict[str, int] = {}
+    kept: list[dict] = []
+    for lead in leads:
+        key = customer_website_key(str(lead.get("customerWebsite") or ""))
+        if key:
+            next_count = counts.get(key, 0) + 1
+            if next_count > max_per_website:
+                continue
+            counts[key] = next_count
+        kept.append(lead)
+    return kept
 
 
 def is_noise_source_url(url: str) -> bool:
@@ -6623,6 +6646,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         )
 
     leads.sort(key=lead_sales_priority)
+    leads = limit_duplicate_customer_websites(leads)
     return {"ok": True, "count": len(leads), "leads": leads, "notice": notice}
 
 

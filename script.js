@@ -159,6 +159,8 @@ const NON_CUSTOMER_WEBSITE_PATTERNS = [
   "ytplayer"
 ];
 
+const MAX_LEADS_PER_CUSTOMER_WEBSITE = 5;
+
 const IRRELEVANT_REVIEW_LEAD_PATTERNS = [
   /\bcgtn\b/i,
   /china global television/i,
@@ -201,6 +203,28 @@ function isNonCustomerWebsiteUrl(value) {
 
 function sanitizeCustomerWebsite(value) {
   return isNonCustomerWebsiteUrl(value) ? "" : String(value || "").trim();
+}
+
+function customerWebsiteKey(value) {
+  const sanitized = sanitizeCustomerWebsite(value);
+  const hostname = leadHostname(sanitized);
+  return hostname || "";
+}
+
+function limitDuplicateCustomerWebsites(leads, existingRecords = []) {
+  const counts = new Map();
+  (Array.isArray(existingRecords) ? existingRecords : []).forEach((record) => {
+    const key = customerWebsiteKey(record?.customerWebsite);
+    if (key) counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return (Array.isArray(leads) ? leads : []).filter((lead) => {
+    const key = customerWebsiteKey(lead?.customerWebsite);
+    if (!key) return true;
+    const nextCount = (counts.get(key) || 0) + 1;
+    if (nextCount > MAX_LEADS_PER_CUSTOMER_WEBSITE) return false;
+    counts.set(key, nextCount);
+    return true;
+  });
 }
 
 function isBlockedLeadDomain(value) {
@@ -690,7 +714,7 @@ function loadSavedState() {
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     return {
-      reviewLeads: filterReviewLeadsForBusinessFit(parsed.reviewLeads),
+      reviewLeads: limitDuplicateCustomerWebsites(filterReviewLeadsForBusinessFit(parsed.reviewLeads)),
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
       rejectedLeads: Array.isArray(parsed.rejectedLeads) ? parsed.rejectedLeads : [],
       quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
@@ -772,9 +796,11 @@ function mergeWorkspaceStates(remoteState, localState) {
   );
   const deletedKeys = new Set(mergedDeletedRecords.map((record) => record.key));
   const merged = {
-    reviewLeads: mergeRecordLists(remoteState?.reviewLeads, localState?.reviewLeads, "reviewLeads")
-      .filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads")))
-      .filter((record) => !isIrrelevantReviewLead(record)),
+    reviewLeads: limitDuplicateCustomerWebsites(
+      mergeRecordLists(remoteState?.reviewLeads, localState?.reviewLeads, "reviewLeads")
+        .filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads")))
+        .filter((record) => !isIrrelevantReviewLead(record))
+    ),
     customers: mergeRecordLists(remoteState?.customers, localState?.customers, "customers")
       .filter((record) => !deletedKeys.has(recordIdentity(record, "customers"))),
     rejectedLeads: mergeRecordLists(remoteState?.rejectedLeads, localState?.rejectedLeads, "rejectedLeads")
@@ -804,9 +830,9 @@ function applyWorkspaceState(state, render = false) {
   deletedRecords = Array.isArray(state?.deletedRecords) ? state.deletedRecords : [];
   const deletedKeys = new Set(deletedRecords.map((record) => record.key));
   reviewLeads = Array.isArray(state?.reviewLeads)
-    ? filterReviewLeadsForBusinessFit(state.reviewLeads)
+    ? limitDuplicateCustomerWebsites(filterReviewLeadsForBusinessFit(state.reviewLeads)
         .filter((record) => !deletedKeys.has(recordIdentity(record, "reviewLeads")))
-        .map(normalizeLead)
+        .map(normalizeLead))
     : [];
   customers = Array.isArray(state?.customers)
     ? state.customers.filter((record) => !deletedKeys.has(recordIdentity(record, "customers"))).map(normalizeLead)
@@ -4082,7 +4108,7 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
   const existing = new Set(
     [...reviewLeads, ...customers].map((lead) => `${lead.company}|${lead.source}`.toLowerCase())
   );
-  const fresh = found
+  const normalizedFound = found
     .map((lead) => normalizeLead({
       ...lead,
       sourceMode,
@@ -4092,6 +4118,7 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
       discoveryJobImportedAt: new Date().toISOString()
     }))
     .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()));
+  const fresh = limitDuplicateCustomerWebsites(normalizedFound, [...reviewLeads, ...customers]);
   if (fresh.length) {
     reviewLeads = [...fresh, ...reviewLeads];
     refreshAllLeadViews();
