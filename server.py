@@ -2529,7 +2529,10 @@ COUNTRY_HINTS = {
     ),
     "Saudi": ("Riyadh", "Jeddah", "Dammam", "Khobar", "Mecca", "Medina"),
     "Kazakhstan": ("Almaty", "Astana", "Aktau"),
-    "Russia": ("Moscow", "St. Petersburg"),
+    "Russia": (
+        "Moscow", "St. Petersburg", "Kazan", "Novosibirsk", "Yekaterinburg",
+        "Nizhny Novgorod", "Samara", "Krasnodar", "Rostov-on-Don",
+    ),
     "Qatar": ("Doha",),
     "Kuwait": ("Kuwait City",),
     "Uzbekistan": ("Tashkent",),
@@ -2634,7 +2637,7 @@ COUNTRY_SEARCH_META = {
         "code": "ru",
         "location": "Russia",
         "google_domain": "google.ru",
-        "aliases": ("Russia", "Russian Federation", "Moscow", "St. Petersburg"),
+        "aliases": ("Russia", "Russian Federation", "Moscow", "St. Petersburg", "Kazan", "автосалон"),
     },
     "Qatar": {
         "code": "qa",
@@ -2695,6 +2698,35 @@ def has_foreign_location_conflict(text: str, country: str) -> bool:
     if has_target_country_signal(value, country):
         return False
     return any(blocker in value for blocker in FOREIGN_LOCATION_BLOCKERS)
+
+
+def is_vehicle_listing_url(url: str) -> bool:
+    parsed = safe_urlparse(normalize_public_url(url))
+    path = parsed.path.lower()
+    if not parsed.netloc or not path:
+        return False
+    return bool(re.search(r"/(?:cars?|autos?|vehicles?)/[^/]+/[^/]+/", path))
+
+
+def site_root_url(url: str) -> str:
+    parsed = safe_urlparse(normalize_public_url(url))
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}/"
+
+
+def localized_vehicle_listing_queries(country: str, cities: list[str]) -> list[str]:
+    if "russia" not in str(country or "").lower():
+        return []
+    queries: list[str] = []
+    for city in cities[:10]:
+        queries.extend([
+            f"{city} автосалон автомобили в наличии официальный сайт",
+            f"{city} купить авто автосалон новые автомобили",
+            f"{city} авто в салоне дилер автомобили",
+            f"{city} site:.ru/cars/ автосалон автомобили",
+        ])
+    return list(dict.fromkeys(queries))
 
 
 def discovery_cities(country: str, city_focus: str = "") -> list[str]:
@@ -6335,6 +6367,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     commercial_query_variants.extend(
         city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, f"official website contact {exclude_query}{cutoff_query}")
     )
+    commercial_query_variants.extend(localized_vehicle_listing_queries(country, cities))
 
     raw_results = []
     google_primary_results: list[dict] = []
@@ -6424,7 +6457,11 @@ def discover(params: dict[str, list[str]]) -> dict:
                     item["origin"] = origin
                     item["source_type"] = source_type
                     item["source_url"] = item["url"]
-                    item["customer_website"] = item["url"]
+                    if is_vehicle_listing_url(item["url"]):
+                        item["source_type"] = "车源详情页（自动归并到车商站点）"
+                        item["customer_website"] = site_root_url(item["url"])
+                    else:
+                        item["customer_website"] = item["url"]
                 raw_results += web_results
             except (OSError, ValueError, TimeoutError, KeyError):
                 pass
@@ -6794,7 +6831,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             business_match = re.search(
                 r"\b(dealer|dealership|showroom|importer|exporter|trading|distributor|"
                 r"cars|motors|automotive|fleet|rental|procurement|tender|buyer|rfq|"
-                r"owner|founder|general manager|import manager|fleet manager|sales director)\b",
+                r"owner|founder|general manager|import manager|fleet manager|sales director)\b"
+                r"|автосалон|автомобил|авто|машин",
                 combined,
                 re.I,
             )
@@ -6809,7 +6847,8 @@ def discover(params: dict[str, list[str]]) -> dict:
         if not is_social_result and not re.search(
             r"\b(dealer|dealership|showroom|importer|exporter|trading|cars|motors|"
             r"vehicles?|automotive|ev|electric|fleet|rental|procurement|tender|buyer|rfq|wanted|"
-            r"owner|founder|general manager|import manager|fleet manager|sales director)\b",
+            r"owner|founder|general manager|import manager|fleet manager|sales director)\b"
+            r"|автосалон|автомобил|авто|машин",
             combined,
             re.I,
         ):
