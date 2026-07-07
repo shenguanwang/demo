@@ -307,6 +307,7 @@ let activeDiscoveryJobFilter = "all";
 let reviewSelectedIds = new Set();
 let selectedReviewLeadId = "";
 let editingReviewLeadId = "";
+const loadingButtonTimers = new WeakMap();
 let currentSession = null;
 let adminKpiSnapshot = null;
 let adminKpiLoading = false;
@@ -1399,6 +1400,38 @@ function setFinderProgress({ percent, stage, title, message, elapsed, state = "r
 function setFinderStatus(message) {
   const el = $("#finderStatus");
   if (el) el.textContent = message;
+}
+
+function startButtonLoading(button, label) {
+  if (!button) return () => undefined;
+  stopButtonLoading(button);
+  const originalText = button.textContent;
+  button.disabled = true;
+  let dotCount = 0;
+  const render = () => {
+    dotCount = (dotCount % 3) + 1;
+    button.textContent = `${label}${".".repeat(dotCount)}`;
+  };
+  render();
+  const timer = window.setInterval(render, 450);
+  loadingButtonTimers.set(button, { timer, originalText });
+  return (finalText = originalText, { disabled = false, autoResetMs = 0 } = {}) => {
+    stopButtonLoading(button);
+    button.textContent = finalText;
+    button.disabled = disabled;
+    if (autoResetMs) {
+      window.setTimeout(() => {
+        if (document.body.contains(button)) button.textContent = originalText;
+      }, autoResetMs);
+    }
+  };
+}
+
+function stopButtonLoading(button) {
+  const state = loadingButtonTimers.get(button);
+  if (!state) return;
+  window.clearInterval(state.timer);
+  loadingButtonTimers.delete(button);
 }
 
 function activeDiscoveryJobs() {
@@ -4128,10 +4161,7 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
 
 async function importDiscoveryJob(jobId) {
   const button = document.querySelector(`[data-import-job="${CSS.escape(jobId)}"]`);
-  if (button) {
-    button.disabled = true;
-    button.textContent = "正在导入";
-  }
+  const finishButtonLoading = startButtonLoading(button, "正在导入");
   try {
     const response = await apiFetch(`/api/discover/status?${new URLSearchParams({ id: jobId })}`, {
       cache: "no-store"
@@ -4149,7 +4179,10 @@ async function importDiscoveryJob(jobId) {
         ? "任务结果已进入线索审核，并已同步到云端数据。"
         : "任务结果中的线索已存在，没有重复导入。"
     });
+    finishButtonLoading("已导入", { disabled: true });
+    await loadDiscoveryJobs().catch(() => undefined);
   } catch (error) {
+    finishButtonLoading("导入失败", { disabled: false, autoResetMs: 1600 });
     setFinderProgress({
       percent: 100,
       stage: "done",
@@ -4293,8 +4326,14 @@ function bindForms() {
     renderDiscoverySchedules();
   });
 
-  $("#refreshDiscoveryJobs")?.addEventListener("click", () => {
-    loadDiscoveryJobs().catch((error) => {
+  $("#refreshDiscoveryJobs")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const finishButtonLoading = startButtonLoading(button, "刷新中");
+    await loadDiscoveryJobs().then(() => {
+      finishButtonLoading("刷新成功", { autoResetMs: 1600 });
+      setFinderStatus("刷新成功，任务列表已更新。");
+    }).catch((error) => {
+      finishButtonLoading("刷新失败", { autoResetMs: 1600 });
       $("#discoveryJobList").innerHTML = `<p class="empty">任务读取失败：${escapeHtml(error.message)}</p>`;
     });
   });
