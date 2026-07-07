@@ -1539,11 +1539,21 @@ function startFinderSearchProgress() {
 }
 
 function reviewStatusMode() {
-  return $("#reviewStatusFilter")?.value === "approved" ? "approved" : "pending";
+  const value = $("#reviewStatusFilter")?.value;
+  return ["approved", "rejected"].includes(value) ? value : "pending";
 }
 
 function reviewSourceLeads() {
-  return reviewStatusMode() === "approved" ? customers : reviewLeads;
+  const mode = reviewStatusMode();
+  if (mode === "approved") return customers;
+  if (mode === "rejected") return rejectedLeads;
+  return reviewLeads;
+}
+
+function reviewModeLabel(mode = reviewStatusMode()) {
+  if (mode === "approved") return "已审核客户";
+  if (mode === "rejected") return "已拒绝线索";
+  return "待审核线索";
 }
 
 function renderReview() {
@@ -1565,19 +1575,24 @@ function renderReview() {
   const visibleReviewIds = rankedLeads.map(({ lead }) => lead.id).filter(Boolean);
   const selectedVisibleCount = [...reviewSelectedIds].filter((id) => visibleReviewIds.includes(id)).length;
   const summary = $("#reviewFilterSummary");
-  if (summary) summary.textContent = `显示 ${rankedLeads.length} / ${sourceLeads.length} 条${reviewMode === "approved" ? " · 已审核客户" : reviewSelectedIds.size ? ` · 已选 ${reviewSelectedIds.size} 条` : ""}`;
+  if (summary) summary.textContent = `显示 ${rankedLeads.length} / ${sourceLeads.length} 条 · ${reviewModeLabel(reviewMode)}${reviewMode === "pending" && reviewSelectedIds.size ? ` · 已选 ${reviewSelectedIds.size} 条` : ""}`;
   const selectVisibleButton = $("#selectVisibleReviewLeads");
   if (selectVisibleButton) {
-    selectVisibleButton.disabled = reviewMode === "approved" || !rankedLeads.length;
+    selectVisibleButton.disabled = reviewMode !== "pending" || !rankedLeads.length;
     selectVisibleButton.textContent = rankedLeads.length && selectedVisibleCount === rankedLeads.length ? "取消选择当前结果" : "全选当前结果";
   }
   const deleteSelectedButton = $("#deleteSelectedReviewLeads");
   if (deleteSelectedButton) {
-    deleteSelectedButton.disabled = reviewMode === "approved" || !reviewSelectedIds.size;
+    deleteSelectedButton.disabled = reviewMode !== "pending" || !reviewSelectedIds.size;
     deleteSelectedButton.textContent = `删除已选（${reviewSelectedIds.size}）`;
   }
   if (!rankedLeads.length) {
-    $("#reviewGrid").innerHTML = `<p class="empty">${reviewMode === "approved" ? "暂无已审核客户。客户池中的客户会显示在这里。" : "暂无待审核线索。一键获客抓到的客户会先出现在这里。"}</p>`;
+    const emptyText = reviewMode === "approved"
+      ? "暂无已审核客户。客户池中的客户会显示在这里。"
+      : reviewMode === "rejected"
+        ? "暂无已拒绝线索。被拒绝的线索会显示在这里。"
+        : "暂无待审核线索。一键获客抓到的客户会先出现在这里。";
+    $("#reviewGrid").innerHTML = `<p class="empty">${emptyText}</p>`;
     return;
   }
   const rankedLeadRows = rankedLeads.map((record, rankIndex) => ({ ...record, rankIndex }));
@@ -1591,7 +1606,7 @@ function renderReview() {
     const missing = (lead.sourceCoverage?.missingFields || []).join("、") || "齐全";
     return `
       <article class="review-list-row ${rowId === selectedReviewLeadId ? "active" : ""}" data-review-lead-row="${escapeHtml(rowId)}" tabindex="0">
-        ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="review-approved-mark">已审核</span>`}
+        ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="review-approved-mark">${escapeHtml(reviewModeLabel(reviewMode))}</span>`}
         <div class="review-list-main">
           <strong>${escapeHtml(lead.company)}</strong>
           <span>${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.origin || lead.sourceType || "公开来源")}</span>
@@ -1616,7 +1631,7 @@ function renderReview() {
       <div class="review-title-row">
         <div>
           <div class="review-card-meta">
-            ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="tag">已审核客户</span>`}
+            ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="tag">${escapeHtml(reviewModeLabel(reviewMode))}</span>`}
             <span class="tag">#${rankIndex + 1} · ${lead.researchAt ? "已完成公开信息尽调" : "待全网补全"}</span>
             <span class="review-captured-at">${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.source || lead.origin || "未知来源")}</span>
           </div>
@@ -1625,7 +1640,7 @@ function renderReview() {
         </div>
         ${reviewMode === "pending" ? `<button class="research-button" type="button" data-research-index="${index}">
           ${lead.researching ? "正在检索…" : lead.researchAt ? "重新全网核验" : "全网补全信息"}
-        </button>` : `<span class="review-approved-status">已进入客户池</span>`}
+        </button>` : `<span class="review-approved-status">${reviewMode === "approved" ? "已进入客户池" : "已拒绝，保留为历史记录"}</span>`}
       </div>
       <div class="review-decision">
         <div class="decision-main">
@@ -1705,7 +1720,7 @@ function renderReview() {
           <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
           <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
           <button class="ghost" type="button" data-review-edit="${index}" data-review-edit-id="${escapeHtml(editId)}">编辑</button>
-        ` : `<button class="primary" type="button" data-section="crm">回到客户池</button>`}
+        ` : reviewMode === "approved" ? `<button class="primary" type="button" data-section="crm">回到客户池</button>` : `<span class="review-approved-status">已拒绝线索</span>`}
       </div>
       ${reviewMode === "pending" && isEditing ? renderLeadEditForm(lead, index, editId) : ""}
       <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}">
@@ -1725,7 +1740,7 @@ function renderReview() {
     <div class="review-workbench">
       <aside class="review-workbench-list" aria-label="待审核线索列表">
         <div class="review-workbench-list-head">
-          <strong>${reviewMode === "approved" ? "已审核客户" : "待审核线索"}</strong>
+          <strong>${escapeHtml(reviewModeLabel(reviewMode))}</strong>
           <span>${rankedLeadRows.length} 条</span>
         </div>
         <div class="review-list-scroll">${reviewListHtml}</div>
