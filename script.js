@@ -142,12 +142,21 @@ const IRRELEVANT_REVIEW_LEAD_DOMAINS = [
 ];
 
 const NON_CUSTOMER_WEBSITE_DOMAINS = [
+  "ytcfg.set",
   "ggpht.com",
   "ytimg.com",
   "iytimg.com",
   "googleusercontent.com",
   "gstatic.com",
   "googlevideo.com"
+];
+
+const NON_CUSTOMER_WEBSITE_PATTERNS = [
+  "ytcfg.set",
+  "ytinitialdata",
+  "ytinitialplayerresponse",
+  "window.ytplayer",
+  "ytplayer"
 ];
 
 const IRRELEVANT_REVIEW_LEAD_PATTERNS = [
@@ -185,8 +194,7 @@ function isNonCustomerWebsiteUrl(value) {
   const hostname = leadHostname(value);
   if (!hostname) return false;
   return (
-    raw.includes("window.ytplayer")
-    || raw.includes("ytplayer")
+    NON_CUSTOMER_WEBSITE_PATTERNS.some((pattern) => raw.includes(pattern) || hostname.includes(pattern))
     || NON_CUSTOMER_WEBSITE_DOMAINS.some((domain) => hostname === domain || hostname.endsWith(`.${domain}`))
   );
 }

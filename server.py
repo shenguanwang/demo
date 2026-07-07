@@ -2502,6 +2502,7 @@ BLOCKED_DOMAINS = (
     "baike.baidu.com",
     "wikipedia.org",
     "wikimedia.org",
+    "ytcfg.set",
     "youtube.com",
     "youtu.be",
     "ytimg.com",
@@ -2712,6 +2713,12 @@ STATIC_ASSET_DOMAINS = (
     "dealerinspire.com", "dealer.com", "carsforsale.com",
 )
 
+SCRIPT_PSEUDO_WEBSITE_DOMAINS = (
+    "ytcfg.set",
+    "ytinitialdata.",
+    "ytinitialplayerresponse.",
+)
+
 NON_CUSTOMER_WEBSITE_DOMAINS = (
     "window.",
     "player.",
@@ -2738,12 +2745,15 @@ def is_business_website_url(url: str) -> bool:
     parsed = safe_urlparse(normalized)
     domain = parsed.netloc.lower().removeprefix("www.")
     path = parsed.path.lower()
+    lowered = normalized.lower()
     if not domain or "." not in domain:
+        return False
+    if any(pseudo in lowered or pseudo in domain for pseudo in SCRIPT_PSEUDO_WEBSITE_DOMAINS):
         return False
     if (
         domain.endswith((".ytplayer", ".js", ".css"))
         or "ytplayer" in domain
-        or "ytplayer" in normalized.lower()
+        or "ytplayer" in lowered
         or domain.endswith("ggpht.com")
     ):
         return False
