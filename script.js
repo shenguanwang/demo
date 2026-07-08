@@ -3826,7 +3826,7 @@ function renderDiscoveryHistory() {
     id: job.id || "",
     status: stateLabels[job.status] || job.status || "未知",
     state: job.status || "",
-    time: job.updatedAt || job.createdAt,
+    time: job.createdAt || job.updatedAt,
     country: job.country,
     model: job.model,
     sourceMode: job.sourceMode,
