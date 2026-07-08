@@ -5139,11 +5139,20 @@ async function loadSession() {
   if (userManagementSection) userManagementSection.hidden = session.role !== "admin";
   const systemSettingsSection = $("#system-settings");
   if (systemSettingsSection) systemSettingsSection.hidden = session.role !== "admin";
+  const accountSettingsToggle = $("#accountSettingsToggle");
+  if (accountSettingsToggle) accountSettingsToggle.hidden = session.role === "admin";
+  const adminLogoutButton = $("#adminLogoutButton");
+  if (adminLogoutButton) adminLogoutButton.hidden = session.role !== "admin";
+  const accountSettingsSection = $("#account-settings-page");
+  if (accountSettingsSection) accountSettingsSection.hidden = session.role === "admin";
   const passwordForm = $("#accountPasswordForm");
   if (passwordForm) passwordForm.hidden = session.role === "admin";
   const accountSettingsUser = $("#accountSettingsUser");
   if (accountSettingsUser) {
     accountSettingsUser.textContent = `${session.username || "当前账号"} · ${session.role === "admin" ? "管理员" : "普通用户"}`;
+  }
+  if (session.role === "admin" && window.location.hash === "#account-settings-page") {
+    showSection("overview");
   }
   return session;
 }
@@ -5646,8 +5655,7 @@ async function init() {
   setInterval(importSocialCaptures, 4_000);
   showRequestedSection();
   window.addEventListener("hashchange", showRequestedSection);
-  const logoutButton = document.getElementById("accountSettingsLogout");
-  if (logoutButton) {
+  $$("#accountSettingsLogout, #adminLogoutButton").forEach((logoutButton) => {
     logoutButton.addEventListener("click", async () => {
       logoutButton.disabled = true;
       try {
@@ -5656,7 +5664,7 @@ async function init() {
         window.location.replace("/login.html");
       }
     });
-  }
+  });
 }
 
 init();
