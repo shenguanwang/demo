@@ -2145,21 +2145,9 @@ const reviewSourceOptions = [
   ["vk", "VK 公开主页"]
 ];
 
-function reviewSourceKey(lead) {
-  const concreteValue = [
-    lead.platform,
-    lead.origin,
-    lead.sourceType,
-    lead.sourceTitle,
-    lead.source,
-    lead.sourceUrl,
-    ...(lead.evidenceSources || []).flatMap((source) => [
-      source.sourceName,
-      source.sourceType,
-      source.url
-    ])
-  ].filter(Boolean).join(" ").toLowerCase();
-  if (!concreteValue) return "dealer";
+function classifySourceText(value) {
+  const concreteValue = String(value || "").toLowerCase();
+  if (!concreteValue) return "";
   if (
     concreteValue.includes("youtube.com")
     || concreteValue.includes("youtu.be")
@@ -2194,6 +2182,27 @@ function reviewSourceKey(lead) {
     || concreteValue.includes("dealer")
     || concreteValue.includes("showroom")
   ) return "dealer";
+  return "";
+}
+
+function reviewSourceKey(lead) {
+  const primaryValue = [
+    lead.platform,
+    lead.origin,
+    lead.sourceType,
+    lead.sourceTitle,
+    lead.source,
+    lead.sourceUrl
+  ].filter(Boolean).join(" ");
+  const primaryKey = classifySourceText(primaryValue);
+  if (primaryKey) return primaryKey;
+  const evidenceValue = (lead.evidenceSources || []).flatMap((source) => [
+    source.sourceName,
+    source.sourceType,
+    source.url
+  ]).filter(Boolean).join(" ");
+  const evidenceKey = classifySourceText(evidenceValue);
+  if (evidenceKey) return evidenceKey;
   const value = [
     lead.discoverySource,
     lead.sourceMode
