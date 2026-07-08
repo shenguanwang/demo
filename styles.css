@@ -2142,6 +2142,10 @@ textarea {
   gap: 12px;
 }
 
+#toggleAdminApis[hidden] {
+  display: none;
+}
+
 .admin-api-card,
 .custom-api-row {
   display: grid;

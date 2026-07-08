@@ -312,6 +312,7 @@ let currentSession = null;
 let adminKpiSnapshot = null;
 let adminKpiLoading = false;
 let adminSettingsSnapshot = null;
+let adminApiShowAll = false;
 let loginEventsShowAll = false;
 let crmViewFilter = "all";
 let navigationBound = false;
@@ -4861,6 +4862,10 @@ function bindForms() {
   $("#accountPasswordForm")?.addEventListener("submit", changeOwnPassword);
 
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
+  $("#toggleAdminApis")?.addEventListener("click", () => {
+    adminApiShowAll = !adminApiShowAll;
+    renderAdminSettings(adminSettingsSnapshot || {});
+  });
   $("#reloadLoginEvents")?.addEventListener("click", () => loadLoginEvents());
   $("#toggleLoginEvents")?.addEventListener("click", () => {
     loginEventsShowAll = !loginEventsShowAll;
@@ -5267,8 +5272,15 @@ function renderAdminSettings(settings = {}) {
   const apiList = $("#adminApiList");
   const runtimeGrid = $("#adminRuntimeGrid");
   if (apiList) {
-    const apiItems = catalog.filter((item) => item.group !== "runtime");
-    apiList.innerHTML = apiItems.map((item) => `
+    const apiItems = catalog
+      .filter((item) => item.group !== "runtime")
+      .sort((a, b) =>
+        Number(Boolean(b.configured)) - Number(Boolean(a.configured))
+        || Number((b.status || "") === "active") - Number((a.status || "") === "active")
+        || String(a.label || a.key || "").localeCompare(String(b.label || b.key || ""), "zh-CN")
+      );
+    const visibleItems = adminApiShowAll ? apiItems : apiItems.slice(0, 5);
+    apiList.innerHTML = visibleItems.map((item) => `
       <article class="admin-api-card ${escapeHtml(adminApiStatusClass(item))}">
         <div class="admin-api-card-head">
           <div>
@@ -5281,6 +5293,18 @@ function renderAdminSettings(settings = {}) {
         ${adminApiInputHtml(item)}
       </article>
     `).join("");
+    const apiSummary = $("#adminApiListSummary");
+    if (apiSummary) {
+      const configured = apiItems.filter((item) => item.configured).length;
+      apiSummary.textContent = adminApiShowAll
+        ? `已展开全部 ${apiItems.length} 个 API，已配置 ${configured} 个`
+        : `优先显示已配置 API，当前显示 ${Math.min(5, apiItems.length)} / ${apiItems.length} 个`;
+    }
+    const toggle = $("#toggleAdminApis");
+    if (toggle) {
+      toggle.hidden = apiItems.length <= 5;
+      toggle.textContent = adminApiShowAll ? "收起" : "展开全部";
+    }
   }
   if (runtimeGrid) {
     runtimeGrid.innerHTML = catalog

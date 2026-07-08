@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>华为系新能源汽车海外获客工作台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260708-account-settings4">
+  <link rel="stylesheet" href="./styles.css?v=20260708-api-stack1">
 </head>
 <body>
   <aside class="sidebar">
@@ -579,7 +579,8 @@
         </div>
         <div class="panel admin-api-section">
           <div class="panel-head">
-            <div><h3>已接入 / 可接入 API</h3><span>留空不改；填入新值后保存即进入后台配置池</span></div>
+            <div><h3>已接入 / 可接入 API</h3><span id="adminApiListSummary">优先显示已配置 API</span></div>
+            <button class="ghost compact" id="toggleAdminApis" type="button">展开全部</button>
           </div>
           <div class="admin-api-list" id="adminApiList"></div>
         </div>
@@ -1053,6 +1054,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260708-account-settings4"></script>
+  <script src="./script.js?v=20260708-api-stack1"></script>
 </body>
 </html>
