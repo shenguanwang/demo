@@ -4856,11 +4856,10 @@ function bindForms() {
     $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
   }));
 
-  $("#changePasswordButton")?.addEventListener("click", () => {
-    changeOwnPassword().catch((error) => {
-      window.alert(error.message || "密码修改失败，请稍后重试。");
-    });
-  });
+  $("#accountSettingsToggle")?.addEventListener("click", () => toggleAccountSettingsMenu());
+  $("#openPasswordPanel")?.addEventListener("click", () => showPasswordPanel(true));
+  $("#cancelPasswordChange")?.addEventListener("click", () => showPasswordPanel(false));
+  $("#accountPasswordForm")?.addEventListener("submit", changeOwnPassword);
 
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
   $("#reloadLoginEvents")?.addEventListener("click", () => loadLoginEvents());
@@ -5141,36 +5140,81 @@ async function loadSession() {
   if (userManagementSection) userManagementSection.hidden = session.role !== "admin";
   const systemSettingsSection = $("#system-settings");
   if (systemSettingsSection) systemSettingsSection.hidden = session.role !== "admin";
-  const changePasswordButton = $("#changePasswordButton");
-  if (changePasswordButton) changePasswordButton.hidden = session.role === "admin";
+  const openPasswordPanel = $("#openPasswordPanel");
+  if (openPasswordPanel) openPasswordPanel.hidden = session.role === "admin";
   return session;
 }
 
-async function changeOwnPassword() {
-  const currentPassword = window.prompt("请输入当前密码：");
-  if (currentPassword === null) return;
-  const newPassword = window.prompt("请输入新密码（至少 6 位）：");
-  if (newPassword === null) return;
+function toggleAccountSettingsMenu(forceOpen) {
+  const menu = $("#accountSettingsMenu");
+  const toggle = $("#accountSettingsToggle");
+  if (!menu || !toggle) return;
+  const open = typeof forceOpen === "boolean" ? forceOpen : menu.hidden;
+  menu.hidden = !open;
+  toggle.setAttribute("aria-expanded", open ? "true" : "false");
+  if (!open) showPasswordPanel(false);
+}
+
+function showPasswordPanel(show) {
+  const form = $("#accountPasswordForm");
+  const status = $("#accountPasswordStatus");
+  if (!form) return;
+  form.hidden = !show;
+  if (!show) form.reset();
+  if (status) {
+    status.className = "form-status";
+    status.textContent = "";
+  }
+}
+
+async function changeOwnPassword(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const status = $("#accountPasswordStatus");
+  const submit = form.querySelector("button[type='submit']");
+  const data = Object.fromEntries(new FormData(form).entries());
+  if (status) {
+    status.className = "form-status";
+    status.textContent = "";
+  }
+  const newPassword = String(data.newPassword || "");
+  const confirmPassword = String(data.confirmPassword || "");
   if (newPassword.length < 6) {
-    window.alert("新密码至少需要 6 位。");
+    if (status) {
+      status.textContent = "新密码至少需要 6 位。";
+      status.classList.add("error");
+    }
     return;
   }
-  const confirmPassword = window.prompt("请再次输入新密码：");
-  if (confirmPassword === null) return;
   if (newPassword !== confirmPassword) {
-    window.alert("两次输入的新密码不一致。");
+    if (status) {
+      status.textContent = "两次输入的新密码不一致。";
+      status.classList.add("error");
+    }
     return;
   }
-  const response = await apiFetch("/api/me/password", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ currentPassword, newPassword })
-  });
-  const result = await response.json().catch(() => ({}));
-  if (!response.ok || !result.ok) {
-    throw new Error(result.error || `HTTP ${response.status}`);
+  if (submit) submit.disabled = true;
+  try {
+    const response = await apiFetch("/api/me/password", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ currentPassword: data.currentPassword, newPassword })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    form.reset();
+    if (status) {
+      status.textContent = "密码修改成功，下次登录请使用新密码。";
+      status.classList.add("success");
+    }
+  } catch (error) {
+    if (status) {
+      status.textContent = error.message || "密码修改失败，请稍后重试。";
+      status.classList.add("error");
+    }
+  } finally {
+    if (submit) submit.disabled = false;
   }
-  window.alert("密码修改成功，下次登录请使用新密码。");
 }
 
 function setAdminSettingsStatus(message = "", type = "") {
@@ -5610,7 +5654,7 @@ async function init() {
   setInterval(importSocialCaptures, 4_000);
   showRequestedSection();
   window.addEventListener("hashchange", showRequestedSection);
-  const logoutButton = document.getElementById("logoutButton");
+  const logoutButton = document.getElementById("accountSettingsLogout");
   if (logoutButton) {
     logoutButton.addEventListener("click", async () => {
       logoutButton.disabled = true;

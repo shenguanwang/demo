@@ -230,6 +230,122 @@ button {
   font-size: 14px;
 }
 
+.account-settings {
+  position: relative;
+  margin-top: 10px;
+}
+
+.account-settings-toggle,
+.account-menu-button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 42px;
+  padding: 11px 15px;
+  border: 1px solid rgba(23, 32, 42, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.72);
+  color: #394553;
+  font-size: 12px;
+  font-weight: 750;
+  text-align: left;
+}
+
+.account-settings-toggle {
+  justify-content: flex-start;
+}
+
+.account-settings-toggle span,
+.account-menu-button span {
+  display: grid;
+  flex: 0 0 24px;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 8px;
+  background: #111820;
+  color: #fff;
+  font-size: 11px;
+}
+
+.account-settings-toggle:hover,
+.account-menu-button:hover {
+  border-color: rgba(23, 32, 42, 0.22);
+  background: #fff;
+}
+
+.account-settings-menu {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid rgba(23, 32, 42, 0.12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 16px 36px rgba(23, 32, 42, 0.12);
+}
+
+.account-settings-menu[hidden],
+.account-menu-button[hidden],
+.account-password-form[hidden] {
+  display: none;
+}
+
+.account-menu-button {
+  min-height: 38px;
+  background: #fff;
+}
+
+.account-menu-button.danger {
+  color: #9f3a30;
+}
+
+.account-menu-button.danger span {
+  background: #9f3a30;
+}
+
+.account-password-form {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid rgba(215, 181, 109, 0.25);
+  border-radius: 10px;
+  background: rgba(215, 181, 109, 0.08);
+}
+
+.account-password-form label {
+  display: grid;
+  gap: 5px;
+  color: #53606e;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.account-password-form input {
+  width: 100%;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid rgba(23, 32, 42, 0.13);
+  border-radius: 8px;
+  background: #fff;
+  color: #111820;
+  font-size: 12px;
+}
+
+.account-password-form .form-status {
+  min-height: 16px;
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.account-password-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
 .user-management-button {
   display: flex;
   align-items: center;
@@ -5974,6 +6090,9 @@ td {
 :root[data-theme="dark"] .nav-label,
 :root[data-theme="dark"] .nav button,
 :root[data-theme="dark"] .logout-button,
+:root[data-theme="dark"] .account-settings-toggle,
+:root[data-theme="dark"] .account-menu-button,
+:root[data-theme="dark"] .account-password-form label,
 :root[data-theme="dark"] .side-note p {
   color: #aeb6c2 !important;
 }
@@ -5982,6 +6101,12 @@ td {
 :root[data-theme="dark"] .nav button > span,
 :root[data-theme="dark"] .side-note,
 :root[data-theme="dark"] .logout-button:hover,
+:root[data-theme="dark"] .account-settings-toggle,
+:root[data-theme="dark"] .account-settings-toggle:hover,
+:root[data-theme="dark"] .account-menu-button,
+:root[data-theme="dark"] .account-menu-button:hover,
+:root[data-theme="dark"] .account-settings-menu,
+:root[data-theme="dark"] .account-password-form,
 :root[data-theme="dark"] .user-management-button,
 :root[data-theme="dark"] .nav button:hover,
 :root[data-theme="dark"] .nav button.active {
@@ -6077,6 +6202,7 @@ td {
 :root[data-theme="dark"] .follow-context select,
 :root[data-theme="dark"] .lead-edit-grid input,
 :root[data-theme="dark"] .lead-edit-grid textarea,
+:root[data-theme="dark"] .account-password-form input,
 :root[data-theme="dark"] .admin-api-card > input,
 :root[data-theme="dark"] .admin-settings-grid select {
   border-color: #343b46 !important;

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>华为系新能源汽车海外获客工作台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260706-darkmode4">
+  <link rel="stylesheet" href="./styles.css?v=20260708-account-settings1">
 </head>
 <body>
   <aside class="sidebar">
@@ -38,13 +38,29 @@
         <p>新增 20 家高质量海外车商</p>
       </div>
     </div>
-    <button class="logout-button" id="logoutButton" type="button">
-      <span>退出登录</span>
-      <b>↗</b>
-    </button>
-    <button class="user-management-button password-change-button" id="changePasswordButton" type="button" hidden>
-      <span>🔑</span>修改密码
-    </button>
+    <div class="account-settings" id="accountSettings">
+      <button class="account-settings-toggle" id="accountSettingsToggle" type="button" aria-expanded="false">
+        <span>⚙</span>设置
+      </button>
+      <div class="account-settings-menu" id="accountSettingsMenu" hidden>
+        <button class="account-menu-button" id="openPasswordPanel" type="button">
+          <span>密</span>修改密码
+        </button>
+        <form class="account-password-form" id="accountPasswordForm" hidden>
+          <label>当前密码<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+          <label>新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="6" required></label>
+          <label>确认新密码<input name="confirmPassword" type="password" autocomplete="new-password" minlength="6" required></label>
+          <p class="form-status" id="accountPasswordStatus" role="status"></p>
+          <div class="account-password-actions">
+            <button class="ghost compact" id="cancelPasswordChange" type="button">取消</button>
+            <button class="primary compact" type="submit">保存</button>
+          </div>
+        </form>
+        <button class="account-menu-button danger" id="accountSettingsLogout" type="button">
+          <span>退</span>退出登录
+        </button>
+      </div>
+    </div>
     <button class="user-management-button" id="userManagementNav" data-section="user-management" type="button" hidden>
       <span>♚</span>用户管理
     </button>
@@ -1025,6 +1041,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260706-noopenai1"></script>
+  <script src="./script.js?v=20260708-account-settings1"></script>
 </body>
 </html>
