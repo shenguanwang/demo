@@ -12,6 +12,7 @@ import secrets
 import socket
 import socketserver
 import base64
+import ssl
 import sqlite3
 import subprocess
 import sys
@@ -3448,7 +3449,23 @@ def post_json_value(url: str, payload: dict, timeout: int = 30, headers: dict | 
             **(headers or {}),
         },
     )
-    with urllib.request.urlopen(req, timeout=timeout) as response:
+    try:
+        response_context = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", None)
+        is_apify = safe_urlparse(url).netloc.lower() == "api.apify.com"
+        if not (
+            is_apify
+            and isinstance(reason, ssl.SSLError)
+            and "CERTIFICATE_VERIFY_FAILED" in str(reason)
+        ):
+            raise
+        response_context = urllib.request.urlopen(
+            req,
+            timeout=timeout,
+            context=ssl._create_unverified_context(),
+        )
+    with response_context as response:
         try:
             raw = response.read(2_000_000)
         except http.client.IncompleteRead as exc:
