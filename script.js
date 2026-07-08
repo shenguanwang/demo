@@ -4856,6 +4856,12 @@ function bindForms() {
     $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
   }));
 
+  $("#changePasswordButton")?.addEventListener("click", () => {
+    changeOwnPassword().catch((error) => {
+      window.alert(error.message || "密码修改失败，请稍后重试。");
+    });
+  });
+
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
   $("#reloadLoginEvents")?.addEventListener("click", () => loadLoginEvents());
   $("#toggleLoginEvents")?.addEventListener("click", () => {
@@ -5135,7 +5141,36 @@ async function loadSession() {
   if (userManagementSection) userManagementSection.hidden = session.role !== "admin";
   const systemSettingsSection = $("#system-settings");
   if (systemSettingsSection) systemSettingsSection.hidden = session.role !== "admin";
+  const changePasswordButton = $("#changePasswordButton");
+  if (changePasswordButton) changePasswordButton.hidden = session.role === "admin";
   return session;
+}
+
+async function changeOwnPassword() {
+  const currentPassword = window.prompt("请输入当前密码：");
+  if (currentPassword === null) return;
+  const newPassword = window.prompt("请输入新密码（至少 6 位）：");
+  if (newPassword === null) return;
+  if (newPassword.length < 6) {
+    window.alert("新密码至少需要 6 位。");
+    return;
+  }
+  const confirmPassword = window.prompt("请再次输入新密码：");
+  if (confirmPassword === null) return;
+  if (newPassword !== confirmPassword) {
+    window.alert("两次输入的新密码不一致。");
+    return;
+  }
+  const response = await apiFetch("/api/me/password", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ currentPassword, newPassword })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) {
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  window.alert("密码修改成功，下次登录请使用新密码。");
 }
 
 function setAdminSettingsStatus(message = "", type = "") {

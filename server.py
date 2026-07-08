@@ -1637,6 +1637,19 @@ def update_user(username: str, *, password: str | None = None, status: str | Non
     return get_user(username)
 
 
+def change_own_password(username: str, current_password: str, new_password: str) -> None:
+    user = get_user(str(username or "").strip())
+    if not user or user.get("status") != "enabled":
+        raise ValueError("当前账户不存在或已被禁用")
+    if user.get("builtIn"):
+        raise ValueError("系统内置管理员密码不能在这里修改")
+    if not verify_password(current_password or "", user.get("passwordHash", "")):
+        raise ValueError("当前密码不正确")
+    if len(new_password or "") < 6:
+        raise ValueError("新密码至少需要 6 位")
+    update_user(user["username"], password=new_password)
+
+
 def delete_user(username: str) -> None:
     username = normalize_username(username)
     if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
@@ -7642,6 +7655,20 @@ class Handler(SimpleHTTPRequestHandler):
             self.wfile.write(body)
             return
         if not self.require_auth(api=True):
+            return
+        if parsed.path == "/api/me/password":
+            try:
+                user = self.current_user()
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                change_own_password(
+                    user["username"],
+                    str(payload.get("currentPassword") or ""),
+                    str(payload.get("newPassword") or ""),
+                )
+                self.send_json(200, {"ok": True, "message": "密码已修改"})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/users":
             if not self.require_admin():
