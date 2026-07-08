@@ -2492,11 +2492,25 @@ def get_discovery_job(job_id: str, owner_username: str | None = None) -> dict | 
     return discovery_job_public(job) if job else None
 
 
-def mark_discovery_job_imported(job_id: str, owner_username: str) -> dict | None:
+def mark_discovery_job_imported(
+    job_id: str,
+    owner_username: str,
+    imported_count: int | None = None,
+    raw_count: int | None = None,
+    skipped_count: int | None = None,
+) -> dict | None:
     job = load_discovery_job(job_id, owner_username)
     if not job:
         return None
     job["imported"] = True
+    result = job.get("result") if isinstance(job.get("result"), dict) else {}
+    if imported_count is not None:
+        result["importedCount"] = max(0, int(imported_count))
+    if raw_count is not None:
+        result["rawCount"] = max(0, int(raw_count))
+    if skipped_count is not None:
+        result["skippedCount"] = max(0, int(skipped_count))
+    job["result"] = result
     job["updatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     save_discovery_job(job)
     return discovery_job_public(job)
@@ -8685,7 +8699,18 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-                job = mark_discovery_job_imported(str(payload.get("id", "")), self.current_user()["username"])
+                def optional_count(value):
+                    if value is None or value == "":
+                        return None
+                    return int(value)
+
+                job = mark_discovery_job_imported(
+                    str(payload.get("id", "")),
+                    self.current_user()["username"],
+                    optional_count(payload.get("importedCount")),
+                    optional_count(payload.get("rawCount")),
+                    optional_count(payload.get("skippedCount")),
+                )
                 if not job:
                     self.send_json(404, {"ok": False, "error": "获客任务不存在"})
                     return

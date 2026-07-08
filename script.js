@@ -1609,10 +1609,11 @@ function renderFinderProgressList() {
     .slice(0, FINDER_PROGRESS_LIST_LIMIT);
   box.innerHTML = jobs.length ? jobs.map((job, index) => {
     const progress = normalizedDiscoveryJobProgress(job);
-    const count = Number(job.result?.count || job.result?.leads?.length || 0);
+    const count = discoveryJobRawCount(job);
+    const importedCount = discoveryJobImportedCount(job);
     const title = `${job.country || "未指定市场"} · ${job.model || "未指定车型"}`;
     const resultText = job.status === "completed"
-      ? (job.imported ? `已导入 ${count} 条` : `发现 ${count} 条`)
+      ? (job.imported ? `已导入 ${importedCount} 条` : `发现 ${count} 条`)
       : stateLabels[job.status] || job.status || "处理中";
     return `
       <article class="finder-progress-card ${escapeHtml(progress.state)} ${escapeHtml(job.status || "")}" data-finder-progress-job="${escapeHtml(job.id || "")}">
@@ -4059,9 +4060,28 @@ function isScheduledDiscoveryJob(job) {
   return discoverySchedules.some((schedule) => schedule.lastJobId && schedule.lastJobId === job.id);
 }
 
+function discoveryJobRawCount(job) {
+  return Number(job?.result?.rawCount ?? job?.result?.count ?? job?.result?.leads?.length ?? 0);
+}
+
+function discoveryJobImportedCount(job) {
+  const importedCount = job?.result?.importedCount;
+  if (importedCount !== undefined && importedCount !== null && importedCount !== "") {
+    return Number(importedCount) || 0;
+  }
+  const jobId = String(job?.id || "");
+  if (jobId) {
+    const visibleCount = [...reviewLeads, ...customers]
+      .filter((lead) => String(lead.discoveryJobId || "") === jobId)
+      .length;
+    if (visibleCount) return visibleCount;
+  }
+  return discoveryJobRawCount(job);
+}
+
 function discoveryJobResultText(job) {
-  const count = Number(job.result?.count || job.result?.leads?.length || 0);
-  if (job.imported) return `已导入 ${count} 条`;
+  const count = discoveryJobRawCount(job);
+  if (job.imported) return `已导入 ${discoveryJobImportedCount(job)} 条`;
   if (job.status === "completed") return count ? `发现 ${count} 条` : "无可导入线索";
   if (job.status === "failed") return "执行失败";
   if (job.status === "canceled") return "已取消";
@@ -4181,7 +4201,7 @@ function renderDiscoveryJobs() {
     const canCancel = ["queued", "running"].includes(job.status);
     const diagnostics = job.result?.diagnostics;
     const actionLabel = job.imported
-      ? "已导入"
+      ? `已导入 ${importedCount} 条`
       : canImport
         ? `导入 ${count} 条`
         : canRetry
@@ -4408,12 +4428,17 @@ async function loadDiscoveryJobs() {
   return discoveryJobs;
 }
 
-async function markDiscoveryImported(jobId) {
+async function markDiscoveryImported(jobId, counts = {}) {
   if (!jobId) return;
   await apiFetch("/api/discover/mark-imported", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id: jobId })
+    body: JSON.stringify({
+      id: jobId,
+      importedCount: counts.importedCount,
+      rawCount: counts.rawCount,
+      skippedCount: counts.skippedCount
+    })
   }).catch(() => undefined);
   await loadDiscoveryJobs().catch(() => undefined);
 }
@@ -4553,7 +4578,11 @@ async function importDiscoveryJob(jobId) {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     const merged = mergeDiscoveryResult(result.job?.result || {}, result.job?.payload?.sourceMode || "", result.job);
-    await markDiscoveryImported(jobId);
+    await markDiscoveryImported(jobId, {
+      importedCount: merged.fresh.length,
+      rawCount: merged.found.length,
+      skippedCount: Math.max(0, merged.found.length - merged.fresh.length)
+    });
     setFinderProgress({
       percent: 100,
       stage: "done",
@@ -4819,7 +4848,11 @@ function bindForms() {
           }
         );
         if (!found.length) {
-          await markDiscoveryImported(result.__jobId);
+          await markDiscoveryImported(result.__jobId, {
+            importedCount: 0,
+            rawCount: 0,
+            skippedCount: 0
+          });
           setFinderProgress({
             percent: 100,
             stage: "done",
@@ -4840,7 +4873,11 @@ function bindForms() {
           message: `${sourceLabel} · ${freshnessLabel}：其中 ${fresh.length} 条为新线索，开始自动全网核验。`
         });
         if (!fresh.length) {
-          await markDiscoveryImported(result.__jobId);
+          await markDiscoveryImported(result.__jobId, {
+            importedCount: 0,
+            rawCount: found.length,
+            skippedCount: found.length
+          });
           setFinderProgress({
             percent: 100,
             stage: "done",
@@ -4851,7 +4888,11 @@ function bindForms() {
           });
           return;
         }
-        await markDiscoveryImported(result.__jobId);
+        await markDiscoveryImported(result.__jobId, {
+          importedCount: fresh.length,
+          rawCount: found.length,
+          skippedCount: Math.max(0, found.length - fresh.length)
+        });
         setFinderProgress({
           percent: 100,
           stage: "done",
