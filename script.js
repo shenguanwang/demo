@@ -2466,28 +2466,15 @@ function renderReviewFilterOptions() {
   const discoverySelect = $("#reviewDiscoveryFilter");
   if (!sourceSelect && !countrySelect && !discoverySelect) return;
   const sourceLeads = reviewSourceLeads();
-  const current = sourceSelect?.value || "all";
+  const current = sourceSelect?.value?.startsWith("specific:") ? "all" : (sourceSelect?.value || "all");
   const available = new Set(sourceLeads.map(reviewSourceKey));
   if (sourceSelect) {
     const options = reviewSourceOptions
       .filter(([value]) => available.has(value) || value === current)
       .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
       .join("");
-    sourceSelect.innerHTML = `<option value="all">全部来源</option>${options || reviewSourceOptions.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
-    const concreteOptions = new Map();
-    sourceLeads.forEach((lead) => {
-      reviewConcreteSourceOptions(lead).forEach(([value, label]) => {
-        if (!concreteOptions.has(value)) concreteOptions.set(value, label);
-      });
-    });
-    const concreteOptionHtml = [...concreteOptions.entries()]
-      .sort((a, b) => String(a[1]).localeCompare(String(b[1]), "zh-CN"))
-      .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
-      .join("");
-    if (concreteOptionHtml) {
-      sourceSelect.insertAdjacentHTML("beforeend", `<optgroup label="具体来源">${concreteOptionHtml}</optgroup>`);
-    }
-    sourceSelect.value = current === "all" || [...available].includes(current) || concreteOptions.has(current) ? current : "all";
+    sourceSelect.innerHTML = `<option value="all">\u5168\u90e8\u6765\u6e90</option>${options || reviewSourceOptions.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
+    sourceSelect.value = current === "all" || available.has(current) ? current : "all";
   }
 
   if (countrySelect) {
@@ -2505,14 +2492,14 @@ function renderReviewFilterOptions() {
       .sort((a, b) => String(a[1]).localeCompare(String(b[1]), "zh-CN"))
       .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
       .join("");
-    countrySelect.innerHTML = `<option value="all">全部国家</option>${countryOptionHtml}`;
+    countrySelect.innerHTML = `<option value="all">\u5168\u90e8\u56fd\u5bb6</option>${countryOptionHtml}`;
     countrySelect.value = currentCountry === "all" || countryOptions.has(currentCountry) ? currentCountry : "all";
   }
 
   if (discoverySelect) {
     const currentDiscovery = discoverySelect.value || "all";
     const options = discoveryJobFilterOptions(sourceLeads);
-    discoverySelect.innerHTML = `<option value="all">全部搜索记录</option>${options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
+    discoverySelect.innerHTML = `<option value="all">\u5168\u90e8\u641c\u7d22\u8bb0\u5f55</option>${options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
     discoverySelect.value = currentDiscovery === "all" || options.some(([value]) => value === currentDiscovery) ? currentDiscovery : "all";
   }
 }
