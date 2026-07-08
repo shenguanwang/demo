@@ -2800,22 +2800,30 @@ LOCAL_DISCOVERY_SOURCES = {
         ("YallaMotor UAE", "uae.yallamotor.com"),
         ("Dubizzle UAE", "dubizzle.com"),
         ("DriveArabia UAE", "drivearabia.com"),
+        ("CarSwitch UAE", "carswitch.com"),
     ),
     "Saudi": (
         ("Motory Saudi", "motory.com"),
         ("Syarah", "syarah.com"),
         ("Haraj", "haraj.com.sa"),
         ("SaudiSale", "saudisale.com"),
+        ("OpenSooq Saudi", "sa.opensooq.com"),
+        ("Dubizzle Saudi", "dubizzle.sa"),
     ),
     "Kazakhstan": (
         ("Kolesa Kazakhstan", "kolesa.kz"),
         ("Market Kazakhstan", "market.kz"),
         ("OLX Kazakhstan", "olx.kz"),
+        ("Mycar Kazakhstan", "mycar.kz"),
+        ("Aster Kazakhstan", "aster.kz"),
+        ("Bazar Kazakhstan", "bazar.kz"),
     ),
     "Russia": (
         ("Auto.ru", "auto.ru"),
         ("Drom", "drom.ru"),
         ("Avito Auto", "avito.ru"),
+        ("Drive2 Russia", "drive2.ru"),
+        ("Youla Auto", "youla.ru"),
     ),
     "Qatar": (
         ("QatarSale", "qatarsale.com"),
@@ -2837,6 +2845,7 @@ LOCAL_DISCOVERY_SOURCES = {
         ("Turbo.az", "turbo.az"),
         ("Tap.az", "tap.az"),
         ("Bina.az", "bina.az"),
+        ("AvtoBaku", "avtobaku.com"),
     ),
     "Nigeria": (
         ("Jiji Nigeria", "jiji.ng"),
@@ -2858,16 +2867,19 @@ LOCAL_DISCOVERY_SOURCES = {
         ("Auto24 Cote d'Ivoire", "auto24.ci"),
         ("CoinAfrique Cote d'Ivoire", "ci.coinafrique.com"),
         ("Afribaba Cote d'Ivoire", "afribaba.ci"),
+        ("Voitures Cote d'Ivoire", "voitures.ci"),
     ),
     "Cote d'Ivoire": (
         ("Auto24 Cote d'Ivoire", "auto24.ci"),
         ("CoinAfrique Cote d'Ivoire", "ci.coinafrique.com"),
         ("Afribaba Cote d'Ivoire", "afribaba.ci"),
+        ("Voitures Cote d'Ivoire", "voitures.ci"),
     ),
     "Ivory Coast": (
         ("Auto24 Cote d'Ivoire", "auto24.ci"),
         ("CoinAfrique Cote d'Ivoire", "ci.coinafrique.com"),
         ("Afribaba Cote d'Ivoire", "afribaba.ci"),
+        ("Voitures Cote d'Ivoire", "voitures.ci"),
     ),
     "Egypt": (
         ("ContactCars", "contactcars.com"),
@@ -2878,11 +2890,14 @@ LOCAL_DISCOVERY_SOURCES = {
         ("Mashina KG", "mashina.kg"),
         ("Cars KG", "cars.kg"),
         ("Lalafo KG", "lalafo.kg"),
+        ("AutoKyrgyz", "autokyrgyz.com"),
+        ("Bazar KG", "bazar.kg"),
     ),
     "Ethiopia": (
         ("Jiji Ethiopia", "jiji.com.et"),
         ("Qefira Ethiopia", "qefira.com"),
         ("AddisMercato", "addismercato.com"),
+        ("YeneF1 Ethiopia", "yenef1.com"),
     ),
     "Oman": (
         ("OpenSooq Oman", "om.opensooq.com"),
