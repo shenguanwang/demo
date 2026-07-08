@@ -123,6 +123,12 @@ ADMIN_SETTING_DEFINITIONS = {
     "BRAVE_SEARCH_API_KEY": {"type": "secret", "label": "Brave Search API Key", "group": "search", "status": "active", "use": "Official Web Search API for websites and directories"},
     "SERPAPI_API_KEY": {"type": "secret", "label": "SerpApi API Key", "group": "search", "status": "active", "use": "Google Search and Google Maps result enrichment"},
     "HUNTER_API_KEY": {"type": "secret", "label": "Hunter.io API Key", "group": "email", "status": "active", "use": "Email candidates by company domain"},
+    "APIFY_API_TOKEN": {"type": "secret", "label": "Apify API Token", "group": "social", "status": "active", "use": "Apify Actors for social and directory discovery"},
+    "APIFY_FACEBOOK_ACTOR_ID": {"type": "text", "label": "Apify Facebook Actor ID", "group": "social", "status": "reserved", "use": "Override Facebook Actor, for example apify/facebook-pages-scraper"},
+    "APIFY_INSTAGRAM_ACTOR_ID": {"type": "text", "label": "Apify Instagram Actor ID", "group": "social", "status": "reserved", "use": "Override Instagram Actor, for example apify/instagram-scraper"},
+    "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example apify/tiktok-scraper"},
+    "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor"},
+    "APIFY_YOUTUBE_ACTOR_ID": {"type": "text", "label": "Apify YouTube Actor ID", "group": "social", "status": "reserved", "use": "Override YouTube Actor, for example apify/youtube-scraper"},
     "APOLLO_API_KEY": {"type": "secret", "label": "Apollo API Key", "group": "email", "status": "reserved", "use": "Reserved for B2B contacts and company enrichment"},
     "CLEARBIT_API_KEY": {"type": "secret", "label": "Clearbit API Key", "group": "company", "status": "reserved", "use": "Reserved for company/domain enrichment"},
     "FACEBOOK_ACCESS_TOKEN": {"type": "secret", "label": "Facebook Graph API Token", "group": "social", "status": "reserved", "use": "后续 Facebook 主页/线索接口"},
@@ -269,6 +275,10 @@ def get_serpapi_api_key() -> str:
 
 def get_hunter_api_key() -> str:
     return runtime_setting("HUNTER_API_KEY")
+
+
+def get_apify_api_token() -> str:
+    return runtime_setting("APIFY_API_TOKEN")
 
 
 def admin_settings_payload() -> dict:
@@ -2962,9 +2972,93 @@ def site_root_url(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}/"
 
 
+LOCALIZED_DISCOVERY_TERMS = {
+    "Nigeria": (
+        "car dealer Lagos imported cars phone WhatsApp",
+        "tokunbo cars dealer Lagos auto sales",
+        "vehicle importer Nigeria showroom",
+        "Jiji Nigeria cars dealer contact",
+    ),
+    "Ghana": (
+        "car dealer Accra imported cars phone WhatsApp",
+        "home used cars Ghana dealer showroom",
+        "vehicle importer Ghana auto sales",
+        "Tonaton cars dealer contact",
+    ),
+    "Algeria": (
+        "vente voiture Alger concessionnaire contact",
+        "concessionnaire automobile Algerie showroom",
+        "importateur automobile Algerie contact",
+        "سيارات للبيع الجزائر وكيل سيارات",
+    ),
+    "C么te d'Ivoire": (
+        "vente voiture Abidjan concessionnaire contact",
+        "concessionnaire automobile Cote d'Ivoire showroom",
+        "importateur automobile Abidjan contact",
+        "voiture occasion Abidjan garage automobile",
+    ),
+    "Cote d'Ivoire": (
+        "vente voiture Abidjan concessionnaire contact",
+        "concessionnaire automobile Cote d'Ivoire showroom",
+        "importateur automobile Abidjan contact",
+        "voiture occasion Abidjan garage automobile",
+    ),
+    "Ivory Coast": (
+        "vente voiture Abidjan concessionnaire contact",
+        "concessionnaire automobile Cote d'Ivoire showroom",
+        "importateur automobile Abidjan contact",
+        "voiture occasion Abidjan garage automobile",
+    ),
+    "Egypt": (
+        "car dealer Cairo imported cars phone WhatsApp",
+        "معرض سيارات القاهرة سيارات للبيع",
+        "مستورد سيارات مصر contact",
+        "Egypt car showroom dealer contact",
+    ),
+    "Kyrgyzstan": (
+        "автосалон Бишкек автомобили контакт",
+        "машины Бишкек автосалон дилер",
+        "импорт авто Кыргызстан дилер",
+        "Кыргызстан авто базар дилер",
+    ),
+    "Ethiopia": (
+        "car dealer Addis Ababa imported cars contact",
+        "vehicle importer Ethiopia showroom",
+        "Addis Ababa car sales dealer phone",
+        "Ethiopia automotive trading company",
+    ),
+    "Oman": (
+        "car dealer Muscat imported cars WhatsApp",
+        "معرض سيارات مسقط سيارات للبيع",
+        "Oman vehicle importer showroom contact",
+        "Muscat auto trading LLC cars",
+    ),
+    "Armenia": (
+        "ավտոսրահ Երևան մեքենաներ կոնտակտ",
+        "автосалон Ереван автомобили контакт",
+        "Armenia car dealer Yerevan imported cars",
+        "Yerevan auto dealer showroom contact",
+    ),
+}
+
+
 def localized_vehicle_listing_queries(country: str, cities: list[str]) -> list[str]:
-    if "russia" not in str(country or "").lower():
-        return []
+    country_text = normalize_country_match_text(country)
+    if "russia" not in country_text:
+        selected_terms: tuple[str, ...] = ()
+        for key, terms in LOCALIZED_DISCOVERY_TERMS.items():
+            meta = COUNTRY_SEARCH_META.get(key, {})
+            aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
+            if any((token := normalize_country_match_text(alias)) and token in country_text for alias in aliases):
+                selected_terms = terms
+                break
+        if not selected_terms:
+            return []
+        queries: list[str] = []
+        for city in cities[:10]:
+            for term in selected_terms:
+                queries.append(f"{city} {term}".strip())
+        return list(dict.fromkeys(queries))
     queries: list[str] = []
     for city in cities[:10]:
         queries.extend([
@@ -3339,6 +3433,30 @@ def fetch_json(url: str, timeout: int = 10, headers: dict | None = None) -> dict
         charset = response.headers.get_content_charset() or "utf-8"
         data = json.loads(raw.decode(charset, errors="ignore"))
         return data if isinstance(data, dict) else {}
+
+
+def post_json_value(url: str, payload: dict, timeout: int = 30, headers: dict | None = None):
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={
+            "User-Agent": "HuaweiEVLeadTool/1.0",
+            "Accept": "application/json",
+            "Content-Type": "application/json; charset=utf-8",
+            **(headers or {}),
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        try:
+            raw = response.read(2_000_000)
+        except http.client.IncompleteRead as exc:
+            raw = exc.partial or b""
+        charset = response.headers.get_content_charset() or "utf-8"
+        if not raw:
+            return None
+        return json.loads(raw.decode(charset, errors="ignore"))
 
 
 def clean_text(value: str) -> str:
@@ -4566,6 +4684,157 @@ def social_search_variants(
     if account_scope in ("person", "both") and platform == "linkedin":
         queries.append(f"site:linkedin.com/in {market} \"dealership owner\"")
     return list(dict.fromkeys(queries))
+
+
+APIFY_SOCIAL_ACTORS = {
+    "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "apify/facebook-pages-scraper"),
+    "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-scraper"),
+    "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "apify/tiktok-scraper"),
+    "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", ""),
+    "youtube": ("APIFY_YOUTUBE_ACTOR_ID", "apify/youtube-scraper"),
+}
+
+
+def apify_actor_url_part(actor_id: str) -> str:
+    return urllib.parse.quote(actor_id.strip().replace("/", "~"), safe="")
+
+
+def apify_actor_id(platform: str) -> str:
+    env_key, default_actor = APIFY_SOCIAL_ACTORS.get(platform, ("", ""))
+    return runtime_setting(env_key, default_actor) if env_key else ""
+
+
+def apify_search_input(platform: str, query: str, limit: int) -> dict:
+    payload = {
+        "query": query,
+        "search": query,
+        "queries": [query],
+        "searchQueries": [query],
+        "maxItems": limit,
+        "maxResults": limit,
+        "resultsLimit": limit,
+        "limit": limit,
+        "proxy": {"useApifyProxy": True},
+    }
+    if platform == "youtube":
+        payload.update({"searchKeywords": query, "maxResultsShorts": 0, "maxResultStreams": 0})
+    elif platform == "instagram":
+        payload.update({"searchType": "user", "resultsType": "profiles"})
+    elif platform == "facebook":
+        payload.update({"searchType": "pages"})
+    elif platform == "tiktok":
+        payload.update({"searchSection": "users"})
+    return payload
+
+
+def first_text_value(item: dict, keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            return clean_text(value)
+        if isinstance(value, (int, float)):
+            return str(value)
+    return ""
+
+
+def apify_item_url(platform: str, item: dict) -> str:
+    url = first_text_value(item, (
+        "url", "profileUrl", "profileURL", "pageUrl", "channelUrl", "webUrl", "link", "externalUrl",
+    ))
+    username = first_text_value(item, ("username", "userName", "handle", "screenName", "channelId", "id"))
+    if not url and username:
+        username = username.lstrip("@")
+        if platform == "instagram":
+            url = f"https://www.instagram.com/{username}/"
+        elif platform == "tiktok":
+            url = f"https://www.tiktok.com/@{username}"
+        elif platform == "facebook":
+            url = f"https://www.facebook.com/{username}"
+        elif platform == "youtube":
+            url = f"https://www.youtube.com/{username if username.startswith('@') else '@' + username}"
+        elif platform == "linkedin":
+            url = f"https://www.linkedin.com/company/{username}"
+    return normalize_public_url(str(url or ""))
+
+
+def normalize_apify_items(
+    platform: str,
+    items,
+    query: str,
+    origin: str,
+    source_type: str,
+    limit: int,
+) -> list[dict]:
+    if isinstance(items, dict):
+        dataset_items = items.get("items") or items.get("data") or items.get("results") or []
+    elif isinstance(items, list):
+        dataset_items = items
+    else:
+        dataset_items = []
+    normalized: list[dict] = []
+    for item in dataset_items:
+        if not isinstance(item, dict):
+            continue
+        url = apify_item_url(platform, item)
+        if not url or not is_valid_http_url(url):
+            continue
+        title = first_text_value(item, (
+            "name", "title", "fullName", "username", "userName", "channelName", "pageName", "displayName",
+        )) or safe_urlparse(url).path.strip("/").replace("/", " ")
+        snippet_parts = [
+            first_text_value(item, ("description", "bio", "about", "text", "snippet", "summary", "categoryName")),
+            first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount")),
+        ]
+        snippet = clean_text(" ".join(part for part in snippet_parts if part))
+        normalized.append({
+            "title": title[:180],
+            "url": url,
+            "snippet": snippet or f"Apify {origin} result for {query}",
+            "apiSource": "Apify",
+            "origin": origin,
+            "source_type": f"{source_type} · Apify",
+            "source_url": url,
+            "customer_website": "",
+            "skip_fetch": True,
+            "apifyPlatform": platform,
+        })
+        if len(normalized) >= limit:
+            break
+    return normalized
+
+
+def search_apify_social(
+    platform: str,
+    queries: list[str],
+    origin: str,
+    source_type: str,
+    limit: int = 8,
+) -> list[dict]:
+    token = get_apify_api_token()
+    actor_id = apify_actor_id(platform)
+    if not token or not actor_id:
+        return []
+    results: list[dict] = []
+    seen: set[str] = set()
+    for query in queries:
+        if len(results) >= limit:
+            break
+        actor = apify_actor_url_part(actor_id)
+        params = urllib.parse.urlencode({"token": token, "timeout": "45", "memory": "1024"})
+        url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?{params}"
+        try:
+            items = post_json_value(url, apify_search_input(platform, query, min(10, limit)), timeout=60)
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
+            continue
+        for item in normalize_apify_items(platform, items, query, origin, source_type, limit):
+            identity = item["url"].lower().rstrip("/")
+            if identity in seen:
+                continue
+            seen.add(identity)
+            results.append(item)
+            if len(results) >= limit:
+                break
+    return results
 
 
 def extract_published_at(text: str, url: str = "") -> str:
@@ -6874,6 +7143,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     social_search_stats = {
         "queries": 0,
         "rawResults": 0,
+        "apifyResults": 0,
         "profileResults": 0,
         "acceptedResults": 0,
         "officialWebsiteProfiles": 0,
@@ -6953,6 +7223,21 @@ def discover(params: dict[str, list[str]]) -> dict:
             pass
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
+        if platform in APIFY_SOCIAL_ACTORS:
+            apify_queries = query_variants[:1 if source_mode in ("all", "combined") else 2]
+            try:
+                apify_results = search_apify_social(
+                    platform,
+                    apify_queries,
+                    origin,
+                    source_type,
+                    limit=6 if source_mode in ("all", "combined") else 10,
+                )
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+                apify_results = []
+            if apify_results:
+                social_search_stats["apifyResults"] += len(apify_results)
+                social_results.extend(apify_results)
         social_search_stats["rawResults"] += len(social_results)
         expected_domains = {
             "instagram": ("instagram.com",),
@@ -7026,6 +7311,33 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
         max_youtube_queries = 45 if source_mode == "youtube" else 32
         youtube_searches = list(dict.fromkeys(youtube_searches))[:max_youtube_queries]
+        try:
+            apify_youtube_results = search_apify_social(
+                "youtube",
+                [query for query, _account_type in youtube_searches[:1 if source_mode in ("all", "combined") else 2]],
+                "YouTube",
+                "YouTube 鍏紑棰戦亾",
+                limit=6 if source_mode in ("all", "combined") else 10,
+            )
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+            apify_youtube_results = []
+        for item in apify_youtube_results:
+            youtube_analysis = analyze_social_business_profile(
+                f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",
+                "YouTube",
+                "company account",
+            )
+            youtube_discovery_candidate = is_youtube_automotive_lead(
+                item.get("title", ""),
+                item.get("snippet", ""),
+                item.get("url", ""),
+            )
+            if not youtube_discovery_candidate:
+                continue
+            item["account_type"] = "company account"
+            item["social_analysis"] = youtube_analysis
+            item["youtube_discovery_candidate"] = youtube_discovery_candidate
+            raw_results.append(item)
         for youtube_query, youtube_account_type in youtube_searches:
             try:
                 youtube_items = search_youtube_channels(youtube_query, limit=25, country=country)
@@ -7784,6 +8096,7 @@ class Handler(SimpleHTTPRequestHandler):
             brave_ready = bool(get_brave_search_api_key())
             serpapi_ready = bool(get_serpapi_api_key())
             hunter_ready = bool(get_hunter_api_key())
+            apify_ready = bool(get_apify_api_token())
             self.send_json(200, {
                 "ok": True,
                 "sources": {
@@ -7811,6 +8124,11 @@ class Handler(SimpleHTTPRequestHandler):
                         "available": hunter_ready,
                         "label": "Hunter.io",
                         "message": "已连接邮箱候选补充" if hunter_ready else "未配置 HUNTER_API_KEY"
+                    },
+                    "apify": {
+                        "available": apify_ready,
+                        "label": "Apify Actors",
+                        "message": "已连接 Apify，可作为社媒 Actor 补充源" if apify_ready else "未配置 APIFY_API_TOKEN"
                     },
                     "maps": {"available": True, "label": "OpenStreetMap"},
                     "youtube": {
