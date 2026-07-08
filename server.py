@@ -2778,6 +2778,108 @@ COUNTRY_SEARCH_META = {
     },
 }
 
+LOCAL_DISCOVERY_SOURCES = {
+    "UAE": (
+        ("DubiCars", "dubicars.com"),
+        ("YallaMotor UAE", "uae.yallamotor.com"),
+        ("Dubizzle UAE", "dubizzle.com"),
+        ("DriveArabia UAE", "drivearabia.com"),
+    ),
+    "Saudi": (
+        ("Motory Saudi", "motory.com"),
+        ("Syarah", "syarah.com"),
+        ("Haraj", "haraj.com.sa"),
+        ("SaudiSale", "saudisale.com"),
+    ),
+    "Kazakhstan": (
+        ("Kolesa Kazakhstan", "kolesa.kz"),
+        ("Market Kazakhstan", "market.kz"),
+        ("OLX Kazakhstan", "olx.kz"),
+    ),
+    "Russia": (
+        ("Auto.ru", "auto.ru"),
+        ("Drom", "drom.ru"),
+        ("Avito Auto", "avito.ru"),
+    ),
+    "Qatar": (
+        ("QatarSale", "qatarsale.com"),
+        ("Mzad Qatar", "mzadqatar.com"),
+        ("Qatar Living", "qatarliving.com"),
+        ("QMotor", "qmotor.com"),
+    ),
+    "Kuwait": (
+        ("Q8Car", "q8car.com"),
+        ("4Sale Kuwait", "q84sale.com"),
+        ("OpenSooq Kuwait", "kw.opensooq.com"),
+    ),
+    "Uzbekistan": (
+        ("Avtoelon", "avtoelon.uz"),
+        ("OLX Uzbekistan", "olx.uz"),
+        ("Avto Uzbekistan", "avto.uz"),
+    ),
+    "Azerbaijan": (
+        ("Turbo.az", "turbo.az"),
+        ("Tap.az", "tap.az"),
+        ("Bina.az", "bina.az"),
+    ),
+    "Nigeria": (
+        ("Jiji Nigeria", "jiji.ng"),
+        ("Cars45", "cars45.com"),
+        ("Autochek Nigeria", "autochek.africa"),
+        ("Cheki Nigeria", "cheki.com.ng"),
+    ),
+    "Ghana": (
+        ("Tonaton", "tonaton.com"),
+        ("Jiji Ghana", "jiji.com.gh"),
+        ("Autochek Ghana", "autochek.africa"),
+    ),
+    "Algeria": (
+        ("Ouedkniss", "ouedkniss.com"),
+        ("Autobip Algeria", "autobip.com"),
+        ("AutoDZ", "autodz.com"),
+    ),
+    "C么te d'Ivoire": (
+        ("Auto24 Cote d'Ivoire", "auto24.ci"),
+        ("CoinAfrique Cote d'Ivoire", "ci.coinafrique.com"),
+        ("Afribaba Cote d'Ivoire", "afribaba.ci"),
+    ),
+    "Cote d'Ivoire": (
+        ("Auto24 Cote d'Ivoire", "auto24.ci"),
+        ("CoinAfrique Cote d'Ivoire", "ci.coinafrique.com"),
+        ("Afribaba Cote d'Ivoire", "afribaba.ci"),
+    ),
+    "Ivory Coast": (
+        ("Auto24 Cote d'Ivoire", "auto24.ci"),
+        ("CoinAfrique Cote d'Ivoire", "ci.coinafrique.com"),
+        ("Afribaba Cote d'Ivoire", "afribaba.ci"),
+    ),
+    "Egypt": (
+        ("ContactCars", "contactcars.com"),
+        ("Hatla2ee Egypt", "eg.hatla2ee.com"),
+        ("Dubizzle Egypt", "dubizzle.com.eg"),
+    ),
+    "Kyrgyzstan": (
+        ("Mashina KG", "mashina.kg"),
+        ("Cars KG", "cars.kg"),
+        ("Lalafo KG", "lalafo.kg"),
+    ),
+    "Ethiopia": (
+        ("Jiji Ethiopia", "jiji.com.et"),
+        ("Qefira Ethiopia", "qefira.com"),
+        ("AddisMercato", "addismercato.com"),
+    ),
+    "Oman": (
+        ("OpenSooq Oman", "om.opensooq.com"),
+        ("Dubizzle Oman", "dubizzle.com.om"),
+        ("Oman YallaMotor", "oman.yallamotor.com"),
+    ),
+    "Armenia": (
+        ("List.am", "list.am"),
+        ("Auto.am", "auto.am"),
+        ("MyAuto Armenia", "myauto.am"),
+    ),
+}
+
 FOREIGN_LOCATION_BLOCKERS = (
     "united states", "usa", "u.s.", "america", "california", "florida",
     "texas", "new york", "los angeles", "chicago", "houston", "miami",
@@ -2805,6 +2907,25 @@ def target_country_aliases(country: str) -> tuple[str, ...]:
     meta = country_search_meta(country)
     aliases = [str(country or "").split(" ")[0], meta["location"], *meta["aliases"]]
     return tuple(dict.fromkeys(alias for alias in aliases if alias))
+
+
+def local_discovery_sources(country: str) -> tuple[tuple[str, str], ...]:
+    meta = country_search_meta(country)
+    candidates = [str(country or "").split(" ")[0], meta.get("location", "")]
+    candidates.extend(meta.get("aliases") or ())
+    for key, sources in LOCAL_DISCOVERY_SOURCES.items():
+        key_text = normalize_country_match_text(key)
+        if any(key_text and key_text in normalize_country_match_text(candidate) for candidate in candidates):
+            return sources
+    return ()
+
+
+def local_discovery_domains() -> set[str]:
+    domains: set[str] = set()
+    for sources in LOCAL_DISCOVERY_SOURCES.values():
+        for _, domain in sources:
+            domains.add(str(domain).lower().removeprefix("www."))
+    return domains
 
 
 def has_target_country_signal(text: str, country: str) -> bool:
@@ -2847,6 +2968,37 @@ def localized_vehicle_listing_queries(country: str, cities: list[str]) -> list[s
             f"{city} авто в салоне дилер автомобили",
             f"{city} site:.ru/cars/ автосалон автомобили",
         ])
+    return list(dict.fromkeys(queries))
+
+
+def local_source_query_variants(
+    country: str,
+    cities: list[str],
+    target_type: str,
+    exclude_query: str = "",
+    cutoff_query: str = "",
+) -> list[str]:
+    sources = local_discovery_sources(country)
+    if not sources:
+        return []
+    meta = country_search_meta(country)
+    market_terms = list(dict.fromkeys([*(cities[:3]), meta.get("location", ""), str(country or "").split(" ")[0]]))
+    intent_terms = {
+        "dealer": ("car dealer", "car showroom", "cars for sale", "motors"),
+        "parallel": ("parallel import", "imported cars", "auto trading", "car dealer"),
+        "importer": ("vehicle importer", "car distributor", "auto trading", "imported cars"),
+        "fleet": ("fleet", "car rental", "corporate vehicles", "vehicle procurement"),
+        "corporate": ("corporate vehicles", "fleet procurement", "car supplier", "vehicle procurement"),
+        "government": ("vehicle supplier", "fleet tender", "automotive company"),
+        "buying": ("car buyer", "used cars", "dealer", "showroom"),
+        "individual": ("used cars", "luxury cars", "electric vehicles", "cars for sale"),
+    }.get(target_type, ("car dealer", "car showroom", "cars for sale", "motors"))
+    queries: list[str] = []
+    for source_name, domain in sources:
+        for place in market_terms[:4]:
+            for term in intent_terms[:3]:
+                queries.append(f"site:{domain} {place} {term} contact phone WhatsApp {exclude_query}{cutoff_query}".strip())
+        queries.append(f"site:{domain} {source_name} automotive dealer showroom contact {exclude_query}{cutoff_query}".strip())
     return list(dict.fromkeys(queries))
 
 
@@ -4502,6 +4654,9 @@ def source_details(url: str, fallback_origin: str = "公开网页搜索") -> tup
         return "Reddit", "Reddit 公开社区或用户"
     if "vk.com" in domain:
         return "VK", "VK 公开主页"
+    local_domains = local_discovery_domains()
+    if domain in local_domains or any(domain.endswith(f".{item}") for item in local_domains):
+        return domain, "Local automotive directory"
     if domain:
         return domain, "车商官网或汽车行业网站"
     return fallback_origin, "公开商业信息网站"
@@ -4536,6 +4691,9 @@ def source_category(url: str, title: str = "", snippet: str = "") -> tuple[str, 
         return "Reddit", "社交媒体"
     if "vk.com" in domain:
         return "VK", "社交媒体"
+    local_domains = local_discovery_domains()
+    if domain in local_domains or any(domain.endswith(f".{item}") for item in local_domains):
+        return domain or "Local automotive directory", "Local automotive directory"
     if any(word in value for word in ("exhibitor", "motor show", "auto show", "exhibition")):
         return domain or "展会网站", "展会参展信息"
     if any(word in value for word in ("chamber", "association", "council", "member directory")):
@@ -6493,6 +6651,14 @@ def discover(params: dict[str, list[str]]) -> dict:
         city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, f"official website contact {exclude_query}{cutoff_query}")
     )
     commercial_query_variants.extend(localized_vehicle_listing_queries(country, cities))
+    if source_mode in ("all", "combined"):
+        local_queries = local_source_query_variants(country, cities, target_type, exclude_query, cutoff_query)
+        if local_queries:
+            commercial_query_variants = [
+                *commercial_query_variants[:7],
+                *local_queries,
+                *commercial_query_variants[7:],
+            ]
 
     raw_results = []
     google_primary_results: list[dict] = []
