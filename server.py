@@ -125,7 +125,7 @@ ADMIN_SETTING_DEFINITIONS = {
     "HUNTER_API_KEY": {"type": "secret", "label": "Hunter.io API Key", "group": "email", "status": "active", "use": "Email candidates by company domain"},
     "APIFY_API_TOKEN": {"type": "secret", "label": "Apify API Token", "group": "social", "status": "active", "use": "Apify Actors for social and directory discovery"},
     "APIFY_FACEBOOK_ACTOR_ID": {"type": "text", "label": "Apify Facebook Actor ID", "group": "social", "status": "reserved", "use": "Override Facebook Actor, for example apify/facebook-pages-scraper"},
-    "APIFY_INSTAGRAM_ACTOR_ID": {"type": "text", "label": "Apify Instagram Actor ID", "group": "social", "status": "reserved", "use": "Override Instagram Actor, for example apify/instagram-scraper"},
+    "APIFY_INSTAGRAM_ACTOR_ID": {"type": "text", "label": "Apify Instagram Actor ID", "group": "social", "status": "reserved", "use": "Override Instagram Actor, for example apify/instagram-search-scraper"},
     "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example apify/tiktok-scraper"},
     "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor"},
     "APIFY_YOUTUBE_ACTOR_ID": {"type": "text", "label": "Apify YouTube Actor ID", "group": "social", "status": "reserved", "use": "Override YouTube Actor, for example apify/youtube-scraper"},
@@ -4505,6 +4505,13 @@ def telegram_directory_terms(market: str, target_type: str) -> list[str]:
     markets = [market]
     if market.lower() in {"uae", "united arab emirates", "emirates"}:
         markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
+    market_text = normalize_country_match_text(market)
+    for key, hints in COUNTRY_HINTS.items():
+        meta = COUNTRY_SEARCH_META.get(key, {})
+        aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
+        if any((token := normalize_country_match_text(alias)) and token in market_text for alias in aliases):
+            markets = [*hints[:4], *markets]
+            break
     markets = list(dict.fromkeys(place for place in markets if place))
     intent_terms = {
         "dealer": ("car dealer", "used cars", "cars for sale", "motors", "car showroom"),
@@ -4606,6 +4613,13 @@ def social_search_variants(
     markets = [market]
     if market.lower() in {"uae", "united arab emirates", "emirates"}:
         markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
+    market_text = normalize_country_match_text(market)
+    for key, hints in COUNTRY_HINTS.items():
+        meta = COUNTRY_SEARCH_META.get(key, {})
+        aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
+        if any((token := normalize_country_match_text(alias)) and token in market_text for alias in aliases):
+            markets = [*hints[:4], *markets]
+            break
     markets = list(dict.fromkeys(place for place in markets if place))
     broad_terms = (
         "car dealer",
@@ -4688,7 +4702,7 @@ def social_search_variants(
 
 APIFY_SOCIAL_ACTORS = {
     "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "apify/facebook-pages-scraper"),
-    "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-scraper"),
+    "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-search-scraper"),
     "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "apify/tiktok-scraper"),
     "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", ""),
     "youtube": ("APIFY_YOUTUBE_ACTOR_ID", "apify/youtube-scraper"),
@@ -4704,7 +4718,16 @@ def apify_actor_id(platform: str) -> str:
     return runtime_setting(env_key, default_actor) if env_key else ""
 
 
+def apify_keyword_query(query: str) -> str:
+    value = re.sub(r"\bsite:\S+", " ", str(query or ""), flags=re.I)
+    value = value.replace('"', " ")
+    value = re.sub(r"\b(contact|contacts|phone|email|whatsapp|about|bio)\b", " ", value, flags=re.I)
+    value = re.sub(r"\s+", " ", value).strip()
+    return value or str(query or "").strip()
+
+
 def apify_search_input(platform: str, query: str, limit: int) -> dict:
+    query = apify_keyword_query(query)
     payload = {
         "query": query,
         "search": query,
@@ -4719,7 +4742,13 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
     if platform == "youtube":
         payload.update({"searchKeywords": query, "maxResultsShorts": 0, "maxResultStreams": 0})
     elif platform == "instagram":
-        payload.update({"searchType": "user", "resultsType": "profiles"})
+        payload = {
+            "search": query,
+            "searchType": "user",
+            "searchLimit": limit,
+            "enhanceUserSearchWithFacebookPage": False,
+            "liveSearch": False,
+        }
     elif platform == "facebook":
         payload.update({"searchType": "pages"})
     elif platform == "tiktok":
@@ -4739,8 +4768,16 @@ def first_text_value(item: dict, keys: tuple[str, ...]) -> str:
 
 def apify_item_url(platform: str, item: dict) -> str:
     url = first_text_value(item, (
-        "url", "profileUrl", "profileURL", "pageUrl", "channelUrl", "webUrl", "link", "externalUrl",
+        "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "channelUrl", "webUrl", "link", "externalUrl", "inputUrl",
     ))
+    if not url and isinstance(item.get("ig_business"), dict):
+        profile = item.get("ig_business", {}).get("profile")
+        if isinstance(profile, dict):
+            url = first_text_value(profile, ("url", "profileUrl", "inputUrl"))
+            if not url:
+                username = first_text_value(profile, ("username", "userName", "handle"))
+                if username:
+                    url = f"https://www.instagram.com/{username.lstrip('@')}/"
     username = first_text_value(item, ("username", "userName", "handle", "screenName", "channelId", "id"))
     if not url and username:
         username = username.lstrip("@")
@@ -6889,6 +6926,87 @@ def social_accounts_from_business_websites(
     return unique
 
 
+def social_accounts_from_local_source_pages(
+    country: str,
+    target_type: str,
+    platform: str,
+    origin: str,
+    source_type: str,
+    limit: int = 12,
+) -> list[dict]:
+    cities = discovery_cities(country)
+    local_queries = local_source_query_variants(country, cities, target_type)
+    if not local_queries:
+        return []
+    expected_domains = {
+        "instagram": ("instagram.com",),
+        "facebook": ("facebook.com", "fb.com"),
+        "tiktok": ("tiktok.com",),
+        "linkedin": ("linkedin.com",),
+        "youtube": ("youtube.com", "youtu.be"),
+        "telegram": ("t.me", "telegram.me", "telegram.dog"),
+        "twitter": ("x.com", "twitter.com"),
+        "threads": ("threads.net",),
+        "pinterest": ("pinterest.",),
+        "reddit": ("reddit.com",),
+        "vk": ("vk.com",),
+    }.get(platform, ())
+    if not expected_domains:
+        return []
+    seeds: list[dict] = []
+    for query in local_queries[:4]:
+        try:
+            seeds.extend(search_web(query, limit=4, country=country))
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+            continue
+    results: list[dict] = []
+    seen: set[str] = set()
+    for seed in seeds[:14]:
+        seed_url = normalize_public_url(seed.get("url", ""))
+        if not seed_url or not is_valid_http_url(seed_url):
+            continue
+        seed_domain = safe_urlparse(seed_url).netloc.lower().removeprefix("www.")
+        if any(expected in seed_domain for expected in expected_domains):
+            social_urls = [normalize_social_profile_url(seed_url)]
+            page_text = seed.get("snippet", "")
+            final_url = seed_url
+        else:
+            try:
+                page_text, final_url = fetch_document(seed_url, timeout=8)
+            except (OSError, TimeoutError, UnicodeError, urllib.error.URLError, http.client.HTTPException):
+                continue
+            contacts = extract_public_contacts(page_text)
+            social_urls = contacts.get("social_accounts") or []
+        for social_url in social_urls:
+            item_url = normalize_social_profile_url(social_url)
+            item_domain = safe_urlparse(item_url).netloc.lower().removeprefix("www.")
+            identity = item_url.lower().rstrip("/")
+            if (
+                not item_url
+                or identity in seen
+                or not any(expected in item_domain for expected in expected_domains)
+                or not is_social_profile_url(item_url)
+            ):
+                continue
+            seen.add(identity)
+            company = clean_text(seed.get("title") or safe_urlparse(final_url).netloc)[:180]
+            results.append({
+                "title": f"{company} - {origin}",
+                "url": item_url,
+                "snippet": clean_text(seed.get("snippet") or page_text)[:700],
+                "origin": origin,
+                "source_type": f"{source_type}（本地目录/官网反查）",
+                "source_url": item_url,
+                "customer_website": final_url if final_url != item_url else "",
+                "account_type": "公司账号",
+                "official_relationship": "本地目录或官网页面公开链接",
+                "skip_fetch": True,
+            })
+            if len(results) >= limit:
+                return results
+    return results
+
+
 def discover(params: dict[str, list[str]]) -> dict:
     country = (params.get("country") or ["UAE"])[0]
     model = (params.get("model") or ["问界 M9"])[0]
@@ -7223,6 +7341,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             pass
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
+        apify_results = []
         if platform in APIFY_SOCIAL_ACTORS:
             apify_queries = query_variants[:1 if source_mode in ("all", "combined") else 2]
             try:
@@ -7235,9 +7354,24 @@ def discover(params: dict[str, list[str]]) -> dict:
                 )
             except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                 apify_results = []
-            if apify_results:
-                social_search_stats["apifyResults"] += len(apify_results)
-                social_results.extend(apify_results)
+        if apify_results:
+            social_search_stats["apifyResults"] += len(apify_results)
+            social_results.extend(apify_results)
+        if source_mode == platform and len(social_results) < 3:
+            try:
+                local_social_results = social_accounts_from_local_source_pages(
+                    country,
+                    target_type,
+                    platform,
+                    origin,
+                    source_type,
+                    limit=10,
+                )
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+                local_social_results = []
+            if local_social_results:
+                social_search_stats["officialWebsiteProfiles"] += len(local_social_results)
+                social_results.extend(local_social_results)
         social_search_stats["rawResults"] += len(social_results)
         expected_domains = {
             "instagram": ("instagram.com",),
