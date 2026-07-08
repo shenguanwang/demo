@@ -252,6 +252,10 @@ button {
   justify-content: flex-start;
 }
 
+.account-settings-toggle[hidden] {
+  display: none;
+}
+
 .account-settings-toggle span,
 .account-menu-button span {
   display: grid;
