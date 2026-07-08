@@ -2903,6 +2903,9 @@ LOCAL_DISCOVERY_SOURCES = {
         ("OpenSooq Oman", "om.opensooq.com"),
         ("Dubizzle Oman", "dubizzle.com.om"),
         ("Oman YallaMotor", "oman.yallamotor.com"),
+        ("AutoBeeb Oman", "autobeeb.com"),
+        ("Hatla2ee Oman", "oman.hatla2ee.com"),
+        ("OmaniCar", "omanicar.com"),
     ),
     "Armenia": (
         ("List.am", "list.am"),
