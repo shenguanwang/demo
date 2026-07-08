@@ -3630,6 +3630,7 @@ function showSection(id) {
   $$(".nav button").forEach((button) => button.classList.toggle("active", button.dataset.section === id));
   $("#userManagementNav")?.classList.toggle("active", id === "user-management");
   $("#systemSettingsNav")?.classList.toggle("active", id === "system-settings");
+  $("#accountSettingsToggle")?.classList.toggle("active", id === "account-settings-page");
   if (window.location.hash !== `#${id}`) {
     history.replaceState(null, "", `#${id}`);
   }
@@ -4856,9 +4857,7 @@ function bindForms() {
     $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
   }));
 
-  $("#accountSettingsToggle")?.addEventListener("click", () => toggleAccountSettingsMenu());
-  $("#openPasswordPanel")?.addEventListener("click", () => showPasswordPanel(true));
-  $("#cancelPasswordChange")?.addEventListener("click", () => showPasswordPanel(false));
+  $("#cancelPasswordChange")?.addEventListener("click", resetAccountPasswordForm);
   $("#accountPasswordForm")?.addEventListener("submit", changeOwnPassword);
 
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
@@ -5140,27 +5139,20 @@ async function loadSession() {
   if (userManagementSection) userManagementSection.hidden = session.role !== "admin";
   const systemSettingsSection = $("#system-settings");
   if (systemSettingsSection) systemSettingsSection.hidden = session.role !== "admin";
-  const openPasswordPanel = $("#openPasswordPanel");
-  if (openPasswordPanel) openPasswordPanel.hidden = session.role === "admin";
+  const passwordForm = $("#accountPasswordForm");
+  if (passwordForm) passwordForm.hidden = session.role === "admin";
+  const accountSettingsUser = $("#accountSettingsUser");
+  if (accountSettingsUser) {
+    accountSettingsUser.textContent = `${session.username || "当前账号"} · ${session.role === "admin" ? "管理员" : "普通用户"}`;
+  }
   return session;
 }
 
-function toggleAccountSettingsMenu(forceOpen) {
-  const menu = $("#accountSettingsMenu");
-  const toggle = $("#accountSettingsToggle");
-  if (!menu || !toggle) return;
-  const open = typeof forceOpen === "boolean" ? forceOpen : menu.hidden;
-  menu.hidden = !open;
-  toggle.setAttribute("aria-expanded", open ? "true" : "false");
-  if (!open) showPasswordPanel(false);
-}
-
-function showPasswordPanel(show) {
+function resetAccountPasswordForm() {
   const form = $("#accountPasswordForm");
   const status = $("#accountPasswordStatus");
   if (!form) return;
-  form.hidden = !show;
-  if (!show) form.reset();
+  form.reset();
   if (status) {
     status.className = "form-status";
     status.textContent = "";

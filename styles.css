@@ -230,11 +230,6 @@ button {
   font-size: 14px;
 }
 
-.account-settings {
-  position: relative;
-  margin-top: 10px;
-}
-
 .account-settings-toggle,
 .account-menu-button {
   display: flex;
@@ -253,6 +248,7 @@ button {
 }
 
 .account-settings-toggle {
+  margin-top: 10px;
   justify-content: flex-start;
 }
 
@@ -344,6 +340,46 @@ button {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.account-settings-layout {
+  display: grid;
+  grid-template-columns: minmax(360px, 520px) minmax(280px, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.account-settings-card {
+  min-height: 220px;
+}
+
+.account-settings-card.account-password-form {
+  padding: 22px;
+  border-color: var(--line);
+  background: #fff;
+}
+
+.account-settings-card.account-password-form label {
+  color: #53606e;
+  font-size: 12px;
+}
+
+.account-settings-card.account-password-form input {
+  min-height: 42px;
+  font-size: 13px;
+}
+
+.account-settings-copy {
+  margin: 0 0 18px;
+  color: #6d7885;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+@media (max-width: 900px) {
+  .account-settings-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 .user-management-button {

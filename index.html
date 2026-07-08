@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>华为系新能源汽车海外获客工作台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260708-account-settings1">
+  <link rel="stylesheet" href="./styles.css?v=20260708-account-settings2">
 </head>
 <body>
   <aside class="sidebar">
@@ -38,29 +38,9 @@
         <p>新增 20 家高质量海外车商</p>
       </div>
     </div>
-    <div class="account-settings" id="accountSettings">
-      <button class="account-settings-toggle" id="accountSettingsToggle" type="button" aria-expanded="false">
-        <span>⚙</span>设置
-      </button>
-      <div class="account-settings-menu" id="accountSettingsMenu" hidden>
-        <button class="account-menu-button" id="openPasswordPanel" type="button">
-          <span>密</span>修改密码
-        </button>
-        <form class="account-password-form" id="accountPasswordForm" hidden>
-          <label>当前密码<input name="currentPassword" type="password" autocomplete="current-password" required></label>
-          <label>新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="6" required></label>
-          <label>确认新密码<input name="confirmPassword" type="password" autocomplete="new-password" minlength="6" required></label>
-          <p class="form-status" id="accountPasswordStatus" role="status"></p>
-          <div class="account-password-actions">
-            <button class="ghost compact" id="cancelPasswordChange" type="button">取消</button>
-            <button class="primary compact" type="submit">保存</button>
-          </div>
-        </form>
-        <button class="account-menu-button danger" id="accountSettingsLogout" type="button">
-          <span>退</span>退出登录
-        </button>
-      </div>
-    </div>
+    <button class="account-settings-toggle" id="accountSettingsToggle" data-section="account-settings-page" type="button">
+      <span>⚙</span>设置
+    </button>
     <button class="user-management-button" id="userManagementNav" data-section="user-management" type="button" hidden>
       <span>♚</span>用户管理
     </button>
@@ -630,6 +610,44 @@
       </form>
     </section>
 
+    <section class="section" id="account-settings-page">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Account settings</p>
+          <h2>账号设置</h2>
+          <p>管理当前登录账号。以后普通用户自己的偏好、通知和安全设置也放在这里。</p>
+        </div>
+      </div>
+      <div class="account-settings-layout">
+        <form class="panel account-settings-card account-password-form" id="accountPasswordForm">
+          <div class="panel-head">
+            <div>
+              <h3>修改密码</h3>
+              <span>需要先验证当前密码</span>
+            </div>
+          </div>
+          <label>当前密码<input name="currentPassword" type="password" autocomplete="current-password" required></label>
+          <label>新密码<input name="newPassword" type="password" autocomplete="new-password" minlength="6" required></label>
+          <label>确认新密码<input name="confirmPassword" type="password" autocomplete="new-password" minlength="6" required></label>
+          <p class="form-status" id="accountPasswordStatus" role="status"></p>
+          <div class="account-password-actions">
+            <button class="ghost compact" id="cancelPasswordChange" type="button">清空</button>
+            <button class="primary compact" type="submit">保存新密码</button>
+          </div>
+        </form>
+        <div class="panel account-settings-card">
+          <div class="panel-head">
+            <div>
+              <h3>登录状态</h3>
+              <span id="accountSettingsUser">当前账号</span>
+            </div>
+          </div>
+          <p class="account-settings-copy">退出后会回到登录页，当前页面未同步的数据请先等待云端同步完成。</p>
+          <button class="danger-button" id="accountSettingsLogout" type="button">退出登录</button>
+        </div>
+      </div>
+    </section>
+
     <section class="section" id="crm">
       <div class="section-head">
         <div>
@@ -1041,6 +1059,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260708-account-settings1"></script>
+  <script src="./script.js?v=20260708-account-settings2"></script>
 </body>
 </html>
