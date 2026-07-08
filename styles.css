@@ -2815,6 +2815,137 @@ textarea {
   line-height: 1.65;
 }
 
+.review-row-number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 20px;
+  margin-right: 8px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #667085;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.lead-review-notes,
+.reject-reason-panel,
+.reject-reason-readonly {
+  margin: 14px 0;
+  padding: 14px 16px;
+  border: 1px solid #d9e3ee;
+  border-radius: 12px;
+  background: #f8fbff;
+}
+
+.lead-review-notes p,
+.reject-reason-readonly p {
+  margin: 0;
+  color: #344052;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.lead-review-notes strong,
+.reject-reason-readonly strong,
+.reject-reason-panel > strong {
+  display: block;
+  margin-bottom: 8px;
+  color: #111827;
+  font-size: 13px;
+}
+
+.reject-reason-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.reject-reason-options label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: #344052;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.reject-reason-options input[type="radio"] {
+  flex: 0 0 auto;
+}
+
+.reject-reason-panel textarea {
+  width: 100%;
+  min-height: 72px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  resize: vertical;
+  font: inherit;
+  font-size: 12px;
+}
+
+.reject-reason-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.lead-file-field small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.lead-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.lead-attachment-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fff;
+  color: #344052;
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.lead-attachment-chip img {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.lead-attachment-chip span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lead-attachment-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .lead-edit-panel {
   margin: 14px 0 16px;
   padding: 16px;
@@ -6056,7 +6187,12 @@ td {
 :root[data-theme="dark"] .source-evidence > .unverified-email-row,
 :root[data-theme="dark"] .source-original p,
 :root[data-theme="dark"] .button-link,
-:root[data-theme="dark"] .lead-edit-panel {
+:root[data-theme="dark"] .lead-edit-panel,
+:root[data-theme="dark"] .lead-review-notes,
+:root[data-theme="dark"] .reject-reason-panel,
+:root[data-theme="dark"] .reject-reason-readonly,
+:root[data-theme="dark"] .reject-reason-options label,
+:root[data-theme="dark"] .lead-attachment-chip {
   border-color: #343b46;
   background: #20242b;
   color: #f4f6f8;
@@ -6071,7 +6207,10 @@ td {
 :root[data-theme="dark"] .source-evidence dd,
 :root[data-theme="dark"] .source-original p strong,
 :root[data-theme="dark"] .lead-edit-head strong,
-:root[data-theme="dark"] .lead-edit-grid label {
+:root[data-theme="dark"] .lead-edit-grid label,
+:root[data-theme="dark"] .lead-review-notes strong,
+:root[data-theme="dark"] .reject-reason-readonly strong,
+:root[data-theme="dark"] .reject-reason-panel > strong {
   color: #f7f8fa;
 }
 
@@ -6082,13 +6221,16 @@ td {
 :root[data-theme="dark"] .review-more summary small,
 :root[data-theme="dark"] .email-source-links span,
 :root[data-theme="dark"] .unverified-email-row small,
-:root[data-theme="dark"] .lead-edit-head span {
+:root[data-theme="dark"] .lead-edit-head span,
+:root[data-theme="dark"] .lead-file-field small,
+:root[data-theme="dark"] .lead-attachment-empty {
   color: #aeb6c2;
 }
 
 :root[data-theme="dark"] .score-breakdown b,
 :root[data-theme="dark"] .verified-badge,
-:root[data-theme="dark"] .review-source-badges b {
+:root[data-theme="dark"] .review-source-badges b,
+:root[data-theme="dark"] .review-row-number {
   background: #2b313a;
 }
 

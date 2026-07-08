@@ -391,6 +391,30 @@ let activeDiscoveryJobFilter = "all";
 let reviewSelectedIds = new Set();
 let selectedReviewLeadId = "";
 let editingReviewLeadId = "";
+let rejectingReviewLeadId = "";
+const rejectReasonOptions = [
+  "不是汽车经销/进口/分销客户",
+  "地区不符合目标市场",
+  "重复线索",
+  "联系方式无效或无法核验",
+  "媒体/个人账号/内容频道",
+  "维修、配件、租赁等非目标客户",
+  "信息太少，暂不跟进"
+];
+const leadAttachmentAccept = [
+  "image/*",
+  ".pdf",
+  ".doc",
+  ".docx",
+  ".xls",
+  ".xlsx",
+  ".csv",
+  ".txt",
+  ".md",
+  ".rtf"
+].join(",");
+const maxLeadAttachmentBytes = 4 * 1024 * 1024;
+const maxLeadAttachmentCount = 6;
 const loadingButtonTimers = new WeakMap();
 let currentSession = null;
 let adminKpiSnapshot = null;
@@ -1710,7 +1734,7 @@ function renderReview() {
       <article class="review-list-row ${rowId === selectedReviewLeadId ? "active" : ""}" data-review-lead-row="${escapeHtml(rowId)}" tabindex="0">
         ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="review-approved-mark">${escapeHtml(reviewModeLabel(reviewMode))}</span>`}
         <div class="review-list-main">
-          <strong>${escapeHtml(lead.company)}</strong>
+          <strong><span class="review-row-number">${rankIndex + 1}</span>${escapeHtml(lead.company)}</strong>
           <span>${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.origin || lead.sourceType || "公开来源")}</span>
         </div>
         <div class="review-list-badges">
@@ -1789,6 +1813,12 @@ function renderReview() {
         </div>
       </dl>
       <p class="review-recommendation"><strong>推荐联系理由：</strong>${escapeHtml(lead.contactReason || lead.reason)}</p>
+      ${(lead.reviewNotes || (lead.attachments || []).length) ? `
+        <section class="lead-review-notes">
+          ${lead.reviewNotes ? `<p><strong>人工备注</strong>${escapeHtml(lead.reviewNotes)}</p>` : ""}
+          ${(lead.attachments || []).length ? `<div class="lead-attachment-list">${leadAttachmentListHtml(lead.attachments)}</div>` : ""}
+        </section>
+      ` : ""}
       <div class="score-breakdown">
         <span>评分依据${lead.manualScoreAdjustment ? ` · 人工校准 ${lead.manualScoreAdjustment > 0 ? "+" : ""}${escapeHtml(lead.manualScoreAdjustment)}` : ""}</span>
         <div class="score-dimensions">
@@ -1824,6 +1854,8 @@ function renderReview() {
           <button class="ghost" type="button" data-review-edit="${index}" data-review-edit-id="${escapeHtml(editId)}">编辑</button>
         ` : reviewMode === "approved" ? `<button class="primary" type="button" data-section="crm">回到客户池</button>` : `<span class="review-approved-status">已拒绝线索</span>`}
       </div>
+      ${reviewMode === "pending" && rejectingReviewLeadId === editId ? rejectReasonPanelHtml(index, lead) : ""}
+      ${reviewMode === "rejected" && lead.rejectReason ? `<div class="reject-reason-readonly"><strong>拒绝原因</strong><p>${escapeHtml(lead.rejectReason)}</p></div>` : ""}
       ${reviewMode === "pending" && isEditing ? renderLeadEditForm(lead, index, editId) : ""}
       <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}">
         <summary>
@@ -1870,6 +1902,85 @@ function splitLeadEditLines(value) {
     .split(/\r?\n|[;；]/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function formatBytes(bytes = 0) {
+  const value = Number(bytes || 0);
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  if (value >= 1024) return `${Math.round(value / 1024)} KB`;
+  return `${value} B`;
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("文件读取失败"));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function leadAttachmentsFromInput(input, existing = []) {
+  const files = Array.from(input?.files || []);
+  const keptExisting = Array.isArray(existing) ? existing.slice(0, maxLeadAttachmentCount) : [];
+  const available = Math.max(0, maxLeadAttachmentCount - keptExisting.length);
+  const accepted = files.slice(0, available).filter((file) => file.size <= maxLeadAttachmentBytes);
+  const skipped = files.length - accepted.length;
+  const next = [...keptExisting];
+  for (const file of accepted) {
+    next.push({
+      id: `att-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`,
+      name: file.name,
+      type: file.type || "application/octet-stream",
+      size: file.size,
+      dataUrl: await readFileAsDataUrl(file),
+      createdAt: new Date().toISOString()
+    });
+  }
+  return { attachments: next.slice(0, maxLeadAttachmentCount), skipped };
+}
+
+function leadAttachmentListHtml(attachments = []) {
+  const items = Array.isArray(attachments) ? attachments : [];
+  if (!items.length) return `<p class="lead-attachment-empty">暂无附件。</p>`;
+  return items.map((item) => {
+    const isImage = String(item.type || "").startsWith("image/");
+    const suffix = String(item.name || "FILE").split(".").pop()?.slice(0, 4).toUpperCase() || "FILE";
+    return `
+      <a class="lead-attachment-chip" href="${escapeHtml(item.dataUrl || "#")}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(item.name || "")}">
+        ${isImage ? `<img src="${escapeHtml(item.dataUrl || "")}" alt="">` : `<span>${escapeHtml(suffix)}</span>`}
+        <b>${escapeHtml(item.name || "附件")}</b>
+        <small>${escapeHtml(formatBytes(item.size))}</small>
+      </a>
+    `;
+  }).join("");
+}
+
+function rejectReasonPanelHtml(index, lead) {
+  const currentReason = lead.rejectReason || "";
+  const isPreset = rejectReasonOptions.includes(currentReason);
+  return `
+    <div class="reject-reason-panel" data-reject-reason-panel="${index}">
+      <strong>请选择拒绝原因</strong>
+      <div class="reject-reason-options">
+        ${rejectReasonOptions.map((reason, optionIndex) => `
+          <label>
+            <input type="radio" name="rejectReason-${index}" value="${escapeHtml(reason)}" ${currentReason === reason || (!currentReason && optionIndex === 0) ? "checked" : ""}>
+            <span>${escapeHtml(reason)}</span>
+          </label>
+        `).join("")}
+        <label>
+          <input type="radio" name="rejectReason-${index}" value="__other" ${currentReason && !isPreset ? "checked" : ""}>
+          <span>其他原因</span>
+        </label>
+      </div>
+      <textarea data-reject-other rows="3" placeholder="手动填写其他拒绝原因">${escapeHtml(currentReason && !isPreset ? currentReason : "")}</textarea>
+      <div class="reject-reason-actions">
+        <button class="danger-button" type="button" data-review-reject-confirm="${index}">确认拒绝</button>
+        <button class="ghost" type="button" data-review-reject-cancel>取消</button>
+      </div>
+    </div>
+  `;
 }
 
 function manualEvidenceSource(lead) {
@@ -1927,6 +2038,14 @@ function renderLeadEditForm(lead, index, editId) {
         <label class="lead-edit-wide">推荐联系理由
           <textarea name="contactReason" rows="4">${escapeHtml(lead.contactReason || lead.reason || "")}</textarea>
         </label>
+        <label class="lead-edit-wide">人工备注
+          <textarea name="reviewNotes" rows="4" placeholder="可记录人工判断、截图说明、客户补充信息">${escapeHtml(lead.reviewNotes || "")}</textarea>
+        </label>
+        <label class="lead-edit-wide lead-file-field">照片 / 附件备注
+          <input name="attachments" type="file" accept="${escapeHtml(leadAttachmentAccept)}" multiple>
+          <small>支持图片、PDF、Word、Excel、CSV、TXT、MD、RTF；单个不超过 ${formatBytes(maxLeadAttachmentBytes)}，最多 ${maxLeadAttachmentCount} 个。新上传会追加到已有附件。</small>
+        </label>
+        <div class="lead-edit-wide lead-attachment-list">${leadAttachmentListHtml(lead.attachments)}</div>
       </div>
       <div class="lead-edit-actions">
         <button class="primary" type="submit">保存修改</button>
@@ -1936,7 +2055,7 @@ function renderLeadEditForm(lead, index, editId) {
   `;
 }
 
-function saveReviewLeadEdit(index, form) {
+async function saveReviewLeadEdit(index, form) {
   const lead = reviewLeads[index];
   if (!lead || !form) return;
   const data = Object.fromEntries(new FormData(form).entries());
@@ -1946,6 +2065,8 @@ function saveReviewLeadEdit(index, form) {
   const recommendedModels = splitLeadEditLines(data.recommendedModels);
   const signals = splitLeadEditLines(data.signals);
   const source = manualEvidenceSource(lead);
+  const attachmentInput = form.querySelector('input[name="attachments"]');
+  const { attachments } = await leadAttachmentsFromInput(attachmentInput, lead.attachments || []);
   const emailSources = emails.map((email) => ({
     email,
     sources: source.url ? [source] : [{ ...source, url: "" }]
@@ -1966,6 +2087,8 @@ function saveReviewLeadEdit(index, form) {
     intentSignals: signals,
     businessSignals: [],
     contactReason: String(data.contactReason || "").trim(),
+    reviewNotes: String(data.reviewNotes || "").trim(),
+    attachments,
     manualEditedAt: new Date().toISOString(),
     sourceCoverage: {
       ...(lead.sourceCoverage || {}),
@@ -2631,6 +2754,10 @@ function normalizeLead(raw) {
     businessSignals: Array.isArray(raw.businessSignals) ? raw.businessSignals : [],
     intentSignals: Array.isArray(raw.intentSignals) ? raw.intentSignals : [],
     contactReason: raw.contactReason || "",
+    rejectReason: raw.rejectReason || "",
+    rejectedAt: raw.rejectedAt || "",
+    reviewNotes: raw.reviewNotes || "",
+    attachments: Array.isArray(raw.attachments) ? raw.attachments : [],
     sourceTranslation: raw.sourceTranslation || "",
     googleRating: Number(raw.googleRating || 0),
     googleReviews: Number(raw.googleReviews || 0),
@@ -2694,10 +2821,16 @@ function calibrateLeadScore(index, delta = 0, reset = false) {
   saveState();
 }
 
-function rejectLead(index) {
+function rejectLead(index, reason = "") {
   const lead = reviewLeads.splice(index, 1)[0];
   if (!lead) return;
-  rejectedLeads.unshift({ ...lead, stage: "已拒绝" });
+  rejectedLeads.unshift({
+    ...lead,
+    stage: "已拒绝",
+    rejectReason: reason || lead.rejectReason || "未填写原因",
+    rejectedAt: new Date().toISOString()
+  });
+  rejectingReviewLeadId = "";
   refreshAllLeadViews();
 }
 
@@ -4798,6 +4931,7 @@ function bindForms() {
     if (row && !event.target.closest("input, button, a, summary, details")) {
       selectedReviewLeadId = row.dataset.reviewLeadRow;
       editingReviewLeadId = "";
+      rejectingReviewLeadId = "";
       closeOpenReviewDetails();
       renderReview();
       return;
@@ -4833,6 +4967,7 @@ function bindForms() {
     const editButton = event.target.closest("[data-review-edit]");
     if (editButton) {
       editingReviewLeadId = editButton.dataset.reviewEditId || "";
+      rejectingReviewLeadId = "";
       renderReview();
       return;
     }
@@ -4842,20 +4977,44 @@ function bindForms() {
       renderReview();
       return;
     }
+    const cancelRejectButton = event.target.closest("[data-review-reject-cancel]");
+    if (cancelRejectButton) {
+      rejectingReviewLeadId = "";
+      renderReview();
+      return;
+    }
+    const confirmRejectButton = event.target.closest("[data-review-reject-confirm]");
+    if (confirmRejectButton) {
+      const panel = confirmRejectButton.closest("[data-reject-reason-panel]");
+      const selected = panel?.querySelector("input[type='radio']:checked")?.value || "";
+      const otherInput = panel?.querySelector("[data-reject-other]");
+      const other = String(otherInput?.value || "").trim();
+      const reason = selected === "__other" ? other : selected;
+      if (!reason) {
+        otherInput?.focus();
+        return;
+      }
+      rejectLead(Number(confirmRejectButton.dataset.reviewRejectConfirm), reason);
+      return;
+    }
     const button = event.target.closest("[data-review-action]");
     if (!button) return;
     const index = Number(button.dataset.index);
     editingReviewLeadId = "";
+    rejectingReviewLeadId = "";
     if (button.dataset.reviewAction === "approve") approveLead(index);
-    if (button.dataset.reviewAction === "reject") rejectLead(index);
+    if (button.dataset.reviewAction === "reject") {
+      rejectingReviewLeadId = `pending:${reviewLeads[index]?.id || index}`;
+      renderReview();
+    }
     if (button.dataset.reviewAction === "delete") deleteReviewLeads([reviewLeads[index]?.id]);
   });
 
-  $("#reviewGrid").addEventListener("submit", (event) => {
+  $("#reviewGrid").addEventListener("submit", async (event) => {
     const form = event.target.closest("[data-review-edit-form]");
     if (!form) return;
     event.preventDefault();
-    saveReviewLeadEdit(Number(form.dataset.index), form);
+    await saveReviewLeadEdit(Number(form.dataset.index), form);
   });
 
   $("#reviewGrid").addEventListener("change", (event) => {
