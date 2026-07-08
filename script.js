@@ -1062,14 +1062,27 @@ function renderCountries() {
   if (countries.some((country) => country.name === current)) select.value = current;
 }
 
+function finderGoalText(countryName, model = "") {
+  const country = countries.find((item) => item.name === countryName) || countries[0];
+  const city = country.cities.split(" / ")[0];
+  const selectedModel = String(model || $("#finderForm")?.model?.value || "问界 M9").trim();
+  const modelText = selectedModel ? `，适合优先推荐${selectedModel}` : "";
+  return `寻找${city}及周边的${country.targets}，适合销售华为系新能源汽车${modelText}。`;
+}
+
+function syncFinderGoalToSelection() {
+  const form = $("#finderForm");
+  if (!form) return;
+  form.goal.value = finderGoalText(form.country.value, form.model.value);
+  updateFinderKeywordsFromForm();
+  updateSocialProspectingQueries();
+}
+
 function chooseMarket(countryName) {
   const country = countries.find((item) => item.name === countryName);
   if (!country) return;
   $("#finderCountry").value = country.name;
-  const form = $("#finderForm");
-  form.goal.value = `寻找${country.cities.split(" / ")[0]}及周边的${country.targets}，适合销售华为系新能源汽车。`;
-  updateFinderKeywordsFromForm();
-  updateSocialProspectingQueries();
+  syncFinderGoalToSelection();
   showSection("lead-finder");
 }
 
@@ -4532,6 +4545,8 @@ function bindForms() {
     updateFinderKeywordsFromForm();
     updateSocialProspectingQueries();
   });
+  $("#finderForm").country?.addEventListener("change", syncFinderGoalToSelection);
+  $("#finderForm").model?.addEventListener("change", syncFinderGoalToSelection);
   $(".social-search-box").addEventListener("click", (event) => {
     const link = event.target.closest("[data-social-platform]");
     if (link) $("#socialLeadForm").platform.value = link.dataset.socialPlatform;
