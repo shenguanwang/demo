@@ -2210,6 +2210,9 @@ def discovery_failure_diagnostics(exc: Exception, params: dict[str, list[str]]) 
     elif any(term in lower for term in ("403", "forbidden", "blocked")):
         category = "来源拒绝访问"
         suggestion = "改用官网、地图或其他公开社媒来源。"
+    elif any(term in lower for term in ("incompleteread", "incomplete read", "bytes read")):
+        category = "来源连接中断"
+        suggestion = "外部来源返回数据中途断开，系统会跳过该来源继续搜索；如仍失败可直接重新执行。"
     elif any(term in lower for term in ("dns", "connection", "network", "urlopen")):
         category = "云端网络异常"
         suggestion = "任务参数已保留，可直接重新执行。"
@@ -3264,7 +3267,10 @@ def fetch_text(url: str, timeout: int = 10) -> str:
         },
     )
     with urllib.request.urlopen(req, timeout=timeout) as response:
-        raw = response.read(600_000)
+        try:
+            raw = response.read(600_000)
+        except http.client.IncompleteRead as exc:
+            raw = exc.partial or b""
         charset = response.headers.get_content_charset() or "utf-8"
         return raw.decode(charset, errors="ignore")
 
@@ -3281,7 +3287,10 @@ def fetch_document(url: str, timeout: int = 10, user_agent: str = "") -> tuple[s
         },
     )
     with urllib.request.urlopen(req, timeout=timeout) as response:
-        raw = response.read(1_200_000)
+        try:
+            raw = response.read(1_200_000)
+        except http.client.IncompleteRead as exc:
+            raw = exc.partial or b""
         charset = response.headers.get_content_charset() or "utf-8"
         return raw.decode(charset, errors="ignore"), response.geturl()
 
@@ -3297,7 +3306,10 @@ def fetch_json(url: str, timeout: int = 10, headers: dict | None = None) -> dict
         },
     )
     with urllib.request.urlopen(req, timeout=timeout) as response:
-        raw = response.read(1_200_000)
+        try:
+            raw = response.read(1_200_000)
+        except http.client.IncompleteRead as exc:
+            raw = exc.partial or b""
         charset = response.headers.get_content_charset() or "utf-8"
         data = json.loads(raw.decode(charset, errors="ignore"))
         return data if isinstance(data, dict) else {}
@@ -4321,7 +4333,7 @@ def search_web(query: str, limit: int = 8, freshness_days: int | None = None, co
         for future in as_completed(futures, timeout=DISCOVERY_SEARCH_TIMEOUT):
             try:
                 collected.extend(future.result(timeout=1))
-            except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                 continue
     except FuturesTimeoutError:
         pass
@@ -4390,7 +4402,7 @@ def search_telegram_directories(query: str, limit: int = 8) -> list[dict]:
         url = template.format(query=encoded)
         try:
             page, final_url = fetch_document(url, timeout=4)
-        except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
             continue
         base_url = final_url or url
         for match in re.finditer(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]{0,500}?)</a>', page, flags=re.I):
@@ -5769,7 +5781,7 @@ def reverse_search_company_socials(company: str, country: str, limit_per_platfor
     for site, origin, source_type in platform_queries:
         try:
             results = search_web(f'site:{site} "{company}" {country}', limit=5, freshness_days=None, country=country)
-        except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
             continue
         accepted = 0
         for result in results:
@@ -6512,7 +6524,7 @@ def social_accounts_from_business_websites(
                 item.get("url") and "openstreetmap.org" not in item.get("url", "")
             )
         ]
-    except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+    except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
         return []
 
     def inspect(seed: dict) -> list[dict]:
@@ -6521,7 +6533,7 @@ def social_accounts_from_business_websites(
             return []
         try:
             page, final_url = fetch_document(website, timeout=12)
-        except (OSError, TimeoutError, UnicodeError, urllib.error.URLError):
+        except (OSError, TimeoutError, UnicodeError, urllib.error.URLError, http.client.HTTPException):
             return []
         meta = extract_meta(page)
         contacts = extract_public_contacts(page, seed.get("tags"))
@@ -6556,7 +6568,7 @@ def social_accounts_from_business_websites(
         for future in as_completed(futures):
             try:
                 discovered.extend(future.result())
-            except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                 continue
     unique: list[dict] = []
     seen: set[str] = set()
@@ -6674,7 +6686,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                         limit=google_city_limit,
                         city=city,
                     )
-                except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError):
+                except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                     pass
                 try:
                     google_primary_results += search_serpapi_google_maps(
@@ -6683,7 +6695,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                         limit=max(3, min(google_city_limit, 8)),
                         city=city,
                     )
-                except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, json.JSONDecodeError):
+                except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
                     pass
             enrich_limit = min(len(google_primary_results), max(4, min(result_limit, 8)))
             enriched_google_results: list[dict] = []
@@ -6697,7 +6709,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                     for future in as_completed(futures, timeout=max(25, DISCOVERY_SEARCH_TIMEOUT * 3)):
                         try:
                             enriched_google_results.append(future.result(timeout=1))
-                        except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                             continue
                 except FuturesTimeoutError:
                     pass
@@ -6735,7 +6747,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             for future in as_completed(futures, timeout=max(20, DISCOVERY_SEARCH_TIMEOUT * 2)):
                 try:
                     web_results_by_query.append(future.result(timeout=1))
-                except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                     continue
         except FuturesTimeoutError:
             pass
@@ -6772,7 +6784,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             for item in dealer_google_results[: min(len(dealer_google_results), 8)]:
                 try:
                     raw_results.append(enrich_google_place_result(item, country))
-                except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                     raw_results.append(item)
             raw_results += dealer_google_results[8:]
         except (OSError, ValueError, RuntimeError, TimeoutError):
@@ -6875,7 +6887,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 for future in as_completed(futures, timeout=DISCOVERY_SEARCH_TIMEOUT):
                     try:
                         social_results.extend(future.result(timeout=1))
-                    except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                    except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                         continue
             except FuturesTimeoutError:
                 pass
@@ -6896,7 +6908,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             for future in as_completed(futures, timeout=max(20, DISCOVERY_SEARCH_TIMEOUT * 2)):
                 try:
                     social_results.extend(future.result(timeout=1))
-                except (OSError, ValueError, TimeoutError, urllib.error.URLError):
+                except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                     continue
         except FuturesTimeoutError:
             pass
@@ -7299,7 +7311,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         if customer_website and target_type != "individual":
             try:
                 hunter_candidates = hunter_email_candidates(customer_website, company, limit=5)
-            except (OSError, ValueError, TimeoutError, urllib.error.URLError, json.JSONDecodeError):
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
                 hunter_candidates = []
             for hunter_item in hunter_candidates:
                 hunter_email = hunter_item.get("email", "")
