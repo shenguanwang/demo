@@ -54,6 +54,69 @@ const countries = [
     cities: "Baku",
     reason: "高加索进口车需求存在，可作为中亚与东欧之间的机会市场。",
     targets: "汽车贸易公司、豪华车展厅"
+  },
+  {
+    name: "Nigeria 尼日利亚",
+    rank: "第三优先级",
+    cities: "Lagos / Abuja / Port Harcourt",
+    reason: "人口和商业规模大，适合从进口商、车商集团和企业车队切入。",
+    targets: "汽车进口商、经销商集团、企业车队"
+  },
+  {
+    name: "Ghana 加纳",
+    rank: "第三优先级",
+    cities: "Accra / Kumasi / Tema",
+    reason: "西非英语市场，港口和贸易体系相对活跃，适合开发进口商和多品牌车商。",
+    targets: "汽车进口商、多品牌展厅、车队采购"
+  },
+  {
+    name: "Algeria 阿尔及利亚",
+    rank: "第三优先级",
+    cities: "Algiers / Oran / Constantine",
+    reason: "北非大型汽车市场，需重点确认进口政策、认证和本地代理资质。",
+    targets: "汽车进口商、区域代理、经销商集团"
+  },
+  {
+    name: "Côte d'Ivoire 科特迪瓦",
+    rank: "第三优先级",
+    cities: "Abidjan / Yamoussoukro",
+    reason: "西非法语商业中心之一，适合寻找进口商、贸易公司和企业车队。",
+    targets: "汽车进口商、贸易公司、企业车队"
+  },
+  {
+    name: "Egypt 埃及",
+    rank: "第三优先级",
+    cities: "Cairo / Alexandria / Giza",
+    reason: "北非人口和汽车消费规模大，适合从经销集团、进口商和商务车队筛选。",
+    targets: "经销商集团、汽车进口商、商务车队"
+  },
+  {
+    name: "Kyrgyzstan 吉尔吉斯",
+    rank: "第三优先级",
+    cities: "Bishkek / Osh",
+    reason: "中亚转口和二手/进口车交易活跃，适合找平行进口商和区域贸易商。",
+    targets: "平行进口商、汽车贸易公司、区域代理"
+  },
+  {
+    name: "Ethiopia 埃塞俄比亚",
+    rank: "第三优先级",
+    cities: "Addis Ababa / Dire Dawa",
+    reason: "东非人口规模大，适合先筛选政府/企业车队和实力进口商。",
+    targets: "汽车进口商、政府/企业采购、车队运营商"
+  },
+  {
+    name: "Oman 阿曼",
+    rank: "第三优先级",
+    cities: "Muscat / Salalah / Sohar",
+    reason: "海湾市场，适合寻找豪华车商、多品牌展厅和商务接待车队。",
+    targets: "豪车展厅、多品牌经销商、商务接待车队"
+  },
+  {
+    name: "Armenia 亚美尼亚",
+    rank: "第三优先级",
+    cities: "Yerevan / Gyumri",
+    reason: "高加索小型进口车市场，可作为区域代理和平行进口补充市场。",
+    targets: "汽车贸易公司、平行进口商、区域代理"
   }
 ];
 
@@ -67,7 +130,16 @@ const destinationByCountry = {
   Qatar: "Doha, Qatar",
   Kuwait: "Kuwait City, Kuwait",
   Uzbekistan: "Poti, Georgia (transit to Uzbekistan)",
-  Azerbaijan: "Alat Port, Azerbaijan"
+  Azerbaijan: "Alat Port, Azerbaijan",
+  Nigeria: "Lagos, Nigeria",
+  Ghana: "Tema, Ghana",
+  Algeria: "Algiers, Algeria",
+  "Côte d'Ivoire": "Abidjan, Côte d'Ivoire",
+  Egypt: "Alexandria, Egypt",
+  Kyrgyzstan: "Bishkek, Kyrgyzstan",
+  Ethiopia: "Addis Ababa, Ethiopia",
+  Oman: "Sohar, Oman",
+  Armenia: "Yerevan, Armenia"
 };
 
 const riskProfiles = {
@@ -120,6 +192,18 @@ const riskProfiles = {
     service: "明确当地维修点、备件、质保和远程技术支持流程。"
   }
 };
+
+[
+  "Nigeria", "Ghana", "Algeria", "Côte d'Ivoire", "Egypt",
+  "Kyrgyzstan", "Ethiopia", "Oman", "Armenia"
+].forEach((key) => {
+  riskProfiles[key] = {
+    certification: "成交前让当地进口商或清关代理书面确认车型准入、认证、年份、排放、关税和上牌资料。",
+    cockpit: "交车前核对英文/当地语言界面、网络、地图、远程 App 和高温/低温环境适配，不承诺未验证功能。",
+    logistics: "按实际港口或内陆交付城市确认海运、清关、内陆运输、保险和本地费用，报价中单列目的港外费用。",
+    service: "先确认当地维修合作方、诊断能力、常用备件和质保责任边界，再承诺交付后的服务周期。"
+  };
+});
 
 const STORAGE_KEY = "huawei-ev-export-workbench-v3";
 const SOCIAL_CAPTURE_SEEN_KEY = "huawei-ev-social-capture-seen-v1";
@@ -1087,7 +1171,10 @@ function chooseMarket(countryName) {
 }
 
 function countryKey(value) {
-  return String(value || "").split(" ")[0] === "Saudi" ? "Saudi Arabia" : String(value || "").split(" ")[0];
+  const text = String(value || "");
+  if (text.startsWith("Saudi Arabia")) return "Saudi Arabia";
+  if (text.startsWith("Côte d'Ivoire")) return "Côte d'Ivoire";
+  return text.split(" ")[0];
 }
 
 function renderRiskProfile(selected = "") {

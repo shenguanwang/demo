@@ -17,6 +17,7 @@ import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -2573,6 +2574,17 @@ COUNTRY_HINTS = {
     "Kuwait": ("Kuwait City",),
     "Uzbekistan": ("Tashkent",),
     "Azerbaijan": ("Baku",),
+    "Nigeria": ("Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan"),
+    "Ghana": ("Accra", "Kumasi", "Tema", "Takoradi"),
+    "Algeria": ("Algiers", "Oran", "Constantine", "Annaba"),
+    "Côte d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouaké"),
+    "Cote d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouaké"),
+    "Ivory Coast": ("Abidjan", "Yamoussoukro", "Bouaké"),
+    "Egypt": ("Cairo", "Alexandria", "Giza", "6th of October City"),
+    "Kyrgyzstan": ("Bishkek", "Osh", "Jalal-Abad"),
+    "Ethiopia": ("Addis Ababa", "Dire Dawa", "Bahir Dar"),
+    "Oman": ("Muscat", "Salalah", "Sohar", "Nizwa"),
+    "Armenia": ("Yerevan", "Gyumri", "Vanadzor"),
 }
 
 DISCOVERY_KEYWORD_TERMS = (
@@ -2648,6 +2660,17 @@ CITY_COORDS = {
     "Kuwait": ("Kuwait City", 29.3759, 47.9774),
     "Uzbekistan": ("Tashkent", 41.2995, 69.2401),
     "Azerbaijan": ("Baku", 40.4093, 49.8671),
+    "Nigeria": ("Lagos", 6.5244, 3.3792),
+    "Ghana": ("Accra", 5.6037, -0.1870),
+    "Algeria": ("Algiers", 36.7538, 3.0588),
+    "Côte d'Ivoire": ("Abidjan", 5.3600, -4.0083),
+    "Cote d'Ivoire": ("Abidjan", 5.3600, -4.0083),
+    "Ivory Coast": ("Abidjan", 5.3600, -4.0083),
+    "Egypt": ("Cairo", 30.0444, 31.2357),
+    "Kyrgyzstan": ("Bishkek", 42.8746, 74.5698),
+    "Ethiopia": ("Addis Ababa", 8.9806, 38.7578),
+    "Oman": ("Muscat", 23.5880, 58.3829),
+    "Armenia": ("Yerevan", 40.1792, 44.4991),
 }
 
 COUNTRY_SEARCH_META = {
@@ -2699,6 +2722,60 @@ COUNTRY_SEARCH_META = {
         "google_domain": "google.az",
         "aliases": ("Azerbaijan", "Baku"),
     },
+    "Nigeria": {
+        "code": "ng",
+        "location": "Nigeria",
+        "google_domain": "google.com.ng",
+        "aliases": ("Nigeria", "Lagos", "Abuja", "Port Harcourt", "Kano"),
+    },
+    "Ghana": {
+        "code": "gh",
+        "location": "Ghana",
+        "google_domain": "google.com.gh",
+        "aliases": ("Ghana", "Accra", "Kumasi", "Tema"),
+    },
+    "Algeria": {
+        "code": "dz",
+        "location": "Algeria",
+        "google_domain": "google.dz",
+        "aliases": ("Algeria", "Algiers", "Oran", "Constantine", "Algérie"),
+    },
+    "Côte d'Ivoire": {
+        "code": "ci",
+        "location": "Côte d'Ivoire",
+        "google_domain": "google.ci",
+        "aliases": ("Côte d'Ivoire", "Cote d'Ivoire", "Ivory Coast", "Abidjan", "Yamoussoukro"),
+    },
+    "Egypt": {
+        "code": "eg",
+        "location": "Egypt",
+        "google_domain": "google.com.eg",
+        "aliases": ("Egypt", "Cairo", "Alexandria", "Giza"),
+    },
+    "Kyrgyzstan": {
+        "code": "kg",
+        "location": "Kyrgyzstan",
+        "google_domain": "google.kg",
+        "aliases": ("Kyrgyzstan", "Bishkek", "Osh", "Kyrgyz Republic"),
+    },
+    "Ethiopia": {
+        "code": "et",
+        "location": "Ethiopia",
+        "google_domain": "google.com.et",
+        "aliases": ("Ethiopia", "Addis Ababa", "Dire Dawa"),
+    },
+    "Oman": {
+        "code": "om",
+        "location": "Oman",
+        "google_domain": "google.com.om",
+        "aliases": ("Oman", "Muscat", "Salalah", "Sohar"),
+    },
+    "Armenia": {
+        "code": "am",
+        "location": "Armenia",
+        "google_domain": "google.am",
+        "aliases": ("Armenia", "Yerevan", "Gyumri"),
+    },
 }
 
 FOREIGN_LOCATION_BLOCKERS = (
@@ -2709,9 +2786,17 @@ FOREIGN_LOCATION_BLOCKERS = (
 )
 
 
+def normalize_country_match_text(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(value or ""))
+    ascii_text = "".join(char for char in normalized if not unicodedata.combining(char))
+    return ascii_text.lower().replace("?", "o")
+
+
 def country_search_meta(country: str) -> dict:
+    text = normalize_country_match_text(country)
     for key, value in COUNTRY_SEARCH_META.items():
-        if key.lower() in str(country or "").lower():
+        aliases = (key, value.get("location", ""), *(value.get("aliases") or ()))
+        if any((token := normalize_country_match_text(alias)) and token in text for alias in aliases):
             return value
     return COUNTRY_SEARCH_META["UAE"]
 
@@ -2767,11 +2852,15 @@ def localized_vehicle_listing_queries(country: str, cities: list[str]) -> list[s
 
 def discovery_cities(country: str, city_focus: str = "") -> list[str]:
     cities = [city_focus.strip()] if city_focus.strip() else []
+    country_text = normalize_country_match_text(country)
     for key, hints in COUNTRY_HINTS.items():
-        if key.lower() in country.lower():
+        meta = COUNTRY_SEARCH_META.get(key, {})
+        aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
+        if any((token := normalize_country_match_text(alias)) and token in country_text for alias in aliases):
             cities.extend(hints)
             break
-    cities.append(country.split(" ")[0])
+    meta = country_search_meta(country)
+    cities.append(meta.get("location") or str(country or "").split(" ")[0])
     return list(dict.fromkeys(city for city in cities if city))
 
 
