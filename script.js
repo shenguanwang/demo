@@ -1856,6 +1856,7 @@ function renderReview() {
       </div>
       ${reviewMode === "pending" && rejectingReviewLeadId === editId ? rejectReasonPanelHtml(index, lead) : ""}
       ${reviewMode === "rejected" && lead.rejectReason ? `<div class="reject-reason-readonly"><strong>拒绝原因</strong><p>${escapeHtml(lead.rejectReason)}</p></div>` : ""}
+      ${reviewMode === "rejected" ? `<div class="restore-rejected-actions"><button class="primary" type="button" data-review-action="restore" data-index="${index}">退回未审核</button></div>` : ""}
       ${reviewMode === "pending" && isEditing ? renderLeadEditForm(lead, index, editId) : ""}
       <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}">
         <summary>
@@ -2078,7 +2079,7 @@ async function saveReviewLeadEdit(index, form) {
     contactName: String(data.contactName || "").trim(),
     contactRole: String(data.contactRole || "").trim(),
     email: emails[0] || "",
-    emailSources: mergeEmailSources(emailSources, lead.emailSources || []),
+    emailSources,
     phone: phones[0] || "",
     phoneSources: manualValueSources(phones, lead),
     whatsapp: whatsapps[0] || "",
@@ -2357,6 +2358,44 @@ function reviewLeadCountryKey(lead) {
   return reviewCountryKey(lead.country);
 }
 
+function reviewLeadSearchText(lead) {
+  return [
+    lead.company,
+    lead.customerWebsite,
+    lead.website,
+    lead.email,
+    lead.phone,
+    lead.whatsapp,
+    lead.country,
+    lead.city,
+    lead.origin,
+    lead.source,
+    lead.sourceUrl,
+    lead.sourceTitle,
+    lead.sourceType,
+    lead.platform,
+    lead.discoveryJobLabel,
+    lead.contactName,
+    lead.contactRole,
+    lead.contactReason,
+    lead.reason,
+    lead.reviewNotes,
+    lead.rejectReason,
+    ...(lead.emailSources || []).flatMap((item) => [item.email, ...(item.sources || []).map((source) => source.url)]),
+    ...(lead.phoneSources || []).map((item) => item.value),
+    ...(lead.whatsappSources || []).map((item) => item.value),
+    ...(lead.recommendedModels || []),
+    ...(lead.intentSignals || []),
+    ...(lead.businessSignals || []),
+    ...(lead.evidenceSources || []).flatMap((source) => [
+      source.sourceName,
+      source.sourceType,
+      source.url,
+      source.excerpt
+    ])
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
 function discoveryJobFilterOptions(leads) {
   const options = new Map();
   leads.forEach((lead) => {
@@ -2423,11 +2462,13 @@ function reviewLeadMatchesFilters(lead) {
   const sourceFilter = $("#reviewSourceFilter")?.value || "all";
   const countryFilter = $("#reviewCountryFilter")?.value || "all";
   const tierFilter = $("#reviewTierFilter")?.value || "all";
+  const searchQuery = String($("#reviewSearchInput")?.value || "").trim().toLowerCase();
   const source = reviewSourceKey(lead);
   if (discoveryFilter !== "all" && String(lead.discoveryJobId || "") !== discoveryFilter) return false;
   if (sourceFilter !== "all" && source !== sourceFilter) return false;
   if (countryFilter !== "all" && reviewLeadCountryKey(lead) !== countryFilter) return false;
   if (tierFilter !== "all" && lead.scoreTier !== tierFilter) return false;
+  if (searchQuery && !reviewLeadSearchText(lead).includes(searchQuery)) return false;
   if (timeFilter === "all") return true;
   const date = reviewLeadTimestamp(lead);
   if (!date) return timeFilter === "unknown";
@@ -2831,6 +2872,23 @@ function rejectLead(index, reason = "") {
     rejectedAt: new Date().toISOString()
   });
   rejectingReviewLeadId = "";
+  refreshAllLeadViews();
+}
+
+function restoreRejectedLead(index) {
+  const lead = rejectedLeads.splice(index, 1)[0];
+  if (!lead) return;
+  const restored = normalizeLead({
+    ...lead,
+    stage: "待审核",
+    rejectReason: "",
+    rejectedAt: "",
+    restoredAt: new Date().toISOString()
+  });
+  reviewLeads.unshift(restored);
+  selectedReviewLeadId = `pending:${restored.id || 0}`;
+  reviewSelectedIds = new Set();
+  $("#reviewStatusFilter") && ($("#reviewStatusFilter").value = "pending");
   refreshAllLeadViews();
 }
 
@@ -5007,6 +5065,7 @@ function bindForms() {
       rejectingReviewLeadId = `pending:${reviewLeads[index]?.id || index}`;
       renderReview();
     }
+    if (button.dataset.reviewAction === "restore") restoreRejectedLead(index);
     if (button.dataset.reviewAction === "delete") deleteReviewLeads([reviewLeads[index]?.id]);
   });
 
@@ -5039,6 +5098,7 @@ function bindForms() {
   ["#reviewStatusFilter", "#reviewDiscoveryFilter", "#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
     $(selector)?.addEventListener("change", renderReview);
   });
+  $("#reviewSearchInput")?.addEventListener("input", renderReview);
 
   $("#clearReviewFilters")?.addEventListener("click", () => {
     $("#reviewStatusFilter").value = "pending";
@@ -5047,6 +5107,7 @@ function bindForms() {
     $("#reviewSourceFilter").value = "all";
     $("#reviewCountryFilter").value = "all";
     $("#reviewTierFilter").value = "all";
+    if ($("#reviewSearchInput")) $("#reviewSearchInput").value = "";
     renderReview();
   });
 

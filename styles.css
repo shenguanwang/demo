@@ -2315,6 +2315,7 @@ textarea {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 16px;
   margin: 0 0 16px;
   padding: 14px 16px;
@@ -2342,6 +2343,7 @@ textarea {
 
 .review-filter-group,
 .review-bulk-actions,
+.review-search-box,
 .review-card-meta {
   display: flex;
   align-items: center;
@@ -2387,10 +2389,44 @@ textarea {
 }
 
 .review-filter-group select:focus-visible,
+.review-search-box input:focus-visible,
 .review-select input:focus-visible,
 .danger-button:focus-visible {
   outline: 3px solid rgba(36, 85, 139, 0.22);
   outline-offset: 2px;
+}
+
+.review-search-box {
+  flex: 1 1 100%;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.review-search-box span {
+  flex: 0 0 auto;
+  padding-top: 10px;
+}
+
+.review-search-box input {
+  flex: 1 1 360px;
+  width: min(560px, 100%);
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #26313c;
+  font: inherit;
+  font-size: 13px;
+}
+
+.restore-rejected-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin: 12px 0 16px;
 }
 
 .review-bulk-actions {
@@ -6396,6 +6432,7 @@ td {
 :root[data-theme="dark"] .follow-context select,
 :root[data-theme="dark"] .lead-edit-grid input,
 :root[data-theme="dark"] .lead-edit-grid textarea,
+:root[data-theme="dark"] .review-search-box input,
 :root[data-theme="dark"] .account-password-form input,
 :root[data-theme="dark"] .admin-api-card > input,
 :root[data-theme="dark"] .admin-settings-grid select {
