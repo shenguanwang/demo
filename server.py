@@ -2637,6 +2637,8 @@ OBVIOUS_IRRELEVANT_LEAD_PATTERNS = (
     r"\b(cgtn|china global television|news channel|news network|television network|tv network|broadcasting|"
     r"newsroom|journalist|newspaper|magazine|media outlet|press agency|public radio|radio station|"
     r"political news|world news|breaking news|current affairs)\b",
+    r"\b(media project|media-project|human rights media|rights media|tv|телеканал|телевидение|"
+    r"новости|журналист|газета|сми|медиа|правозащитный|прецедент)\b",
     r"\b(towing|tow truck|roadside assistance|vehicle recovery|car recovery|breakdown service|wrecker)\b",
     r"\b(tax consultant|tax consultancy|vat consultant|vat consultancy|tax agent|tax filing|tax refund)\b",
     r"\b(tax free|duty free|excise tax|corporate tax|customs clearance|customs broker)\b",
@@ -3044,6 +3046,30 @@ def is_obviously_irrelevant_lead(text: str) -> bool:
         re.search(pattern, text, re.I)
         for pattern in OBVIOUS_IRRELEVANT_LEAD_PATTERNS
     )
+
+
+def is_media_or_content_channel(text: str) -> bool:
+    value = clean_text(text).lower()
+    if not value:
+        return False
+    media_signal = re.search(
+        r"\b(news|media|journalist|newspaper|magazine|broadcast|broadcasting|tv channel|television|"
+        r"podcast|vlog|blogger|youtuber|influencer|press agency|radio station)\b|"
+        r"(телеканал|телевидение|новости|журналист|газета|сми|медиа|правозащитный|прецедент)",
+        value,
+        re.I,
+    )
+    if not media_signal:
+        return False
+    dealer_signal = re.search(
+        r"\b(car dealer|dealership|auto dealer|vehicle dealer|car showroom|motors showroom|"
+        r"auto trading|automotive trading|vehicle importer|car importer|vehicle distributor|"
+        r"cars for sale|used cars|new cars|inventory|stock vehicles|showroom address|"
+        r"sales department|book a test drive)\b",
+        value,
+        re.I,
+    )
+    return not bool(dealer_signal)
 
 
 def is_youtube_automotive_lead(title: str, snippet: str, url: str = "") -> bool:
@@ -6482,6 +6508,19 @@ def opportunity_signals(text: str) -> tuple[list[str], list[str]]:
     return business[:4], intent[:4]
 
 
+def has_strong_automotive_business_evidence(text: str) -> bool:
+    value = clean_text(text).lower()
+    return bool(re.search(
+        r"\b(car dealer|dealership|auto dealer|vehicle dealer|car showroom|motors showroom|"
+        r"auto trading|automotive trading|vehicle importer|car importer|automotive importer|"
+        r"parallel import|vehicle distributor|car distributor|authorized dealer|exclusive dealer|"
+        r"cars for sale|used cars|new cars|pre-owned cars|inventory|stock vehicles|"
+        r"sales department|showroom address|book a test drive)\b",
+        value,
+        re.I,
+    ))
+
+
 def infer_city(country: str, text: str) -> str:
     lower = text.lower()
     for key, cities in COUNTRY_HINTS.items():
@@ -7116,6 +7155,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             continue
         if is_obviously_irrelevant_lead(combined):
             continue
+        if is_media_or_content_channel(combined):
+            continue
         if not is_social_result and is_brand_bound_chinese_dealer(combined):
             excluded_brand_bound_dealers += 1
             continue
@@ -7418,21 +7459,24 @@ def discover(params: dict[str, list[str]]) -> dict:
             contacts,
             published_at,
         )
+        has_business_evidence = has_strong_automotive_business_evidence(combined)
         contact_reason = (
             f"该线索与“{target_label}”目标匹配，"
             f"信息可信度为{confidence_label}（{confidence}%），"
             f"建议优先推荐{'、'.join(recommended_models)}。"
         )
-        if intent_signals:
+        if intent_signals and has_business_evidence:
             contact_reason = (
                 f"发现{ '、'.join(intent_signals) }，即使页面未提及华为汽车也值得优先联系。"
                 + contact_reason
             )
-        elif business_signals:
+        elif business_signals and has_business_evidence:
             contact_reason = (
                 f"已确认具备{ '、'.join(business_signals) }，可作为潜在进口或分销客户培育。"
                 + contact_reason
             )
+        if not has_business_evidence:
+            contact_reason = "未发现明确车商、展厅、进口商或车辆销售证据；仅可作为待人工核验线索，不应优先联系。"
         if is_competitor:
             contact_reason += " 但页面存在汽车出口同行特征，建议先核实身份，不直接发送底价。"
         reason = f"{origin}显示该客户可能是 {lead_type}。来源：{domain}。"
