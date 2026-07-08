@@ -5141,16 +5141,12 @@ async function loadSession() {
   if (systemSettingsSection) systemSettingsSection.hidden = session.role !== "admin";
   const accountSettingsToggle = $("#accountSettingsToggle");
   if (accountSettingsToggle) accountSettingsToggle.hidden = session.role === "admin";
-  const adminLogoutButton = $("#adminLogoutButton");
-  if (adminLogoutButton) adminLogoutButton.hidden = session.role !== "admin";
+  const logoutButton = $("#logoutButton");
+  if (logoutButton) logoutButton.hidden = false;
   const accountSettingsSection = $("#account-settings-page");
   if (accountSettingsSection) accountSettingsSection.hidden = session.role === "admin";
   const passwordForm = $("#accountPasswordForm");
   if (passwordForm) passwordForm.hidden = session.role === "admin";
-  const accountSettingsUser = $("#accountSettingsUser");
-  if (accountSettingsUser) {
-    accountSettingsUser.textContent = `${session.username || "当前账号"} · ${session.role === "admin" ? "管理员" : "普通用户"}`;
-  }
   if (session.role === "admin" && window.location.hash === "#account-settings-page") {
     showSection("overview");
   }
@@ -5655,7 +5651,7 @@ async function init() {
   setInterval(importSocialCaptures, 4_000);
   showRequestedSection();
   window.addEventListener("hashchange", showRequestedSection);
-  $$("#accountSettingsLogout, #adminLogoutButton").forEach((logoutButton) => {
+  $$("#logoutButton").forEach((logoutButton) => {
     logoutButton.addEventListener("click", async () => {
       logoutButton.disabled = true;
       try {

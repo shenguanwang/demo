@@ -344,8 +344,8 @@ button {
 
 .account-settings-layout {
   display: grid;
-  grid-template-columns: minmax(360px, 520px) minmax(280px, 1fr);
-  gap: 18px;
+  grid-template-columns: minmax(320px, 560px);
+  gap: 14px;
   align-items: start;
 }
 
@@ -367,13 +367,6 @@ button {
 .account-settings-card.account-password-form input {
   min-height: 42px;
   font-size: 13px;
-}
-
-.account-settings-copy {
-  margin: 0 0 18px;
-  color: #6d7885;
-  font-size: 13px;
-  line-height: 1.7;
 }
 
 @media (max-width: 900px) {
