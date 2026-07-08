@@ -2396,6 +2396,53 @@ function reviewLeadSearchText(lead) {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
+function reviewSourceHost(value) {
+  try {
+    return new URL(/^https?:\/\//i.test(String(value || "")) ? String(value || "") : `https://${value}`).hostname
+      .replace(/^www\./, "")
+      .toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function reviewConcreteSourceOptions(lead) {
+  const options = new Map();
+  const add = (label, value = "") => {
+    const text = String(label || "").trim();
+    const host = reviewSourceHost(value || text);
+    const cleanLabel = text && !/^https?:\/\//i.test(text) ? text : host;
+    const key = (host || cleanLabel).toLowerCase();
+    const blockedHosts = ["google.", "youtube.", "youtu.be", "openstreetmap.org", "facebook.", "instagram.", "tiktok.", "linkedin.", "twitter.", "x.com"];
+    if (!key || ["google", "google maps", "openstreetmap", "youtube", "facebook", "instagram"].includes(key)) return;
+    if (host && blockedHosts.some((item) => host.includes(item))) return;
+    if (["公开网页", "公开来源", "原始来源", "综合搜索", "Local automotive directory", "公开商业信息网站", "车商官网或汽车行业网站"].includes(cleanLabel)) return;
+    options.set(`specific:${key}`, cleanLabel || key);
+  };
+  add(lead.origin, lead.sourceUrl || lead.source);
+  add(lead.sourceTitle, lead.sourceUrl || lead.source);
+  add(lead.sourceType, lead.sourceUrl || lead.source);
+  add(lead.sourceUrl || lead.source);
+  (lead.evidenceSources || []).forEach((source) => {
+    add(source.sourceName || source.name, source.url);
+    add(source.url);
+  });
+  (lead.emailSources || []).forEach((item) => {
+    (item.sources || []).forEach((source) => add(source.name, source.url));
+  });
+  (lead.phoneSources || []).forEach((item) => {
+    (item.sources || []).forEach((source) => add(source.name, source.url));
+  });
+  (lead.whatsappSources || []).forEach((item) => {
+    (item.sources || []).forEach((source) => add(source.name, source.url));
+  });
+  return [...options.entries()];
+}
+
+function reviewLeadConcreteSourceKeys(lead) {
+  return new Set(reviewConcreteSourceOptions(lead).map(([value]) => value));
+}
+
 function discoveryJobFilterOptions(leads) {
   const options = new Map();
   leads.forEach((lead) => {
@@ -2426,7 +2473,20 @@ function renderReviewFilterOptions() {
       .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
       .join("");
     sourceSelect.innerHTML = `<option value="all">全部来源</option>${options || reviewSourceOptions.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
-    sourceSelect.value = current === "all" || [...available].includes(current) ? current : "all";
+    const concreteOptions = new Map();
+    sourceLeads.forEach((lead) => {
+      reviewConcreteSourceOptions(lead).forEach(([value, label]) => {
+        if (!concreteOptions.has(value)) concreteOptions.set(value, label);
+      });
+    });
+    const concreteOptionHtml = [...concreteOptions.entries()]
+      .sort((a, b) => String(a[1]).localeCompare(String(b[1]), "zh-CN"))
+      .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+      .join("");
+    if (concreteOptionHtml) {
+      sourceSelect.insertAdjacentHTML("beforeend", `<optgroup label="具体来源">${concreteOptionHtml}</optgroup>`);
+    }
+    sourceSelect.value = current === "all" || [...available].includes(current) || concreteOptions.has(current) ? current : "all";
   }
 
   if (countrySelect) {
@@ -2465,7 +2525,13 @@ function reviewLeadMatchesFilters(lead) {
   const searchQuery = String($("#reviewSearchInput")?.value || "").trim().toLowerCase();
   const source = reviewSourceKey(lead);
   if (discoveryFilter !== "all" && String(lead.discoveryJobId || "") !== discoveryFilter) return false;
-  if (sourceFilter !== "all" && source !== sourceFilter) return false;
+  if (sourceFilter !== "all") {
+    if (sourceFilter.startsWith("specific:")) {
+      if (!reviewLeadConcreteSourceKeys(lead).has(sourceFilter)) return false;
+    } else if (source !== sourceFilter) {
+      return false;
+    }
+  }
   if (countryFilter !== "all" && reviewLeadCountryKey(lead) !== countryFilter) return false;
   if (tierFilter !== "all" && lead.scoreTier !== tierFilter) return false;
   if (searchQuery && !reviewLeadSearchText(lead).includes(searchQuery)) return false;
