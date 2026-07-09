@@ -5158,6 +5158,11 @@ function bindForms() {
     if (button.dataset.reviewAction === "reject") {
       rejectingReviewLeadId = `pending:${reviewLeads[index]?.id || index}`;
       renderReview();
+      requestAnimationFrame(() => {
+        const panel = document.querySelector("[data-reject-reason-panel]");
+        panel?.scrollIntoView({ behavior: "smooth", block: "center" });
+        panel?.querySelector("input[type='radio']")?.focus({ preventScroll: true });
+      });
     }
     if (button.dataset.reviewAction === "restore") restoreRejectedLead(index);
     if (button.dataset.reviewAction === "delete") deleteReviewLeads([reviewLeads[index]?.id]);
