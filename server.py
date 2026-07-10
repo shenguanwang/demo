@@ -3672,6 +3672,12 @@ NON_CUSTOMER_WEBSITE_DOMAINS = (
     "tracking.",
     "pixel.",
     "ads.",
+    "kfc.",
+    "mcdonalds.",
+    "burgerking.",
+    "pizzahut.",
+    "dominos.",
+    "starbucks.",
 )
 
 NON_CUSTOMER_WEBSITE_PATHS = (
@@ -3717,6 +3723,17 @@ def is_business_website_url(url: str) -> bool:
     if re.search(r"\.(?:png|jpe?g|gif|svg|webp|css|js|ico|json|xml|txt|pdf)$", path):
         return False
     return True
+
+
+def has_automotive_business_signal(text: str) -> bool:
+    return bool(re.search(
+        r"\b(auto|automotive|car|cars|vehicle|vehicles|motor|motors|dealership|dealer|"
+        r"showroom|importer|distributor|fleet|rental|garage|used cars|new cars|"
+        r"luxury cars|pre-owned|spare parts|workshop|4x4|suv|ev|electric vehicle)\b|"
+        r"(汽车|车辆|车商|经销|展厅|进口|平行进口|车队|租赁|新能源|电动车)",
+        clean_text(text),
+        re.I,
+    ))
 
 
 def customer_website_key(url: str) -> str:
@@ -5402,6 +5419,43 @@ def official_site_pages(website: str) -> list[dict]:
     return pages
 
 
+def audit_customer_website(website: str) -> dict:
+    website = normalize_public_url(website)
+    result = {
+        "url": website,
+        "reachable": False,
+        "vehicleRelated": False,
+        "pages": [],
+        "text": "",
+        "reason": "",
+    }
+    if not is_business_website_url(website):
+        result["reason"] = "not_business_website_url"
+        return result
+    try:
+        pages = official_site_pages(website)
+    except (OSError, TimeoutError, UnicodeError, urllib.error.URLError, http.client.HTTPException):
+        pages = []
+    if not pages:
+        result["reason"] = "website_unreachable"
+        return result
+    page_text = " ".join(
+        clean_text(page.get("html", ""))[:20_000] or page.get("text", "")
+        for page in pages[:3]
+    )
+    final_url = normalize_public_url(pages[0].get("url", "")) or website
+    result.update({
+        "url": final_url,
+        "reachable": True,
+        "pages": pages,
+        "text": page_text,
+        "vehicleRelated": has_automotive_business_signal(f"{final_url} {page_text}"),
+    })
+    if not result["vehicleRelated"]:
+        result["reason"] = "website_not_vehicle_related"
+    return result
+
+
 def company_domain_candidates(company: str) -> list[str]:
     stop_words = {
         "auto", "autos", "car", "cars", "motor", "motors", "group", "llc",
@@ -5498,6 +5552,39 @@ def research_company(params: dict[str, list[str]]) -> dict:
     inferred_site_pages: list[dict] = []
     if not website:
         website, inferred_site_pages = infer_company_website(company)
+    website_audit = {
+        "url": website,
+        "reachable": False,
+        "vehicleRelated": False,
+        "pages": [],
+        "text": "",
+        "reason": "no_customer_website",
+    }
+    if website:
+        if inferred_site_pages:
+            inferred_text = " ".join(
+                clean_text(page.get("html", ""))[:20_000] or page.get("text", "")
+                for page in inferred_site_pages[:3]
+            )
+            website_audit = {
+                "url": normalize_public_url(inferred_site_pages[0].get("url", "")) or website,
+                "reachable": True,
+                "vehicleRelated": has_automotive_business_signal(
+                    f"{inferred_site_pages[0].get('url', '')} {inferred_text}"
+                ),
+                "pages": inferred_site_pages,
+                "text": inferred_text,
+                "reason": "",
+            }
+            if not website_audit["vehicleRelated"]:
+                website_audit["reason"] = "website_not_vehicle_related"
+        else:
+            website_audit = audit_customer_website(website)
+        if not website_audit.get("reachable") or not website_audit.get("vehicleRelated"):
+            website = ""
+            inferred_site_pages = []
+        else:
+            website = website_audit.get("url") or website
 
     if source_url and not is_noise_source_url(source_url):
         name, kind = source_category(source_url)
@@ -5523,7 +5610,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
             )
             seen_urls.add(key)
 
-    site_pages = inferred_site_pages or official_site_pages(website)
+    site_pages = website_audit.get("pages") if website else []
     official_website_text = " ".join(
         clean_text(page.get("html", ""))[:20_000] or page.get("text", "")
         for page in site_pages
@@ -5860,6 +5947,10 @@ def research_company(params: dict[str, list[str]]) -> dict:
     ]
     if not website and not site_pages:
         missing_fields.append("官网")
+    if website_audit.get("url") and not website_audit.get("reachable"):
+        missing_fields.append("官网可打开")
+    if website_audit.get("url") and not website_audit.get("vehicleRelated"):
+        missing_fields.append("官网车辆相关")
     if not verified_email_sources:
         missing_fields.append("邮箱")
     if not contacts["phone_sources"]:
@@ -5936,7 +6027,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
         "scoreTier": score_tier,
         "scoreDimensions": score_dimensions,
         "scoreBreakdown": website_score_breakdown,
-        "scoreBasis": "100分机会模型：进出口资质20、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7，另计风险扣分",
+        "scoreBasis": "90分机会模型：进出口资质10、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7，另计风险扣分",
         "isCompetitor": is_competitor,
         "businessSignals": business_signals,
         "intentSignals": intent_signals,
@@ -5945,6 +6036,9 @@ def research_company(params: dict[str, list[str]]) -> dict:
             "official": official_count,
             "independentDomains": len(independent_domains),
             "contactable": contactable,
+            "websiteReachable": bool(website_audit.get("reachable")),
+            "websiteVehicleRelated": bool(website_audit.get("vehicleRelated")),
+            "websiteAuditReason": website_audit.get("reason", ""),
             "missingFields": missing_fields,
             "decision": decision,
         },
@@ -6751,12 +6845,12 @@ def lead_opportunity_score(
         "贸易许可证", "商业登记", "授权进口商",
     )
     if any(term in lower for term in qualification_terms):
-        set_dimension("tradeQualification", "明确具备进出口、海关或贸易许可资质", 20)
+        set_dimension("tradeQualification", "明确具备进出口、海关或贸易许可资质", 10)
     elif any(term in lower for term in (
         "vehicle importer", "car importer", "automotive importer",
         "parallel import", "import and export",
     )):
-        set_dimension("tradeQualification", "公开业务显示具备车辆进口经验，资质待核验", 11)
+        set_dimension("tradeQualification", "公开业务显示具备车辆进口经验，资质待核验", 6)
 
     if any(term in lower for term in ("vehicle importer", "car importer", "automotive importer", "parallel import", "import and export")):
         set_dimension("customerFit", "汽车进口或平行进口客户", 27)
@@ -7772,6 +7866,15 @@ def discover(params: dict[str, list[str]]) -> dict:
                 for website_url in (social_profile.get("externalWebsites") or [])
                 if is_business_website_url(website_url)
             ]
+            if social_websites and not has_automotive_business_signal(
+                " ".join([
+                    combined,
+                    social_profile.get("title", ""),
+                    social_profile.get("description", ""),
+                    " ".join(social_websites),
+                ])
+            ):
+                social_websites = []
             if social_websites:
                 customer_website = customer_website or social_websites[0]
                 combined = " ".join(
@@ -7796,6 +7899,35 @@ def discover(params: dict[str, list[str]]) -> dict:
                 (website for website in contacts["websites"] if is_business_website_url(website)),
                 "",
             )
+        had_customer_website_candidate = bool(customer_website)
+        website_audit = {
+            "url": customer_website,
+            "reachable": False,
+            "vehicleRelated": False,
+            "pages": [],
+            "text": "",
+            "reason": "no_customer_website",
+        }
+        if customer_website:
+            website_audit = audit_customer_website(customer_website)
+            if not website_audit.get("reachable") or not website_audit.get("vehicleRelated"):
+                customer_website = ""
+            else:
+                customer_website = website_audit.get("url") or customer_website
+                combined = " ".join(
+                    value for value in (
+                        combined,
+                        str(website_audit.get("text") or "")[:3000],
+                    ) if value
+                )
+        if (
+            had_customer_website_candidate
+            and not customer_website
+            and not is_google_places
+            and item.get("origin") != "OpenStreetMap"
+            and not is_social_result
+        ):
+            continue
         official_contact_url = ""
         official_contact_excerpt = ""
         if item.get("google_official_pages") and any(contacts.get(key) for key in ("email", "phone", "whatsapp")):
@@ -7807,7 +7939,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             and target_type != "individual"
             and not all(contacts.get(key) for key in ("email", "phone", "whatsapp"))
         ):
-            for official_page in official_site_pages(customer_website)[:3]:
+            for official_page in (website_audit.get("pages") or official_site_pages(customer_website))[:3]:
                 official_contacts = extract_public_contacts(official_page.get("html", ""))
                 contacts = merge_public_contacts(contacts, official_contacts)
                 if not official_contact_url and any(official_contacts.get(key) for key in ("email", "phone", "whatsapp")):
@@ -8063,10 +8195,15 @@ def discover(params: dict[str, list[str]]) -> dict:
                     "official": official_source_count,
                     "independentDomains": max(1, len(source_domains)),
                     "contactable": contactable,
+                    "websiteReachable": bool(website_audit.get("reachable")),
+                    "websiteVehicleRelated": bool(website_audit.get("vehicleRelated")),
+                    "websiteAuditReason": website_audit.get("reason", ""),
                     "missingFields": [
                         field
                         for field, present in (
                             ("官网", bool(customer_website)),
+                            ("官网可打开", bool(website_audit.get("reachable")) if website_audit.get("url") else True),
+                            ("官网车辆相关", bool(website_audit.get("vehicleRelated")) if website_audit.get("url") else True),
                             ("邮箱", bool(email_sources)),
                             ("电话", bool(phone_sources)),
                             ("联系人", bool(contacts["contact_name"])),
@@ -8098,7 +8235,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "scoreTier": score_tier,
                 "scoreDimensions": score_dimensions,
                 "scoreBreakdown": score_breakdown,
-                "scoreBasis": "100分机会模型：进出口资质20、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7，另计风险扣分",
+                "scoreBasis": "90分机会模型：进出口资质10、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7，另计风险扣分",
                 "stage": "准备联系" if score >= 80 else "待审核",
                 "next": "生成英文开发信并人工确认",
                 "website": combined[:1000],

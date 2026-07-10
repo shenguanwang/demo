@@ -222,7 +222,14 @@ const IRRELEVANT_REVIEW_LEAD_DOMAINS = [
   "reuters.com",
   "apnews.com",
   "aljazeera.com",
-  "bloomberg.com"
+  "bloomberg.com",
+  "kfc.co.th",
+  "kfc.com",
+  "mcdonalds.com",
+  "burgerking.com",
+  "pizzahut.com",
+  "dominos.com",
+  "starbucks.com"
 ];
 
 const NON_CUSTOMER_WEBSITE_DOMAINS = [
@@ -232,7 +239,14 @@ const NON_CUSTOMER_WEBSITE_DOMAINS = [
   "iytimg.com",
   "googleusercontent.com",
   "gstatic.com",
-  "googlevideo.com"
+  "googlevideo.com",
+  "kfc.co.th",
+  "kfc.com",
+  "mcdonalds.com",
+  "burgerking.com",
+  "pizzahut.com",
+  "dominos.com",
+  "starbucks.com"
 ];
 
 const NON_CUSTOMER_WEBSITE_PATTERNS = [
@@ -240,7 +254,13 @@ const NON_CUSTOMER_WEBSITE_PATTERNS = [
   "ytinitialdata",
   "ytinitialplayerresponse",
   "window.ytplayer",
-  "ytplayer"
+  "ytplayer",
+  "kfc.",
+  "mcdonalds.",
+  "burgerking.",
+  "pizzahut.",
+  "dominos.",
+  "starbucks."
 ];
 
 const MAX_LEADS_PER_CUSTOMER_WEBSITE = 5;
@@ -314,9 +334,12 @@ function limitDuplicateCustomerWebsites(leads, existingRecords = []) {
 function isBlockedLeadDomain(value) {
   const hostname = leadHostname(value);
   if (!hostname) return false;
-  return IRRELEVANT_REVIEW_LEAD_DOMAINS.some((domain) => (
-    hostname === domain || hostname.endsWith(`.${domain}`)
-  ));
+  return (
+    isNonCustomerWebsiteUrl(value)
+    || IRRELEVANT_REVIEW_LEAD_DOMAINS.some((domain) => (
+      hostname === domain || hostname.endsWith(`.${domain}`)
+    ))
+  );
 }
 
 function isIrrelevantReviewLead(lead) {
@@ -1083,8 +1106,8 @@ function evaluateLeadScore(text, options = {}) {
   const value = String(text || "").toLowerCase();
   const dimensions = {
     tradeQualification: /import.{0,8}(license|licence|permit)|export.{0,8}(license|licence|permit)|licensed importer|customs (registration|registered|code)|trade license|commercial registration|进出口资质|进出口许可证|进口许可证|出口许可证|海关注册|海关备案|报关资质|贸易许可证|授权进口商/.test(value)
-      ? 20
-      : /vehicle importer|car importer|parallel import|import and export|汽车进口|平行进口/.test(value) ? 11 : 0,
+      ? 10
+      : /vehicle importer|car importer|parallel import|import and export|汽车进口|平行进口/.test(value) ? 6 : 0,
     customerFit: /import|distributor|进口|分销|平行进口/.test(value)
       ? 27
       : /dealer|showroom|trading|经销|展厅|贸易/.test(value)
@@ -1823,7 +1846,7 @@ function renderReview() {
       <div class="score-breakdown">
         <span>评分依据${lead.manualScoreAdjustment ? ` · 人工校准 ${lead.manualScoreAdjustment > 0 ? "+" : ""}${escapeHtml(lead.manualScoreAdjustment)}` : ""}</span>
         <div class="score-dimensions">
-          <span>进出口资质 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/20</strong></span>
+          <span>进出口资质 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/10</strong></span>
           <span>客户匹配 <strong>${escapeHtml(lead.scoreDimensions?.customerFit || 0)}/27</strong></span>
           <span>采购意向 <strong>${escapeHtml(lead.scoreDimensions?.purchaseIntent || 0)}/20</strong></span>
           <span>经营能力 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/14</strong></span>
@@ -2869,7 +2892,7 @@ function normalizeLead(raw) {
       : fallbackBreakdown,
     scoreBasis: scoreModelVersion >= 6 && raw.scoreBasis
       ? raw.scoreBasis
-      : "100分机会模型：进出口资质20、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7",
+      : "90分机会模型：进出口资质10、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7",
     model: raw.model || "问界 M9",
     createdAt: raw.createdAt || raw.importedAt || raw.discoveredAt || new Date().toISOString(),
     score,
