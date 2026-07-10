@@ -433,6 +433,60 @@ def ai_review_lead_candidate(
     }
 
 
+def ai_generate_search_queries(
+    *,
+    country: str,
+    cities: list[str],
+    target_type: str,
+    model: str,
+    goal: str,
+    limit: int = 12,
+) -> list[str]:
+    if not ai_lead_review_enabled():
+        return []
+    meta = country_search_meta(country)
+    prompt = {
+        "task": "Generate real web search queries for finding B2B automotive sales leads. Do not invent company names.",
+        "targetCountry": country,
+        "countryAliases": list(target_country_aliases(country)),
+        "cities": cities[:8],
+        "targetType": target_type,
+        "vehicleModel": model,
+        "goal": goal,
+        "rules": [
+            "Every query must include the target country or one of the target cities.",
+            "Prefer car dealer, showroom, importer, distributor, fleet, auto trading, and official website/contact terms.",
+            "Include local language or regional platform terms when useful.",
+            "Avoid broad global queries that can return other countries.",
+            "Return JSON only.",
+        ],
+        "requiredJson": {"queries": ["string"]},
+        "maxQueries": limit,
+        "searchCountryCode": meta.get("code", ""),
+    }
+    try:
+        result = deepseek_chat_json(
+            [
+                {"role": "system", "content": "You generate precise search engine queries for real-time lead discovery. Return JSON only."},
+                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+            ],
+            model=get_ai_model("fast"),
+        )
+    except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
+        return []
+    queries = []
+    for item in result.get("queries") or []:
+        query = clean_text(str(item))[:220]
+        if not query:
+            continue
+        if not has_target_country_signal(f"{query} {country}", country):
+            query = f"{query} {meta.get('location') or country}"
+        queries.append(query)
+        if len(queries) >= limit:
+            break
+    return list(dict.fromkeys(queries))
+
+
 def admin_settings_payload() -> dict:
     settings = load_admin_settings_file()
     values = {}
@@ -3150,17 +3204,34 @@ def local_discovery_domains() -> set[str]:
 
 
 def has_target_country_signal(text: str, country: str) -> bool:
-    value = str(text or "").lower()
-    return any(alias.lower() in value for alias in target_country_aliases(country))
+    value = normalize_country_match_text(text)
+    return any((alias_text := normalize_country_match_text(alias)) and alias_text in value for alias in target_country_aliases(country))
+
+
+def supported_foreign_location_signal(text: str, country: str) -> str:
+    value = normalize_country_match_text(text)
+    if not value or has_target_country_signal(value, country):
+        return ""
+    target_meta = country_search_meta(country)
+    target_code = target_meta.get("code", "")
+    for meta_country, meta in COUNTRY_SEARCH_META.items():
+        if meta.get("code") == target_code:
+            continue
+        aliases = (meta_country, meta.get("location", ""), *(meta.get("aliases") or ()))
+        for alias in aliases:
+            alias_text = normalize_country_match_text(alias)
+            if len(alias_text) >= 4 and alias_text in value:
+                return alias
+    return ""
 
 
 def has_foreign_location_conflict(text: str, country: str) -> bool:
-    value = str(text or "").lower()
+    value = normalize_country_match_text(text)
     if not value:
         return False
     if has_target_country_signal(value, country):
         return False
-    return any(blocker in value for blocker in FOREIGN_LOCATION_BLOCKERS)
+    return any(blocker in value for blocker in FOREIGN_LOCATION_BLOCKERS) or bool(supported_foreign_location_signal(value, country))
 
 
 def is_vehicle_listing_url(url: str) -> bool:
@@ -3176,6 +3247,48 @@ def site_root_url(url: str) -> str:
     if not parsed.scheme or not parsed.netloc:
         return ""
     return f"{parsed.scheme}://{parsed.netloc}/"
+
+
+def raw_result_identity(item: dict) -> str:
+    url = normalize_public_url(
+        item.get("customer_website")
+        or item.get("source_url")
+        or item.get("url")
+        or ""
+    )
+    if not url:
+        return re.sub(r"[^a-z0-9]+", "", str(item.get("title") or "").lower())
+    if is_social_profile_url(url) or is_vehicle_listing_url(url):
+        return normalize_public_url(url).lower().split("#", 1)[0].rstrip("/")
+    parsed = safe_urlparse(url)
+    path = parsed.path.strip("/").lower()
+    root = f"{parsed.scheme}://{parsed.netloc.lower().removeprefix('www.')}/"
+    if not path or path in {"about", "about-us", "contact", "contact-us", "home", "index.html"}:
+        return root
+    return normalize_public_url(url).lower().split("#", 1)[0].rstrip("/")
+
+
+def filter_raw_results_for_country_and_duplicates(raw_results: list[dict], country: str) -> list[dict]:
+    kept: list[dict] = []
+    seen: set[str] = set()
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+        text = " ".join(
+            str(item.get(key) or "")
+            for key in ("title", "snippet", "url", "source_url", "customer_website", "origin")
+        )
+        origin = str(item.get("origin") or "")
+        trusted_geo_source = origin in {"Google Maps", "OpenStreetMap"} or origin.startswith("OpenStreetMap")
+        if not trusted_geo_source and has_foreign_location_conflict(text, country):
+            continue
+        identity = raw_result_identity(item)
+        if identity and identity in seen:
+            continue
+        if identity:
+            seen.add(identity)
+        kept.append(item)
+    return kept
 
 
 LOCALIZED_DISCOVERY_TERMS = {
@@ -7413,6 +7526,19 @@ def discover(params: dict[str, list[str]]) -> dict:
                 *local_queries,
                 *commercial_query_variants[7:],
             ]
+    ai_search_queries = ai_generate_search_queries(
+        country=country,
+        cities=cities,
+        target_type=target_type,
+        model=model,
+        goal=goal,
+        limit=12,
+    )
+    if ai_search_queries:
+        commercial_query_variants = [
+            *ai_search_queries,
+            *commercial_query_variants,
+        ]
 
     raw_results = []
     google_primary_results: list[dict] = []
@@ -7831,7 +7957,9 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["social_analysis"] = youtube_analysis
                 item["youtube_discovery_candidate"] = youtube_discovery_candidate
                 raw_results.append(item)
+    raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
     raw_results = balance_discovery_sources(raw_results)
+    raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
     if source_mode == "dealer":
         def dealer_source_priority(item: dict) -> tuple:
             origin = item.get("origin", "")
@@ -7885,12 +8013,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             continue
         if not is_social_result and re.search(r"/20\d{2}/\d{1,2}/\d{1,2}/", path_lower) and not allow_recent_content:
             continue
-        source_identity = (
-            item.get("customer_website")
-            or item.get("source_url")
-            or item["url"]
-            or item["title"]
-        ).lower()
+        source_identity = raw_result_identity(item)
         if source_identity in seen_sources:
             continue
         seen_sources.add(source_identity)
