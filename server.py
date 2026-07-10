@@ -130,6 +130,12 @@ ADMIN_SETTING_DEFINITIONS = {
     "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example apify/tiktok-scraper"},
     "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor"},
     "APIFY_YOUTUBE_ACTOR_ID": {"type": "text", "label": "Apify YouTube Actor ID", "group": "social", "status": "reserved", "use": "Override YouTube Actor, for example apify/youtube-scraper"},
+    "AI_PROVIDER": {"type": "text", "label": "AI Provider", "group": "ai", "status": "active", "use": "deepseek / qwen; used for lead verification"},
+    "DEEPSEEK_API_KEY": {"type": "secret", "label": "DeepSeek API Key", "group": "ai", "status": "active", "use": "AI lead verification"},
+    "DEEPSEEK_BASE_URL": {"type": "url", "label": "DeepSeek Base URL", "group": "ai", "status": "active", "use": "OpenAI-compatible endpoint"},
+    "AI_MODEL_FAST": {"type": "text", "label": "AI Fast Model", "group": "ai", "status": "active", "use": "Fast lead screening model"},
+    "AI_MODEL_DEFAULT": {"type": "text", "label": "AI Default Model", "group": "ai", "status": "active", "use": "Default lead verification model"},
+    "AI_MODEL_STRONG": {"type": "text", "label": "AI Strong Model", "group": "ai", "status": "active", "use": "Manual/important lead review model"},
     "APOLLO_API_KEY": {"type": "secret", "label": "Apollo API Key", "group": "email", "status": "reserved", "use": "Reserved for B2B contacts and company enrichment"},
     "CLEARBIT_API_KEY": {"type": "secret", "label": "Clearbit API Key", "group": "company", "status": "reserved", "use": "Reserved for company/domain enrichment"},
     "FACEBOOK_ACCESS_TOKEN": {"type": "secret", "label": "Facebook Graph API Token", "group": "social", "status": "reserved", "use": "后续 Facebook 主页/线索接口"},
@@ -280,6 +286,151 @@ def get_hunter_api_key() -> str:
 
 def get_apify_api_token() -> str:
     return runtime_setting("APIFY_API_TOKEN")
+
+
+def get_ai_provider() -> str:
+    return runtime_setting("AI_PROVIDER", "").lower()
+
+
+def get_deepseek_api_key() -> str:
+    return runtime_setting("DEEPSEEK_API_KEY")
+
+
+def get_deepseek_base_url() -> str:
+    return runtime_setting("DEEPSEEK_BASE_URL", "https://api.deepseek.com").rstrip("/")
+
+
+def get_ai_model(kind: str = "default") -> str:
+    defaults = {
+        "fast": "deepseek-v4-flash",
+        "default": "deepseek-v4-flash",
+        "strong": "deepseek-v4-pro",
+    }
+    key = {
+        "fast": "AI_MODEL_FAST",
+        "strong": "AI_MODEL_STRONG",
+    }.get(kind, "AI_MODEL_DEFAULT")
+    return runtime_setting(key, defaults.get(kind, defaults["default"]))
+
+
+def ai_lead_review_enabled() -> bool:
+    provider = get_ai_provider()
+    return provider in {"deepseek", ""} and bool(get_deepseek_api_key())
+
+
+def extract_json_object(value: str) -> dict:
+    text = str(value or "").strip()
+    if not text:
+        return {}
+    try:
+        data = json.loads(text)
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        pass
+    match = re.search(r"\{[\s\S]*\}", text)
+    if not match:
+        return {}
+    try:
+        data = json.loads(match.group(0))
+        return data if isinstance(data, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def deepseek_chat_json(messages: list[dict], model: str = "") -> dict:
+    api_key = get_deepseek_api_key()
+    if not api_key:
+        return {}
+    payload = {
+        "model": model or get_ai_model("default"),
+        "messages": messages,
+        "temperature": 0,
+        "response_format": {"type": "json_object"},
+    }
+    data = post_json_value(
+        f"{get_deepseek_base_url()}/chat/completions",
+        payload,
+        timeout=30,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    content = (
+        ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+        if isinstance(data, dict) else ""
+    )
+    return extract_json_object(content)
+
+
+def ai_review_lead_candidate(
+    *,
+    company: str,
+    country: str,
+    city: str,
+    source_url: str,
+    customer_website: str,
+    origin: str,
+    source_type: str,
+    text: str,
+) -> dict:
+    if not ai_lead_review_enabled():
+        return {}
+    review_text = clean_text(text)[:5000]
+    if not review_text:
+        return {}
+    system = (
+        "You are a strict B2B automotive export lead auditor. "
+        "Use only the supplied text and URLs. Do not infer facts that are not present. "
+        "Reject food, restaurants, media, tourism, unrelated retail, and non-automotive pages. "
+        "Do not reject a real automotive dealer/importer merely because it does not mention Chinese NEV brands. "
+        "For reject=true, the reason must be non-automotive, wrong country/market, or clearly unusable evidence. "
+        "Return JSON only."
+    )
+    user = {
+        "task": "Decide whether this is a real automotive lead for Chinese NEV export sales.",
+        "targetCountry": country,
+        "targetCityHint": city,
+        "company": company,
+        "origin": origin,
+        "sourceType": source_type,
+        "sourceUrl": source_url,
+        "customerWebsite": customer_website,
+        "text": review_text,
+        "requiredJson": {
+            "automotive": "boolean",
+            "target_country_match": "boolean",
+            "reject": "boolean",
+            "confidence": "integer 0-100",
+            "business_type": "short string",
+            "reason": "short Chinese reason",
+            "evidence": ["short quoted/near-quoted evidence snippets from supplied text"],
+        },
+    }
+    try:
+        result = deepseek_chat_json(
+            [
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+            ],
+            model=get_ai_model("fast"),
+        )
+    except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
+        return {}
+    if not isinstance(result, dict):
+        return {}
+    return {
+        "provider": "deepseek",
+        "model": get_ai_model("fast"),
+        "automotive": bool(result.get("automotive")),
+        "targetCountryMatch": bool(result.get("target_country_match")),
+        "reject": bool(result.get("reject")),
+        "confidence": max(0, min(100, int(result.get("confidence") or 0))),
+        "businessType": clean_text(str(result.get("business_type") or ""))[:80],
+        "reason": clean_text(str(result.get("reason") or ""))[:240],
+        "evidence": [
+            clean_text(str(item))[:180]
+            for item in (result.get("evidence") or [])
+            if clean_text(str(item))
+        ][:5],
+    }
 
 
 def admin_settings_payload() -> dict:
@@ -8109,6 +8260,34 @@ def discover(params: dict[str, list[str]]) -> dict:
             published_at,
         )
         has_business_evidence = has_strong_automotive_business_evidence(combined)
+        ai_review = ai_review_lead_candidate(
+            company=company,
+            country=country,
+            city=city,
+            source_url=source_url,
+            customer_website=customer_website,
+            origin=origin,
+            source_type=source_type,
+            text=combined,
+        )
+        if ai_review:
+            ai_confidence = int(ai_review.get("confidence") or 0)
+            if (
+                ai_confidence >= 70
+                and (
+                    ai_review.get("reject")
+                    or not ai_review.get("automotive")
+                    or not ai_review.get("targetCountryMatch")
+                )
+            ):
+                continue
+            if ai_review.get("automotive"):
+                has_business_evidence = True
+                if ai_review.get("businessType"):
+                    business_signals = list(dict.fromkeys([
+                        ai_review["businessType"],
+                        *business_signals,
+                    ]))[:6]
         contact_reason = (
             f"该线索与“{target_label}”目标匹配，"
             f"信息可信度为{confidence_label}（{confidence}%），"
@@ -8128,6 +8307,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             contact_reason = "未发现明确车商、展厅、进口商或车辆销售证据；仅可作为待人工核验线索，不应优先联系。"
         if is_competitor:
             contact_reason += " 但页面存在汽车出口同行特征，建议先核实身份，不直接发送底价。"
+        if ai_review and ai_review.get("reason"):
+            contact_reason += f" AI复核：{ai_review['reason']}"
         reason = f"{origin}显示该客户可能是 {lead_type}。来源：{domain}。"
         if contacts["email"] or contacts["phone"] or contacts["whatsapp"]:
             reason += " 已找到公开商业联系方式。"
@@ -8221,6 +8402,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                     "resultLimit": result_limit,
                 },
                 "recommendedModels": recommended_models,
+                "aiReview": ai_review,
                 "businessSignals": business_signals,
                 "intentSignals": intent_signals,
                 "contactReason": contact_reason,
