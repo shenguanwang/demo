@@ -465,6 +465,7 @@ let discoveryJobs = [];
 let discoveryJobsTimer = null;
 let discoveryJobPage = 1;
 const DISCOVERY_JOBS_PAGE_SIZE = 4;
+const autoImportingDiscoveryJobs = new Set();
 let discoverySchedules = [];
 let discoverySchedulePage = 1;
 const DISCOVERY_SCHEDULES_PAGE_SIZE = 4;
@@ -4537,14 +4538,18 @@ function renderDiscoveryJobs() {
   if (nextPage) nextPage.disabled = discoveryJobPage >= pageCount;
   box.innerHTML = visibleJobs.length ? visibleJobs.map((job) => {
     const count = Number(job.result?.count || job.result?.leads?.length || 0);
+    const importedCount = discoveryJobImportedCount(job);
     const canImport = job.status === "completed" && !job.imported && count > 0;
+    const isAutoImporting = autoImportingDiscoveryJobs.has(job.id);
     const canRetry = ["failed", "canceled"].includes(job.status);
     const canCancel = ["queued", "running"].includes(job.status);
     const diagnostics = job.result?.diagnostics;
     const actionLabel = job.imported
       ? `已导入 ${importedCount} 条`
+      : isAutoImporting
+        ? `自动导入中`
       : canImport
-        ? `导入 ${count} 条`
+        ? `等待自动导入`
         : canRetry
           ? "重新执行"
           : canCancel
@@ -4584,7 +4589,7 @@ function renderDiscoveryJobs() {
         </div>
         <div class="discovery-job-actions">
           <button class="discovery-job-action" type="button"
-            ${actionAttribute} ${canImport || canRetry || canCancel ? "" : "disabled"}>
+            ${actionAttribute} ${canRetry || canCancel || (canImport && !isAutoImporting) ? "" : "disabled"}>
             ${escapeHtml(actionLabel)}
           </button>
           <button class="discovery-job-delete" type="button"
@@ -4749,7 +4754,8 @@ async function deleteDiscoverySchedule(scheduleId) {
   await loadDiscoverySchedules();
 }
 
-async function loadDiscoveryJobs() {
+async function loadDiscoveryJobs(options = {}) {
+  const { autoImport = true } = options;
   const response = await apiFetch("/api/discover/jobs", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -4768,6 +4774,7 @@ async function loadDiscoveryJobs() {
       message: active.message || "任务仍在云端执行，可以关闭当前页面。"
     });
   }
+  if (autoImport) autoImportCompletedDiscoveryJobs();
   return discoveryJobs;
 }
 
@@ -4911,9 +4918,25 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
   return { found, fresh };
 }
 
-async function importDiscoveryJob(jobId) {
+function autoImportCompletedDiscoveryJobs() {
+  const completed = discoveryJobs.filter((job) =>
+    job?.id &&
+    job.status === "completed" &&
+    !job.imported &&
+    !autoImportingDiscoveryJobs.has(job.id)
+  );
+  completed.forEach((job) => {
+    autoImportingDiscoveryJobs.add(job.id);
+    importDiscoveryJob(job.id, { automatic: true }).finally(() => {
+      autoImportingDiscoveryJobs.delete(job.id);
+    });
+  });
+}
+
+async function importDiscoveryJob(jobId, options = {}) {
+  const { automatic = false } = options;
   const button = document.querySelector(`[data-import-job="${CSS.escape(jobId)}"]`);
-  const finishButtonLoading = startButtonLoading(button, "正在导入");
+  const finishButtonLoading = startButtonLoading(button, automatic ? "自动导入" : "正在导入");
   try {
     const response = await apiFetch(`/api/discover/status?${new URLSearchParams({ id: jobId })}`, {
       cache: "no-store"
@@ -4930,13 +4953,13 @@ async function importDiscoveryJob(jobId) {
       percent: 100,
       stage: "done",
       state: "complete",
-      title: `已导入 ${merged.fresh.length} 条新线索`,
+      title: `${automatic ? "搜索完成，已自动导入" : "已导入"} ${merged.fresh.length} 条新线索`,
       message: merged.fresh.length
-        ? "任务结果已进入线索审核，并已同步到云端数据。"
+        ? "任务结果已自动进入线索审核，并已同步到云端数据。"
         : "任务结果中的线索已存在，没有重复导入。"
     });
     finishButtonLoading("已导入", { disabled: true });
-    await loadDiscoveryJobs().catch(() => undefined);
+    await loadDiscoveryJobs({ autoImport: false }).catch(() => undefined);
   } catch (error) {
     finishButtonLoading("导入失败", { disabled: false, autoResetMs: 1600 });
     setFinderProgress({
@@ -4946,7 +4969,7 @@ async function importDiscoveryJob(jobId) {
       title: "任务结果导入失败",
       message: error.message
     });
-    await loadDiscoveryJobs().catch(() => undefined);
+    await loadDiscoveryJobs({ autoImport: false }).catch(() => undefined);
   }
 }
 
