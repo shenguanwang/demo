@@ -7683,7 +7683,9 @@ def discover(params: dict[str, list[str]]) -> dict:
     raw_results = []
     google_primary_results: list[dict] = []
     notice = ""
-    if source_mode in ("all", "combined", "google"):
+    is_china_discovery = country_meta.get("code") == "cn"
+    use_geo_sources = not is_china_discovery or source_mode in ("google", "osm")
+    if use_geo_sources and source_mode in ("all", "combined", "google"):
         try:
             google_city_limit = min(10, max(4, result_limit // max(1, len(cities))))
             for city in cities:
@@ -7731,7 +7733,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
             if source_mode == "google":
                 notice = f"{exc}。请在本机配置密钥后重试。"
-    if source_mode in ("all", "combined", "osm"):
+    if use_geo_sources and source_mode in ("all", "combined", "osm"):
         try:
             raw_results += search_osm_dealers(
                 country,
@@ -7742,9 +7744,12 @@ def discover(params: dict[str, list[str]]) -> dict:
             pass
     if source_mode in ("all", "combined", "dealer"):
         search_variants = list(dict.fromkeys(commercial_query_variants))
-        max_web_queries = 18 if source_mode in ("all", "combined") and google_primary_results else 36 if source_mode in ("all", "combined") else 12
+        if is_china_discovery and source_mode in ("all", "combined"):
+            max_web_queries = 16
+        else:
+            max_web_queries = 18 if source_mode in ("all", "combined") and google_primary_results else 36 if source_mode in ("all", "combined") else 12
         search_variants = search_variants[:max_web_queries]
-        per_query_limit = 8 if source_mode in ("all", "combined") else 6
+        per_query_limit = 5 if is_china_discovery and source_mode in ("all", "combined") else 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
         executor = ThreadPoolExecutor(max_workers=min(4, len(search_variants)))
         futures = [
@@ -7826,6 +7831,8 @@ def discover(params: dict[str, list[str]]) -> dict:
         if source_mode in ("all", "social", "combined")
         else [source_mode] if source_mode in platform_queries else []
     )
+    if is_china_discovery and source_mode == "combined":
+        selected_platforms = []
     platform_queries.update({
         "instagram": ("instagram.com", "Instagram", "Instagram 公开主页或内容"),
         "facebook": ("facebook.com", "Facebook", "Facebook 公开主页、群组或内容"),
