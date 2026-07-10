@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>华为系新能源汽车海外获客工作台</title>
-  <link rel="stylesheet" href="./styles.css?v=20260708-api-stack1">
+  <link rel="stylesheet" href="./styles.css?v=20260710-website-leads">
 </head>
 <body>
   <aside class="sidebar">
@@ -25,11 +25,12 @@
       <button data-section="lead-finder"><span>02</span>自动找客户</button>
       <button data-section="review"><span>03</span>线索审核</button>
       <button data-section="crm"><span>04</span>客户池 CRM</button>
-      <button data-section="email"><span>05</span>智能开发信</button>
-      <button data-section="follow"><span>06</span>今日跟进</button>
-      <button data-section="quote"><span>07</span>CIF 报价</button>
-      <button data-section="risk"><span>08</span>售后与风险</button>
-      <button data-section="kpi"><span>09</span>KPI 看板</button>
+      <button data-section="website-leads"><span>05</span>独立站线索 <b id="websiteLeadCount">0</b></button>
+      <button data-section="email"><span>06</span>智能开发信</button>
+      <button data-section="follow"><span>07</span>今日跟进</button>
+      <button data-section="quote"><span>08</span>CIF 报价</button>
+      <button data-section="risk"><span>09</span>售后与风险</button>
+      <button data-section="kpi"><span>10</span>KPI 看板</button>
     </nav>
     <div class="side-note">
       <div class="side-note-icon">↗</div>
@@ -201,17 +202,12 @@
           <label>中文目标描述
             <textarea name="goal" rows="4">找迪拜卖豪华新能源 SUV 的汽车经销商，适合推荐问界 M9 和尊界 S800。</textarea>
           </label>
-          <label>目标国家
+          <label>目标国家（国外）
             <select name="country" id="finderCountry"></select>
           </label>
-          <label>主推车型
-            <select name="model">
-              <option>问界 M9</option>
-              <option>尊界 S800</option>
-              <option>享界 S9</option>
-              <option>问界 M8</option>
-              <option>智界 R7</option>
-            </select>
+          <label>目标国家（国内）
+            <select name="domesticRegion" id="finderDomesticRegion"></select>
+            <input type="hidden" name="model" value="华为系新能源汽车">
           </label>
           <label>客户来源
             <select name="sourceMode">
@@ -727,6 +723,37 @@
       </div>
     </section>
 
+    <section class="section" id="website-leads">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Step 5</p>
+          <h2>独立站线索</h2>
+          <p>官网表单提交的信息会先进入这里。确认是真实需求后，可导入到线索审核，再进入客户池、开发信和报价流程。</p>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h3>官网询盘收件箱</h3>
+          <span>来源：www.yiming-auto.com 表单</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>客户 / 联系方式</th>
+                <th>国家 / 目的港</th>
+                <th>目标车型</th>
+                <th>需求说明</th>
+                <th>状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="websiteLeadRows"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <section class="section" id="email">
       <div class="section-head">
         <div>
@@ -1058,6 +1085,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260710-score-v8"></script>
+  <script src="./script.js?v=20260710-domestic-leads"></script>
 </body>
 </html>

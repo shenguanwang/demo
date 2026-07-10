@@ -903,6 +903,7 @@ def empty_workspace_state() -> dict:
     return {
         "reviewLeads": [],
         "customers": [],
+        "websiteLeads": [],
         "rejectedLeads": [],
         "quotes": [],
         "afterSalesOrders": [],
@@ -918,7 +919,7 @@ def normalize_workspace_state(payload: dict) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("工作台数据格式无效")
     normalized = {}
-    for key in ("reviewLeads", "customers", "rejectedLeads", "quotes", "afterSalesOrders", "deletedRecords"):
+    for key in ("reviewLeads", "customers", "websiteLeads", "rejectedLeads", "quotes", "afterSalesOrders", "deletedRecords"):
         value = payload.get(key, [])
         if not isinstance(value, list):
             raise ValueError(f"{key} 必须是数组")
@@ -1120,7 +1121,7 @@ def merge_workspace_states(current: dict, incoming: dict) -> tuple[dict, dict]:
     current = normalize_workspace_state(current or {})
     incoming = normalize_workspace_state(incoming or {})
     totals = {}
-    for key in ("reviewLeads", "customers", "rejectedLeads", "quotes", "afterSalesOrders", "deletedRecords"):
+    for key in ("reviewLeads", "customers", "websiteLeads", "rejectedLeads", "quotes", "afterSalesOrders", "deletedRecords"):
         limit = 10000 if key == "deletedRecords" else 5000
         current[key], totals[key] = merge_record_lists(current.get(key, []), incoming.get(key, []), key, limit)
     return current, totals
@@ -2009,7 +2010,7 @@ def normalize_schedule_payload(payload: dict) -> dict:
     if not normalized.get("country"):
         raise ValueError("请先选择目标国家")
     if not normalized.get("model"):
-        raise ValueError("请先选择主推车型")
+        normalized["model"] = "华为系新能源汽车"
     normalized.setdefault("sourceMode", "combined")
     normalized.setdefault("accountScope", "both")
     normalized.setdefault("freshness", "all")
@@ -2818,6 +2819,25 @@ COUNTRY_HINTS = {
     "Ethiopia": ("Addis Ababa", "Dire Dawa", "Bahir Dar"),
     "Oman": ("Muscat", "Salalah", "Sohar", "Nizwa"),
     "Armenia": ("Yerevan", "Gyumri", "Vanadzor"),
+    "China": (
+        "Beijing", "Shanghai", "Guangzhou", "Shenzhen", "Hangzhou", "Chengdu",
+        "Chongqing", "Wuhan", "Nanjing", "Suzhou", "Tianjin", "Xi'an",
+        "北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "武汉",
+    ),
+}
+
+CHINA_DOMESTIC_REGIONS = {
+    "全国": (
+        "北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "武汉",
+        "南京", "苏州", "天津", "西安",
+    ),
+    "华北": ("北京", "天津", "石家庄", "太原", "呼和浩特", "河北", "山西", "内蒙古"),
+    "华东": ("上海", "杭州", "南京", "苏州", "宁波", "合肥", "济南", "福州", "浙江", "江苏", "山东"),
+    "华南": ("广州", "深圳", "佛山", "东莞", "南宁", "海口", "广东", "广西", "海南"),
+    "华中": ("武汉", "长沙", "郑州", "湖北", "湖南", "河南"),
+    "西南": ("成都", "重庆", "昆明", "贵阳", "拉萨", "四川", "云南", "贵州", "西藏"),
+    "西北": ("西安", "兰州", "银川", "西宁", "乌鲁木齐", "陕西", "甘肃", "青海", "宁夏", "新疆"),
+    "东北": ("沈阳", "大连", "长春", "哈尔滨", "辽宁", "吉林", "黑龙江"),
 }
 
 DISCOVERY_KEYWORD_TERMS = (
@@ -2906,9 +2926,24 @@ CITY_COORDS = {
     "Ethiopia": ("Addis Ababa", 8.9806, 38.7578),
     "Oman": ("Muscat", 23.5880, 58.3829),
     "Armenia": ("Yerevan", 40.1792, 44.4991),
+    "China": ("Shanghai", 31.2304, 121.4737),
 }
 
 COUNTRY_SEARCH_META = {
+    "China": {
+        "code": "cn",
+        "location": "China",
+        "google_domain": "google.com",
+        "aliases": (
+            "China", "中国", "Mainland China", "PRC", "Beijing", "Shanghai", "Guangzhou", "Shenzhen",
+            "Hangzhou", "Chengdu", "Chongqing", "Wuhan", "Nanjing", "Suzhou", "Tianjin", "Xi'an",
+            "北京", "上海", "广州", "深圳", "杭州", "成都", "重庆", "武汉", "南京", "苏州", "天津", "西安",
+            "华北", "华东", "华南", "华中", "西南", "西北", "东北", "全国",
+            "河北", "山西", "内蒙古", "江苏", "浙江", "安徽", "福建", "江西", "山东", "广东", "广西",
+            "海南", "河南", "湖北", "湖南", "四川", "贵州", "云南", "西藏", "陕西", "甘肃", "青海",
+            "宁夏", "新疆", "辽宁", "吉林", "黑龙江",
+        ),
+    },
     "UAE": {
         "code": "ae",
         "location": "United Arab Emirates",
@@ -3014,6 +3049,19 @@ COUNTRY_SEARCH_META = {
 }
 
 LOCAL_DISCOVERY_SOURCES = {
+    "China": (
+        ("Baidu Search", "baidu.com"),
+        ("Baidu Maps", "map.baidu.com"),
+        ("Amap", "amap.com"),
+        ("Aiqicha", "aiqicha.baidu.com"),
+        ("Qichacha", "qcc.com"),
+        ("Tianyancha", "tianyancha.com"),
+        ("1688", "1688.com"),
+        ("Autohome Dealer", "dealer.autohome.com.cn"),
+        ("Yiche Dealer", "dealer.yiche.com"),
+        ("Dongchedi", "dongchedi.com"),
+        ("Sohu Auto", "auto.sohu.com"),
+    ),
     "UAE": (
         ("DubiCars", "dubicars.com"),
         ("YallaMotor UAE", "uae.yallamotor.com"),
@@ -3292,6 +3340,14 @@ def filter_raw_results_for_country_and_duplicates(raw_results: list[dict], count
 
 
 LOCALIZED_DISCOVERY_TERMS = {
+    "China": (
+        "汽车经销商 新能源 联系方式 官网",
+        "华为系 问界 尊界 汽车 经销商 电话",
+        "新能源汽车贸易公司 出口 联系人",
+        "多品牌汽车展厅 高端新能源 SUV",
+        "企业车队 新能源汽车 采购",
+        "汽车外贸公司 新能源车 出口",
+    ),
     "Nigeria": (
         "car dealer Lagos imported cars phone WhatsApp",
         "tokunbo cars dealer Lagos auto sales",
@@ -3401,6 +3457,24 @@ def local_source_query_variants(
         return []
     meta = country_search_meta(country)
     market_terms = list(dict.fromkeys([*(cities[:3]), meta.get("location", ""), str(country or "").split(" ")[0]]))
+    if meta.get("code") == "cn":
+        intent_terms = {
+            "dealer": ("汽车经销商", "新能源车商", "多品牌汽车展厅"),
+            "parallel": ("平行进口车商", "汽车贸易公司", "进口车展厅"),
+            "importer": ("汽车外贸公司", "新能源汽车出口", "汽车贸易公司"),
+            "fleet": ("企业车队", "汽车租赁公司", "新能源车队"),
+            "corporate": ("企业用车采购", "公司车辆采购", "新能源汽车采购"),
+            "government": ("公务车采购", "政府用车项目", "新能源汽车招标"),
+            "buying": ("求购新能源车", "汽车批发", "车商收车"),
+            "individual": ("新能源车商", "高端汽车展厅", "二网车商"),
+        }.get(target_type, ("汽车经销商", "新能源车商", "汽车贸易公司"))
+        queries: list[str] = []
+        for source_name, domain in sources:
+            for place in market_terms[:5]:
+                for term in intent_terms[:3]:
+                    queries.append(f"site:{domain} {place} {term} 联系方式 电话 邮箱 {exclude_query}{cutoff_query}".strip())
+            queries.append(f"site:{domain} {source_name} 华为系 问界 尊界 新能源 汽车 客户 {exclude_query}{cutoff_query}".strip())
+        return list(dict.fromkeys(queries))
     intent_terms = {
         "dealer": ("car dealer", "car showroom", "cars for sale", "motors"),
         "parallel": ("parallel import", "imported cars", "auto trading", "car dealer"),
@@ -3420,9 +3494,15 @@ def local_source_query_variants(
     return list(dict.fromkeys(queries))
 
 
-def discovery_cities(country: str, city_focus: str = "") -> list[str]:
+def discovery_cities(country: str, city_focus: str = "", domestic_region: str = "") -> list[str]:
     cities = [city_focus.strip()] if city_focus.strip() else []
     country_text = normalize_country_match_text(country)
+    if "china" in country_text or "中国" in str(country or ""):
+        region_key = domestic_region if domestic_region in CHINA_DOMESTIC_REGIONS else "全国"
+        cities.extend(CHINA_DOMESTIC_REGIONS.get(region_key, ()))
+        cities.append("China")
+        cities.append("中国")
+        return list(dict.fromkeys(city for city in cities if city))[:14]
     for key, hints in COUNTRY_HINTS.items():
         meta = COUNTRY_SEARCH_META.get(key, {})
         aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
@@ -4787,7 +4867,7 @@ def search_serpapi(query: str, limit: int = 8, freshness_days: int | None = None
         "q": query,
         "api_key": api_key,
         "num": max(1, min(20, limit)),
-        "hl": "en",
+        "hl": "zh-cn" if meta.get("code") == "cn" else "en",
         "gl": meta["code"],
         "google_domain": meta["google_domain"],
         "location": meta["location"],
@@ -6232,7 +6312,8 @@ def research_company(params: dict[str, list[str]]) -> dict:
         else "证据不足，暂不联系"
     )
     scoring_text = official_website_text or " ".join(item.get("excerpt", "") for item in evidence)
-    is_competitor = detect_competitor(scoring_text)
+    is_china_target = country_search_meta(country).get("code") == "cn"
+    is_competitor = False if is_china_target else detect_competitor(scoring_text)
     website_score, website_score_breakdown, score_dimensions, score_tier = lead_opportunity_score(
         scoring_text,
         bool(site_pages or website),
@@ -6253,6 +6334,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
         has_phone=bool(contacts["phone_sources"]),
         has_whatsapp=bool(contacts["whatsapp_sources"]),
         has_decision_maker=bool(contacts["contact_name"] or contacts["contact_role"]),
+        allow_competitor_auto=not is_china_target,
     )
     decision = (
         "疑似同行，建议排除"
@@ -6422,13 +6504,14 @@ def search_serpapi_google_maps(country: str, query_terms: str, limit: int = 12, 
         (value[0] for key, value in CITY_COORDS.items() if key.lower() in country.lower()),
         CITY_COORDS["UAE"][0],
     )
+    meta = country_search_meta(country)
     params = {
         "engine": "google_maps",
-        "q": f"{query_terms} in {city}, {country_search_meta(country)['location']}",
+        "q": f"{query_terms} in {city}, {meta['location']}",
         "api_key": api_key,
-        "hl": "en",
-        "gl": country_search_meta(country)["code"],
-        "google_domain": country_search_meta(country)["google_domain"],
+        "hl": "zh-cn" if meta.get("code") == "cn" else "en",
+        "gl": meta["code"],
+        "google_domain": meta["google_domain"],
         "ll": f"@{CITY_COORDS.get(next((key for key in CITY_COORDS if key.lower() in country.lower()), 'UAE'))[1]},{CITY_COORDS.get(next((key for key in CITY_COORDS if key.lower() in country.lower()), 'UAE'))[2]},12z",
         "type": "search",
     }
@@ -7096,6 +7179,7 @@ def lead_opportunity_score(
     has_phone: bool = False,
     has_whatsapp: bool = False,
     has_decision_maker: bool = False,
+    allow_competitor_auto: bool = True,
 ) -> tuple[int, list[dict], dict, str]:
     lower = clean_text(f"{text} {lead_type}").lower()
     dimensions = {
@@ -7220,7 +7304,7 @@ def lead_opportunity_score(
     if re.search(r"\b(classifieds?|marketplace|individual seller|private seller)\b", lower):
         dimensions["penalty"] -= 55
         breakdown.append({"category": "penalty", "label": "交易平台或个人卖家特征", "points": -55})
-    if is_competitor or detect_competitor(lower):
+    if is_competitor or (allow_competitor_auto and detect_competitor(lower)):
         dimensions["penalty"] -= 70
         breakdown.append({"category": "penalty", "label": "中国汽车出口同行特征", "points": -70})
 
@@ -7489,6 +7573,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     target_label = target_profile["label"]
     source_mode = (params.get("sourceMode") or ["combined"])[0]
     account_scope = (params.get("accountScope") or ["both"])[0]
+    domestic_region = (params.get("domesticRegion") or [""])[0].strip()
     city_focus = (params.get("cityFocus") or [""])[0].strip()
     customer_types = (params.get("customerTypes") or [""])[0].strip()
     exclusions = (params.get("exclusions") or [""])[0].strip()
@@ -7510,8 +7595,9 @@ def discover(params: dict[str, list[str]]) -> dict:
         f"{city_focus} {keywords} {customer_types} {target_profile['query']} "
         f"official website contact contacts about profile email phone WhatsApp {exclude_query}{cutoff_query}"
     ).strip()
-    cities = discovery_cities(country, city_focus)
-    market = city_focus or country.split(" ")[0]
+    cities = discovery_cities(country, city_focus, domestic_region)
+    country_meta = country_search_meta(country)
+    market = city_focus or (domestic_region if country_meta.get("code") == "cn" and domestic_region else country.split(" ")[0])
     broad_business_query = (
         f"{market} automotive importer vehicle distributor car dealer showroom "
         f"parallel import auto trading official website contact contacts about email phone {exclude_query}{cutoff_query}"
@@ -7530,6 +7616,16 @@ def discover(params: dict[str, list[str]]) -> dict:
         f"{market} Chinese car importer electric vehicle distributor dealership "
         f"official website contact contacts about email phone {exclude_query}{cutoff_query}"
     ).strip()
+    if country_meta.get("code") == "cn":
+        broad_business_query = (
+            f"{market} 汽车经销商 新能源 汽车贸易公司 官网 联系方式 电话 邮箱 {exclude_query}{cutoff_query}"
+        ).strip()
+        intent_query = (
+            f"{market} 华为系 问界 尊界 鸿蒙智行 新能源汽车 经销商 采购 外贸 联系人 {exclude_query}{cutoff_query}"
+        ).strip()
+        china_ev_query = (
+            f"{market} 中国新能源 汽车贸易公司 出口 企业车队 高端展厅 联系方式 {exclude_query}{cutoff_query}"
+        ).strip()
     commercial_query_variants = [
         broad_business_query,
         intent_query,
@@ -8131,7 +8227,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         origin = item.get("origin", "公开网页搜索")
         source_url = item.get("source_url") or item["url"]
         source_type = item.get("source_type") or source_details(source_url, origin)[1]
-        is_competitor = detect_competitor(combined)
+        is_competitor = False if country_meta.get("code") == "cn" else detect_competitor(combined)
         business_signals, intent_signals = opportunity_signals(combined)
         business_signals = list(dict.fromkeys([
             *business_signals,
@@ -8415,6 +8511,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             has_phone=bool(phone_sources),
             has_whatsapp=bool(whatsapp_sources),
             has_decision_maker=bool(contacts["contact_name"] or contacts["contact_role"]),
+            allow_competitor_auto=country_meta.get("code") != "cn",
         )
         confidence, confidence_label = confidence_score(
             customer_website,
@@ -8684,6 +8781,89 @@ def discover(params: dict[str, list[str]]) -> dict:
     leads.sort(key=lead_sales_priority)
     leads = limit_duplicate_customer_websites(leads)
     return {"ok": True, "count": len(leads), "leads": leads, "notice": notice}
+
+
+def compact_text(value, limit: int = 2000) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    return text[:limit]
+
+
+def normalize_website_lead(payload: dict, client_ip: str = "", user_agent: str = "") -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("Invalid website lead payload")
+    company = compact_text(payload.get("name") or payload.get("company"), 160)
+    contact = compact_text(payload.get("contact"), 180)
+    country = compact_text(payload.get("country"), 180)
+    model_line = compact_text(payload.get("modelLine") or payload.get("model-line") or payload.get("target"), 120)
+    quantity_text = compact_text(payload.get("quantity"), 40)
+    message = compact_text(payload.get("message"), 2000)
+    if not company:
+        raise ValueError("Name or company is required")
+    if not contact:
+        raise ValueError("Email or WhatsApp is required")
+    if not country:
+        raise ValueError("Country or destination port is required")
+    try:
+        quantity = max(1, min(9999, int(float(quantity_text or 1))))
+    except (TypeError, ValueError):
+        quantity = 1
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    email = contact if re.search(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", contact) else ""
+    whatsapp = contact if not email else ""
+    model = "尊界 S800" if "ZUNJIE" in model_line.upper() or "尊界" in model_line else (
+        "问界 M9" if "AITO" in model_line.upper() or "问界" in model_line else model_line or "其他车型"
+    )
+    return {
+        "id": f"site-{uuid.uuid4().hex[:12]}",
+        "company": company,
+        "contact": contact,
+        "email": email,
+        "whatsapp": whatsapp,
+        "country": country,
+        "city": "",
+        "modelLine": model_line,
+        "model": model,
+        "quantity": quantity,
+        "message": message,
+        "source": "Official website",
+        "sourceUrl": "https://www.yiming-auto.com/#contact",
+        "sourceType": "Official website form",
+        "origin": "Official website",
+        "status": "new",
+        "createdAt": now,
+        "receivedAt": now,
+        "clientIp": client_ip,
+        "userAgent": compact_text(user_agent, 500),
+        "reason": f"{company} submitted a website inquiry for {model_line or model}, destination {country}, quantity {quantity}.",
+        "website": " ".join(["YIMING AUTO official website inquiry", company, country, model_line, message]).strip(),
+    }
+
+
+def save_website_lead(payload: dict, client_ip: str = "", user_agent: str = "") -> dict:
+    record = normalize_website_lead(payload, client_ip, user_agent)
+    workspace = load_workspace_state(AUTH_USERNAME)
+    state = workspace.get("state") or empty_workspace_state()
+    website_leads = state.get("websiteLeads")
+    if not isinstance(website_leads, list):
+        website_leads = []
+    duplicate_key = "|".join([
+        str(record.get("company") or "").strip().lower(),
+        str(record.get("contact") or "").strip().lower(),
+        str(record.get("country") or "").strip().lower(),
+        str(record.get("message") or "").strip().lower()[:160],
+    ])
+    for item in website_leads:
+        item_key = "|".join([
+            str(item.get("company") or "").strip().lower(),
+            str(item.get("contact") or "").strip().lower(),
+            str(item.get("country") or "").strip().lower(),
+            str(item.get("message") or "").strip().lower()[:160],
+        ])
+        if item_key == duplicate_key:
+            return {"lead": item, "duplicate": True}
+    state["websiteLeads"] = [record, *website_leads][:5000]
+    save_workspace_state(AUTH_USERNAME, state)
+    return {"lead": record, "duplicate": False}
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -9002,6 +9182,15 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if parsed.path == "/api/website-leads":
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                result = save_website_lead(payload, self.client_ip(), self.headers.get("User-Agent", ""))
+                self.send_json(201 if not result.get("duplicate") else 200, {"ok": True, **result})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if not self.require_auth(api=True):
             return

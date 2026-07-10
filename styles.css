@@ -147,6 +147,17 @@ button {
   font-weight: 800;
 }
 
+.nav button > b {
+  margin-left: auto;
+  min-width: 22px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(215, 181, 109, 0.16);
+  color: #d9b870;
+  font-size: 11px;
+  text-align: center;
+}
+
 .nav button:hover,
 .nav button.active {
   background: rgba(255, 255, 255, 0.08);
@@ -161,6 +172,33 @@ button {
   border-color: rgba(215, 181, 109, 0.3);
   background: rgba(215, 181, 109, 0.12);
   color: #d9b870;
+}
+
+.website-lead-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.website-lead-status.new {
+  background: rgba(201, 164, 93, 0.14);
+  color: #8d6b24;
+}
+
+.website-lead-status.imported {
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+}
+
+.website-lead-status.done {
+  background: rgba(15, 138, 95, 0.1);
+  color: #0f8a5f;
 }
 
 .side-note {

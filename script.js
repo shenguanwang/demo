@@ -120,6 +120,65 @@ const countries = [
   }
 ];
 
+const domesticRegions = [
+  {
+    value: "",
+    label: "不搜索国内",
+    cities: "",
+    targets: "汽车经销商、进口贸易商、企业车队"
+  },
+  {
+    value: "全国",
+    label: "全国",
+    cities: "北京 / 上海 / 广州 / 深圳 / 成都 / 杭州 / 武汉",
+    targets: "多品牌车商、汽车贸易公司、企业车队、二网经销商"
+  },
+  {
+    value: "华北",
+    label: "华北",
+    cities: "北京 / 天津 / 石家庄 / 太原 / 呼和浩特",
+    targets: "汽车集团、平行进口商、政企车队、二网经销商"
+  },
+  {
+    value: "华东",
+    label: "华东",
+    cities: "上海 / 杭州 / 南京 / 苏州 / 宁波 / 合肥 / 济南 / 福州",
+    targets: "汽车贸易公司、高端展厅、外贸公司、企业采购"
+  },
+  {
+    value: "华南",
+    label: "华南",
+    cities: "广州 / 深圳 / 佛山 / 东莞 / 南宁 / 海口",
+    targets: "外贸车商、出口公司、豪华车展厅、港口贸易商"
+  },
+  {
+    value: "华中",
+    label: "华中",
+    cities: "武汉 / 长沙 / 郑州",
+    targets: "汽车经销集团、新能源车商、企业车队"
+  },
+  {
+    value: "西南",
+    label: "西南",
+    cities: "成都 / 重庆 / 昆明 / 贵阳 / 拉萨",
+    targets: "区域经销商、车队采购、汽车贸易公司"
+  },
+  {
+    value: "西北",
+    label: "西北",
+    cities: "西安 / 兰州 / 银川 / 西宁 / 乌鲁木齐",
+    targets: "区域代理、商用采购、边贸汽车公司"
+  },
+  {
+    value: "东北",
+    label: "东北",
+    cities: "沈阳 / 大连 / 长春 / 哈尔滨",
+    targets: "经销集团、二网车商、进口车贸易公司"
+  }
+];
+
+const DEFAULT_FINDER_MODEL = "华为系新能源汽车";
+
 const salesStages = ["准备联系", "已联系", "有回复", "报价中", "谈判中", "已成交", "暂缓", "已流失"];
 
 const destinationByCountry = {
@@ -390,6 +449,7 @@ function purgeIrrelevantReviewLeads() {
 const savedState = loadSavedState();
 let reviewLeads = savedState.reviewLeads;
 let customers = savedState.customers;
+let websiteLeads = savedState.websiteLeads || [];
 let rejectedLeads = savedState.rejectedLeads;
 let quoteHistory = savedState.quotes;
 let afterSalesOrders = savedState.afterSalesOrders;
@@ -839,6 +899,7 @@ function loadSavedState() {
   const fallback = {
     reviewLeads: [],
     customers: [],
+    websiteLeads: [],
     rejectedLeads: [],
     quotes: [],
     afterSalesOrders: [],
@@ -854,6 +915,7 @@ function loadSavedState() {
     return {
       reviewLeads: limitDuplicateCustomerWebsites(filterReviewLeadsForBusinessFit(parsed.reviewLeads)),
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
+      websiteLeads: Array.isArray(parsed.websiteLeads) ? parsed.websiteLeads : [],
       rejectedLeads: Array.isArray(parsed.rejectedLeads) ? parsed.rejectedLeads : [],
       quotes: Array.isArray(parsed.quotes) ? parsed.quotes : [],
       afterSalesOrders: Array.isArray(parsed.afterSalesOrders) ? parsed.afterSalesOrders : [],
@@ -871,6 +933,7 @@ function workspaceStateSnapshot() {
   return {
     reviewLeads,
     customers,
+    websiteLeads,
     rejectedLeads,
     quotes: quoteHistory,
     afterSalesOrders,
@@ -941,6 +1004,8 @@ function mergeWorkspaceStates(remoteState, localState) {
     ),
     customers: mergeRecordLists(remoteState?.customers, localState?.customers, "customers")
       .filter((record) => !deletedKeys.has(recordIdentity(record, "customers"))),
+    websiteLeads: mergeRecordLists(remoteState?.websiteLeads, localState?.websiteLeads, "websiteLeads")
+      .filter((record) => !deletedKeys.has(recordIdentity(record, "websiteLeads"))),
     rejectedLeads: mergeRecordLists(remoteState?.rejectedLeads, localState?.rejectedLeads, "rejectedLeads")
       .filter((record) => !deletedKeys.has(recordIdentity(record, "rejectedLeads"))),
     quotes: mergeRecordLists(remoteState?.quotes, localState?.quotes, "quotes")
@@ -975,6 +1040,9 @@ function applyWorkspaceState(state, render = false) {
   customers = Array.isArray(state?.customers)
     ? state.customers.filter((record) => !deletedKeys.has(recordIdentity(record, "customers"))).map(normalizeLead)
     : [];
+  websiteLeads = Array.isArray(state?.websiteLeads)
+    ? state.websiteLeads.filter((record) => !deletedKeys.has(recordIdentity(record, "websiteLeads")))
+    : [];
   rejectedLeads = Array.isArray(state?.rejectedLeads)
     ? state.rejectedLeads.filter((record) => !deletedKeys.has(recordIdentity(record, "rejectedLeads"))).map(normalizeLead)
     : [];
@@ -989,6 +1057,7 @@ function applyWorkspaceState(state, render = false) {
     renderLeads();
     renderReview();
     renderCrm();
+    renderWebsiteLeads();
     renderFollowTasks();
     renderKpis();
     renderQuoteHistory();
@@ -1192,12 +1261,54 @@ function renderCountries() {
     `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`
   ).join("");
   if (countries.some((country) => country.name === current)) select.value = current;
+  const domesticSelect = $("#finderDomesticRegion");
+  if (domesticSelect) {
+    const domesticCurrent = domesticSelect.value;
+    domesticSelect.innerHTML = domesticRegions.map((region) =>
+      `<option value="${escapeHtml(region.value)}">${escapeHtml(region.label)}</option>`
+    ).join("");
+    domesticSelect.value = domesticRegions.some((region) => region.value === domesticCurrent) ? domesticCurrent : "";
+  }
 }
 
-function finderGoalText(countryName, model = "") {
+function selectedDomesticRegion(value = "") {
+  return domesticRegions.find((item) => item.value === value) || domesticRegions[0];
+}
+
+function selectedFinderMarket(form = $("#finderForm")) {
+  const domesticRegion = String(form?.domesticRegion?.value || "").trim();
+  if (domesticRegion) {
+    const region = selectedDomesticRegion(domesticRegion);
+    return {
+      isDomestic: true,
+      country: "China 中国",
+      domesticRegion,
+      label: `China 中国 · ${domesticRegion}`,
+      cities: region.cities,
+      targets: region.targets,
+    };
+  }
+  const countryName = String(form?.country?.value || countries[0]?.name || "UAE 阿联酋").trim();
+  const country = countries.find((item) => item.name === countryName) || countries[0];
+  return {
+    isDomestic: false,
+    country: country.name,
+    domesticRegion: "",
+    label: country.name,
+    cities: country.cities,
+    targets: country.targets,
+  };
+}
+
+function finderGoalText(countryName, model = "", domesticRegion = "") {
+  if (domesticRegion) {
+    const region = selectedDomesticRegion(domesticRegion);
+    const city = (region.cities || "全国").split(" / ")[0];
+    return `寻找中国${domesticRegion === "全国" ? "" : domesticRegion}${city ? `（${city}及周边）` : ""}的${region.targets}，重点筛选中国新能源、华为系车型、联系方式完整且汽车相关的真实客户。`;
+  }
   const country = countries.find((item) => item.name === countryName) || countries[0];
   const city = country.cities.split(" / ")[0];
-  const selectedModel = String(model || $("#finderForm")?.model?.value || "问界 M9").trim();
+  const selectedModel = String(model || $("#finderForm")?.model?.value || DEFAULT_FINDER_MODEL).trim();
   const modelText = selectedModel ? `，适合优先推荐${selectedModel}` : "";
   return `寻找${city}及周边的${country.targets}，适合销售华为系新能源汽车${modelText}。`;
 }
@@ -1205,7 +1316,7 @@ function finderGoalText(countryName, model = "") {
 function syncFinderGoalToSelection() {
   const form = $("#finderForm");
   if (!form) return;
-  form.goal.value = finderGoalText(form.country.value, form.model.value);
+  form.goal.value = finderGoalText(form.country.value, form.model.value, form.domesticRegion?.value || "");
   updateFinderKeywordsFromForm();
   updateSocialProspectingQueries();
 }
@@ -1214,6 +1325,8 @@ function chooseMarket(countryName) {
   const country = countries.find((item) => item.name === countryName);
   if (!country) return;
   $("#finderCountry").value = country.name;
+  const domesticSelect = $("#finderDomesticRegion");
+  if (domesticSelect) domesticSelect.value = "";
   syncFinderGoalToSelection();
   showSection("lead-finder");
 }
@@ -2585,6 +2698,109 @@ function deleteReviewLeads(ids) {
   refreshAllLeadViews();
 }
 
+function websiteLeadStatusLabel(status) {
+  return {
+    new: "新提交",
+    imported: "已导入审核",
+    done: "已处理"
+  }[status] || "新提交";
+}
+
+function websiteLeadModelLabel(lead) {
+  return lead.modelLine || lead.model || "未指定车型";
+}
+
+function websiteLeadToReviewLead(lead) {
+  const text = [
+    lead.company,
+    lead.country,
+    websiteLeadModelLabel(lead),
+    lead.quantity ? `数量 ${lead.quantity}` : "",
+    lead.message,
+    lead.contact
+  ].filter(Boolean).join(" ");
+  return normalizeLead({
+    id: `review-${lead.id || Date.now()}`,
+    company: lead.company || "官网询盘客户",
+    country: lead.country || "",
+    city: "",
+    type: "Official website inquiry",
+    source: lead.sourceUrl || "https://www.yiming-auto.com/#contact",
+    origin: "Official website",
+    sourceType: "Official website form",
+    sourceTitle: `${lead.company || "Website inquiry"} · ${websiteLeadModelLabel(lead)}`,
+    sourceUrl: lead.sourceUrl || "https://www.yiming-auto.com/#contact",
+    sourceExcerpt: lead.message || text,
+    evidenceSources: [{
+      title: "YIMING AUTO official website form",
+      url: lead.sourceUrl || "https://www.yiming-auto.com/#contact",
+      excerpt: text,
+      sourceName: "Official website",
+      sourceType: "Inbound inquiry"
+    }],
+    email: lead.email || "",
+    whatsapp: lead.whatsapp || "",
+    model: lead.model || websiteLeadModelLabel(lead),
+    website: text,
+    reason: `官网主动询盘：${lead.country || "未填写地区"}，${websiteLeadModelLabel(lead)}，预计 ${lead.quantity || 1} 台。`,
+    next: "先确认国家、车型、数量、配置和交付时间，再生成开发信或报价。",
+    createdAt: lead.createdAt || lead.receivedAt || new Date().toISOString(),
+    websiteLeadId: lead.id || ""
+  });
+}
+
+function renderWebsiteLeads() {
+  const count = $("#websiteLeadCount");
+  if (count) count.textContent = websiteLeads.filter((lead) => lead.status !== "done").length;
+  const tbody = $("#websiteLeadRows");
+  if (!tbody) return;
+  tbody.innerHTML = websiteLeads.length ? websiteLeads.map((lead, index) => `
+    <tr>
+      <td><strong>${escapeHtml(lead.company || "未填写")}</strong><br><span>${escapeHtml(lead.contact || lead.email || lead.whatsapp || "无联系方式")}</span></td>
+      <td>${escapeHtml(lead.country || "-")}</td>
+      <td>${escapeHtml(websiteLeadModelLabel(lead))}<br><span>${escapeHtml(String(lead.quantity || 1))} 台</span></td>
+      <td>${escapeHtml(lead.message || "-")}</td>
+      <td><span class="website-lead-status ${escapeHtml(lead.status || "new")}">${escapeHtml(websiteLeadStatusLabel(lead.status))}</span><br><small>${escapeHtml(formatJobTime(lead.receivedAt || lead.createdAt))}</small></td>
+      <td>
+        <div class="crm-actions">
+          <button type="button" data-website-lead-action="import" data-index="${index}">导入审核</button>
+          <button type="button" data-website-lead-action="done" data-index="${index}">标记处理</button>
+          <button type="button" data-website-lead-action="delete" data-index="${index}">删除</button>
+        </div>
+      </td>
+    </tr>
+  `).join("") : `<tr><td colspan="6">暂无独立站提交线索。客户在官网表单提交后会出现在这里。</td></tr>`;
+}
+
+function importWebsiteLead(index) {
+  const lead = websiteLeads[index];
+  if (!lead) return;
+  const reviewLead = websiteLeadToReviewLead(lead);
+  const exists = [...reviewLeads, ...customers].some((item) =>
+    String(item.websiteLeadId || item.id || "") === String(lead.id || "")
+  );
+  if (!exists) reviewLeads.unshift(reviewLead);
+  websiteLeads[index] = { ...lead, status: "imported", importedAt: new Date().toISOString() };
+  selectedReviewLeadId = `pending:${reviewLead.id}`;
+  refreshAllLeadViews();
+  showSection("review");
+}
+
+function updateWebsiteLeadStatus(index, status) {
+  const lead = websiteLeads[index];
+  if (!lead) return;
+  websiteLeads[index] = { ...lead, status, updatedAt: new Date().toISOString() };
+  refreshAllLeadViews();
+}
+
+function deleteWebsiteLead(index) {
+  const lead = websiteLeads[index];
+  if (!lead) return;
+  rememberDeletedRecord(lead, "websiteLeads");
+  websiteLeads.splice(index, 1);
+  refreshAllLeadViews();
+}
+
 function renderCrm() {
   const today = new Date().toISOString().slice(0, 10);
   const activeCustomers = customers.filter((lead) => !["已成交", "已流失"].includes(lead.stage));
@@ -2774,6 +2990,7 @@ function refreshAllLeadViews() {
   renderLeads();
   renderReview();
   renderCrm();
+  renderWebsiteLeads();
   renderFollowTasks();
   renderKpis();
   renderQuoteHistory();
@@ -3129,10 +3346,17 @@ function uniqueKeywords(words) {
 }
 
 function countrySearchName(country) {
-  return countryKey(country || "UAE");
+  const text = String(country || "UAE");
+  if (/China|中国/i.test(text)) return "China";
+  return countryKey(text);
 }
 
-function countrySearchCities(country) {
+function countrySearchCities(country, options = {}) {
+  if (/China|中国/i.test(String(country || ""))) {
+    const region = selectedDomesticRegion(options.domesticRegion || "");
+    const fromRegion = (region.cities || domesticRegions[1].cities).split("/").map((city) => city.trim()).filter(Boolean);
+    return uniqueKeywords(fromRegion).slice(0, region.value === "全国" ? 7 : 6);
+  }
   const key = countrySearchName(country);
   const configured = countries.find((item) => countryKey(item.name) === key)?.cities || "";
   const fallback = {
@@ -3147,6 +3371,15 @@ function countrySearchCities(country) {
   }[key] || [key];
   const fromConfig = configured.split("/").map((city) => city.trim()).filter(Boolean);
   return uniqueKeywords([...fromConfig, ...fallback]).slice(0, 4);
+}
+
+function domesticSearchTerms(goal) {
+  const text = String(goal || "");
+  if (/租赁|出租|车队|fleet|rental|chauffeur/i.test(text)) return ["汽车租赁公司", "企业车队采购", "商务接待车队", "新能源车队"];
+  if (/政府|项目|招标|government|tender/i.test(text)) return ["公务车采购", "政府用车项目", "新能源汽车采购", "招标"];
+  if (/企业|采购|公司用车|corporate|procurement/i.test(text)) return ["企业用车采购", "公司车辆采购", "商务车队", "批量采购"];
+  if (/平行进口|进口|外贸|出口|import|parallel/i.test(text)) return ["汽车外贸公司", "新能源汽车出口", "平行进口车商", "汽车贸易公司"];
+  return ["汽车经销商", "新能源车商", "多品牌展厅", "汽车贸易公司"];
 }
 
 function intentSearchTerms(goal) {
@@ -3173,12 +3406,58 @@ function modelSearchTerms(model) {
 
 function generateSmartKeywords(goal, country, model, options = {}) {
   const countryName = countrySearchName(country);
-  const cities = countrySearchCities(country);
+  const cities = countrySearchCities(country, options);
   const primaryCity = String(options.cityFocus || "").trim() || cities[0] || countryName;
   const modelTerms = modelSearchTerms(model);
   const modelName = modelTerms[0];
   const intentTerms = intentSearchTerms(goal);
   const depth = String(options.searchDepth || "standard");
+  if (countryName === "China") {
+    const region = selectedDomesticRegion(options.domesticRegion || "");
+    const domesticRegion = region.value && region.value !== "全国" ? region.value : "中国";
+    const domesticTerms = domesticSearchTerms(goal);
+    const sourceSites = [
+      "site:baidu.com",
+      "site:map.baidu.com",
+      "site:amap.com",
+      "site:qcc.com",
+      "site:tianyancha.com",
+      "site:aiqicha.baidu.com",
+      "site:1688.com",
+      "site:dealer.autohome.com.cn",
+      "site:dealer.yiche.com",
+      "site:dongchedi.com"
+    ];
+    const core = [
+      `${domesticRegion} 汽车经销商 新能源 联系方式`,
+      `${domesticRegion} 华为系 汽车 经销商 联系人`,
+      `${domesticRegion} 鸿蒙智行 问界 尊界 经销商`,
+      `${domesticRegion} 中国新能源 汽车贸易公司 电话 邮箱`,
+      `${domesticRegion} 汽车外贸公司 新能源车 出口 联系方式`,
+      `${domesticRegion} 多品牌汽车展厅 新能源 SUV`,
+      `${domesticRegion} 企业车队 新能源汽车 采购`
+    ];
+    const cityTerms = cities.flatMap((city) => [
+      `${city} 汽车经销商 新能源 联系方式`,
+      `${city} 华为系 问界 尊界 汽车贸易`,
+      `${city} 汽车外贸公司 新能源车 出口`
+    ]);
+    const intentQueries = domesticTerms.flatMap((term) => [
+      `${primaryCity} ${term} 联系人 电话`,
+      `${domesticRegion} ${term} 官网`
+    ]);
+    const sourceQueries = sourceSites.flatMap((site) =>
+      domesticTerms.slice(0, 2).map((term) => `${site} ${primaryCity} ${term} 联系方式`)
+    );
+    const deepQueries = depth === "deep" ? [
+      `${domesticRegion} 汽车集团 新能源 经销商 邮箱`,
+      `${domesticRegion} 二网车商 新能源车 联系电话`,
+      `${primaryCity} 高端汽车展厅 华为系 新能源`,
+      `${domesticRegion} 汽车供应链 外贸 新能源车 出口`,
+      `${primaryCity} 企业采购 新能源 SUV 车队`
+    ] : [];
+    return uniqueKeywords([...core, ...cityTerms, ...intentQueries, ...sourceQueries, ...deepQueries]).slice(0, depth === "deep" ? 28 : 18);
+  }
   const core = [
     `${primaryCity} automotive importer vehicle distributor`,
     `${primaryCity} car dealer showroom auto trading`,
@@ -3236,12 +3515,26 @@ function generateKeywords(goal, country, model, options = {}) {
   ];
 }
 
+function normalizeFinderPayload(raw = {}, form = $("#finderForm")) {
+  const market = selectedFinderMarket(form);
+  const model = String(raw.model || DEFAULT_FINDER_MODEL).trim() || DEFAULT_FINDER_MODEL;
+  return {
+    ...raw,
+    country: market.country,
+    marketLabel: market.label,
+    domesticRegion: market.domesticRegion,
+    model,
+    cityFocus: raw.cityFocus || "",
+  };
+}
+
 function updateFinderKeywordsFromForm() {
   const form = $("#finderForm");
   if (!form || !$("#keywords")) return [];
-  const data = Object.fromEntries(new FormData(form).entries());
+  const data = normalizeFinderPayload(Object.fromEntries(new FormData(form).entries()), form);
   const words = generateKeywords(data.goal, data.country, data.model, {
-    searchDepth: data.searchDepth
+    searchDepth: data.searchDepth,
+    domesticRegion: data.domesticRegion
   });
   renderKeywords(words);
   return words;
@@ -3250,9 +3543,9 @@ function updateFinderKeywordsFromForm() {
 function updateSocialProspectingQueries() {
   const form = $("#finderForm");
   if (!form || !$("#socialSearchQuery")) return;
-  const country = countries.find((item) => item.name === form.country.value);
-  const place = country?.cities?.split(" / ")[0] || String(form.country.value || "UAE").split(" ")[0];
-  const countryName = String(form.country.value || "UAE").split(" ")[0];
+  const market = selectedFinderMarket(form);
+  const place = (market.cities || market.country).split(" / ")[0];
+  const countryName = market.isDomestic ? "China" : String(form.country.value || "UAE").split(" ")[0];
   const goal = String(form.goal.value || "");
   let facebookQueries = [
     `${place} car dealer`,
@@ -3651,6 +3944,17 @@ function openOutlookDraft(data = Object.fromEntries(new FormData($("#emailForm")
   if (!text) {
     if (status) status.textContent = "请先生成英文开发信。";
     return;
+  }
+  if (market.isDomestic) {
+    facebookQueries = [
+      `${place} 汽车经销商`,
+      `${place} 新能源车商`,
+      `${place} 华为系 汽车`,
+      `${market.domesticRegion} 汽车贸易公司`
+    ];
+    instagramTags = [`${place}汽车`, `${place}新能源车`, `华为系汽车`, `汽车贸易`];
+    businessTerms = ["汽车经销商", "新能源车商", "汽车贸易公司", "华为系汽车"];
+    roleTerms = ["总经理", "采购负责人", "销售总监", "外贸经理"];
   }
   const draft = emailDraftFromGeneratedText(text, data);
   window.location.href = outlookMailtoUrl(draft);
@@ -4349,13 +4653,15 @@ function renderDiscoverySchedules() {
 
 function currentDiscoveryPayload() {
   const form = $("#finderForm");
-  const data = Object.fromEntries(new FormData(form).entries());
+  const data = normalizeFinderPayload(Object.fromEntries(new FormData(form).entries()), form);
   const words = generateKeywords(data.goal, data.country, data.model, {
-    searchDepth: data.searchDepth
+    searchDepth: data.searchDepth,
+    domesticRegion: data.domesticRegion
   });
   return {
     goal: data.goal,
     country: data.country,
+    domesticRegion: data.domesticRegion,
     model: data.model,
     sourceMode: data.sourceMode,
     accountScope: data.accountScope,
@@ -4651,6 +4957,7 @@ async function runCloudDiscovery(data, words, onProgress) {
     body: JSON.stringify({
       goal: data.goal,
       country: data.country,
+      domesticRegion: data.domesticRegion,
       model: data.model,
       sourceMode: data.sourceMode,
       accountScope: data.accountScope,
@@ -4742,6 +5049,15 @@ async function loadDiscoverySourceStatus() {
 }
 
 function bindForms() {
+  $("#websiteLeadRows")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-website-lead-action]");
+    if (!button) return;
+    const index = Number(button.dataset.index);
+    if (button.dataset.websiteLeadAction === "import") importWebsiteLead(index);
+    if (button.dataset.websiteLeadAction === "done") updateWebsiteLeadStatus(index, "done");
+    if (button.dataset.websiteLeadAction === "delete") deleteWebsiteLead(index);
+  });
+
   $("#finderHistoryPrev")?.addEventListener("click", () => {
     finderHistoryPage = Math.max(1, finderHistoryPage - 1);
     renderDiscoveryHistory();
@@ -4852,9 +5168,10 @@ function bindForms() {
     }, 1500);
     discoveryJobPage = 1;
     finderHistoryPage = 1;
-    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const data = normalizeFinderPayload(Object.fromEntries(new FormData(event.currentTarget).entries()), event.currentTarget);
     const words = generateKeywords(data.goal, data.country, data.model, {
-      searchDepth: data.searchDepth
+      searchDepth: data.searchDepth,
+      domesticRegion: data.domesticRegion
     });
     renderKeywords(words);
     const searchProgress = startFinderSearchProgress();
@@ -4976,7 +5293,11 @@ function bindForms() {
     updateFinderKeywordsFromForm();
     updateSocialProspectingQueries();
   });
-  $("#finderForm").country?.addEventListener("change", syncFinderGoalToSelection);
+  $("#finderForm").country?.addEventListener("change", () => {
+    if ($("#finderForm").domesticRegion) $("#finderForm").domesticRegion.value = "";
+    syncFinderGoalToSelection();
+  });
+  $("#finderForm").domesticRegion?.addEventListener("change", syncFinderGoalToSelection);
   $("#finderForm").model?.addEventListener("change", syncFinderGoalToSelection);
   $(".social-search-box").addEventListener("click", (event) => {
     const link = event.target.closest("[data-social-platform]");
@@ -6117,6 +6438,7 @@ async function init() {
       console.error(`Workbench module failed: ${name}`, error);
     }
   });
+  renderWebsiteLeads();
   hydrateCloudState(true).catch((error) => {
     setCloudSyncStatus("云端不可用，当前使用本地副本", "error");
     console.error("Cloud workspace load failed:", error);
