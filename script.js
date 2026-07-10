@@ -684,12 +684,16 @@ function exportCustomersCsv() {
     ["系统原始评分", (lead) => lead.baseScore],
     ["客户等级", (lead) => lead.scoreTier],
     ["人工校准", (lead) => lead.manualScoreAdjustment || 0],
-    ["进出口资质分", (lead) => lead.scoreDimensions?.tradeQualification || 0],
-    ["客户匹配分", (lead) => lead.scoreDimensions?.customerFit || 0],
-    ["采购意向分", (lead) => lead.scoreDimensions?.purchaseIntent || 0],
-    ["经营能力分", (lead) => lead.scoreDimensions?.businessCapacity || 0],
-    ["车型匹配分", (lead) => lead.scoreDimensions?.modelFit || 0],
-    ["可触达性分", (lead) => lead.scoreDimensions?.contactability || 0],
+    ["汽车业务匹配分", (lead) => lead.scoreDimensions?.automotiveFit || 0],
+    ["目标地区匹配分", (lead) => lead.scoreDimensions?.countryFit || 0],
+    ["中国新能源分", (lead) => lead.scoreDimensions?.chineseNev || 0],
+    ["华为系列分", (lead) => lead.scoreDimensions?.huaweiFit || 0],
+    ["联系方式完整分", (lead) => lead.scoreDimensions?.contactCompleteness || 0],
+    ["官网可信度分", (lead) => lead.scoreDimensions?.websiteTrust || 0],
+    ["进口分销能力分", (lead) => lead.scoreDimensions?.tradeQualification || 0],
+    ["经营活跃度分", (lead) => lead.scoreDimensions?.businessCapacity || 0],
+    ["决策人信息分", (lead) => lead.scoreDimensions?.decisionMaker || 0],
+    ["采购合作意向分", (lead) => lead.scoreDimensions?.purchaseIntent || 0],
     ["风险扣分", (lead) => lead.scoreDimensions?.penalty || 0],
     ["信息可信度", (lead) => `${lead.confidenceLabel || ""} ${lead.confidence || 0}%`.trim()],
     ["推荐车型", (lead) => (lead.recommendedModels || [lead.model]).join("、")],
@@ -1104,31 +1108,28 @@ function saveState() {
 
 function evaluateLeadScore(text, options = {}) {
   const value = String(text || "").toLowerCase();
+  const contactCount = [options.email, options.phone, options.whatsapp].filter(Boolean).length;
   const dimensions = {
+    automotiveFit: /vehicle importer|car importer|automotive importer|parallel import|car distributor|vehicle distributor|authorized dealer|dealership|car dealer|auto dealer|car showroom|vehicle showroom|auto trading|automotive trading|vehicle sales|fleet sales|汽车进口|汽车经销|汽车展厅|汽车贸易|汽车销售|车队采购/.test(value)
+      ? 15
+      : /automotive|vehicles|cars|motors|new cars|used cars|汽车|车辆|新车|二手车/.test(value) ? 10 : 0,
+    countryFit: options.countryMatch ? 15 : 0,
+    chineseNev: /chinese ev|china ev|chinese electric vehicle|chinese new energy vehicle|byd|geely|zeekr|chery|jetour|gac aion|nio|xpeng|li auto|leapmotor|hongqi|changan|deepal|voyah|avatr|denza|中国新能源|中国电动车|中国电动汽车|中国新能源汽车|比亚迪|吉利|极氪|奇瑞|捷途|广汽埃安|蔚来|小鹏|理想|零跑|红旗|长安|深蓝|岚图|阿维塔|腾势/.test(value) ? 12 : 0,
+    huaweiFit: /huawei|harmonyos|harmony intelligent mobility|\bhima\b|\baito\b|luxeed|stelato|maextro|问界|智界|享界|尊界|鸿蒙智行|华为汽车/.test(value) ? 12 : 0,
+    contactCompleteness: contactCount >= 3 ? 12 : contactCount === 2 ? 8 : contactCount === 1 || options.hasContact ? 4 : 0,
+    websiteTrust: options.hasOfficialWebsite ? 10 : 0,
     tradeQualification: /import.{0,8}(license|licence|permit)|export.{0,8}(license|licence|permit)|licensed importer|customs (registration|registered|code)|trade license|commercial registration|进出口资质|进出口许可证|进口许可证|出口许可证|海关注册|海关备案|报关资质|贸易许可证|授权进口商/.test(value)
       ? 10
       : /vehicle importer|car importer|parallel import|import and export|汽车进口|平行进口/.test(value) ? 6 : 0,
-    customerFit: /import|distributor|进口|分销|平行进口/.test(value)
-      ? 27
-      : /dealer|showroom|trading|经销|展厅|贸易/.test(value)
-        ? 22
-        : /fleet|rental|procurement|车队|租赁|采购/.test(value)
-          ? 20
-          : /automotive|vehicle|cars|汽车/.test(value) ? 12 : 0,
     purchaseIntent: /rfq|looking to buy|supplier wanted|dealer wanted|bulk order|询价|求购|招募经销商|批量采购/.test(value)
-      ? 20
-      : /procurement|wholesale|fleet purchase|采购|批发|车队/.test(value) ? 15 : 0,
+      ? 4
+      : /procurement|wholesale|fleet purchase|采购|批发|车队/.test(value) ? 3 : 0,
     businessCapacity: /branches|locations|regional network|集团|分店|区域网络/.test(value)
-      ? 13
+      ? 5
       : /multi-brand|brand portfolio|多品牌/.test(value)
-        ? 11
-        : /luxury|premium|supercar|豪华|高端/.test(value) ? 7 : 0,
-    modelFit: /electric|hybrid|new energy|chinese car|新能源|电动|混动|中国汽车/.test(value)
-      ? 8
-      : options.model ? 5 : 0,
-    contactability: /owner|founder|director|procurement manager|老板|创始人|采购经理/.test(value)
-      ? 7
-      : /@|whatsapp|phone|contact|邮箱|电话|联系/.test(value) ? 6 : 0,
+        ? 4
+        : /luxury|premium|supercar|豪华|高端/.test(value) ? 3 : 0,
+    decisionMaker: options.contactName || options.contactRole || /owner|founder|director|general manager|procurement manager|purchasing manager|老板|创始人|总经理|采购经理/.test(value) ? 4 : 0,
     penalty: 0
   };
   if (/repair|workshop|spare parts|car wash|detailing|维修|配件|洗车|美容/.test(value) &&
@@ -1846,12 +1847,25 @@ function renderReview() {
       <div class="score-breakdown">
         <span>评分依据${lead.manualScoreAdjustment ? ` · 人工校准 ${lead.manualScoreAdjustment > 0 ? "+" : ""}${escapeHtml(lead.manualScoreAdjustment)}` : ""}</span>
         <div class="score-dimensions">
-          <span>进出口资质 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/10</strong></span>
-          <span>客户匹配 <strong>${escapeHtml(lead.scoreDimensions?.customerFit || 0)}/27</strong></span>
-          <span>采购意向 <strong>${escapeHtml(lead.scoreDimensions?.purchaseIntent || 0)}/20</strong></span>
-          <span>经营能力 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/14</strong></span>
-          <span>车型匹配 <strong>${escapeHtml(lead.scoreDimensions?.modelFit || 0)}/12</strong></span>
-          <span>可触达性 <strong>${escapeHtml(lead.scoreDimensions?.contactability || 0)}/7</strong></span>
+          ${Number(lead.scoreModelVersion || 0) >= 8 ? `
+            <span>汽车业务 <strong>${escapeHtml(lead.scoreDimensions?.automotiveFit || 0)}/15</strong></span>
+            <span>地区匹配 <strong>${escapeHtml(lead.scoreDimensions?.countryFit || 0)}/15</strong></span>
+            <span>中国新能源 <strong>${escapeHtml(lead.scoreDimensions?.chineseNev || 0)}/12</strong></span>
+            <span>华为系列 <strong>${escapeHtml(lead.scoreDimensions?.huaweiFit || 0)}/12</strong></span>
+            <span>联系方式 <strong>${escapeHtml(lead.scoreDimensions?.contactCompleteness || 0)}/12</strong></span>
+            <span>官网可信 <strong>${escapeHtml(lead.scoreDimensions?.websiteTrust || 0)}/10</strong></span>
+            <span>进口分销 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/10</strong></span>
+            <span>经营活跃 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/6</strong></span>
+            <span>决策人 <strong>${escapeHtml(lead.scoreDimensions?.decisionMaker || 0)}/4</strong></span>
+            <span>采购意向 <strong>${escapeHtml(lead.scoreDimensions?.purchaseIntent || 0)}/4</strong></span>
+          ` : `
+            <span>进出口资质 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/10</strong></span>
+            <span>客户匹配 <strong>${escapeHtml(lead.scoreDimensions?.customerFit || 0)}/27</strong></span>
+            <span>采购意向 <strong>${escapeHtml(lead.scoreDimensions?.purchaseIntent || 0)}/20</strong></span>
+            <span>经营能力 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/14</strong></span>
+            <span>车型匹配 <strong>${escapeHtml(lead.scoreDimensions?.modelFit || 0)}/12</strong></span>
+            <span>可触达性 <strong>${escapeHtml(lead.scoreDimensions?.contactability || 0)}/7</strong></span>
+          `}
           ${Number(lead.scoreDimensions?.penalty || 0) < 0
             ? `<span class="penalty">风险扣分 <strong>${escapeHtml(lead.scoreDimensions.penalty)}</strong></span>`
             : ""}
@@ -2772,7 +2786,16 @@ function normalizeLead(raw) {
   const website = raw.website || raw.reason || `${raw.company || "Unknown"} ${raw.type || ""}`;
   const fallbackEvaluation = evaluateLeadScore(
     `${raw.company} ${raw.type} ${raw.country} ${website}`,
-    { model: raw.model }
+    {
+      model: raw.model,
+      email: raw.email,
+      phone: raw.phone,
+      whatsapp: raw.whatsapp,
+      hasContact: Boolean(raw.email || raw.phone || raw.whatsapp),
+      hasOfficialWebsite: Boolean(raw.customerWebsite),
+      contactName: raw.contactName,
+      contactRole: raw.contactRole
+    }
   );
   const scoreModelVersion = Number(raw.scoreModelVersion || 0);
   const baseScore = scoreModelVersion >= 6
@@ -2786,12 +2809,16 @@ function normalizeLead(raw) {
     .map(([category, points]) => ({
       category,
       label: {
-        tradeQualification: "进出口资质",
-        customerFit: "客户类型匹配",
-        purchaseIntent: "采购意向信号",
-        businessCapacity: "经营能力信号",
-        modelFit: "目标车型匹配",
-        contactability: "公开可触达性",
+        automotiveFit: "汽车业务匹配",
+        countryFit: "目标地区匹配",
+        chineseNev: "中国新能源相关",
+        huaweiFit: "华为系列相关",
+        contactCompleteness: "联系方式完整",
+        websiteTrust: "官网可信度",
+        tradeQualification: "进口分销能力",
+        businessCapacity: "经营活跃度",
+        decisionMaker: "决策人信息",
+        purchaseIntent: "采购合作意向",
         penalty: "风险扣分"
       }[category],
       points
@@ -2881,7 +2908,7 @@ function normalizeLead(raw) {
     googleReviews: Number(raw.googleReviews || 0),
     businessStatus: raw.businessStatus || "",
     baseScore,
-    scoreModelVersion: 7,
+    scoreModelVersion: scoreModelVersion || 8,
     manualScoreAdjustment,
     scoreTier,
     scoreDimensions: scoreModelVersion >= 6 && raw.scoreDimensions
@@ -2892,7 +2919,7 @@ function normalizeLead(raw) {
       : fallbackBreakdown,
     scoreBasis: scoreModelVersion >= 6 && raw.scoreBasis
       ? raw.scoreBasis
-      : "90分机会模型：进出口资质10、客户匹配27、采购意向20、经营能力14、车型匹配12、可触达性7",
+      : "100分线索模型：汽车业务15、地区匹配15、中国新能源12、华为系12、联系方式12、官网10、进口分销10、经营活跃6、决策人4、采购意向4",
     model: raw.model || "问界 M9",
     createdAt: raw.createdAt || raw.importedAt || raw.discoveredAt || new Date().toISOString(),
     score,
