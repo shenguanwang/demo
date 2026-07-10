@@ -1270,6 +1270,7 @@ function renderCountries() {
     ).join("");
     domesticSelect.value = domesticRegions.some((region) => region.value === domesticCurrent) ? domesticCurrent : "";
   }
+  updateFinderMarketControls();
 }
 
 function selectedDomesticRegion(value = "") {
@@ -1301,6 +1302,29 @@ function selectedFinderMarket(form = $("#finderForm")) {
   };
 }
 
+function updateFinderMarketControls() {
+  const form = $("#finderForm");
+  if (!form) return;
+  const domesticSelected = Boolean(String(form.domesticRegion?.value || "").trim());
+  if (form.country) {
+    form.country.disabled = domesticSelected;
+    form.country.title = domesticSelected ? "已选择国内区域，国外目标国家不参与本次搜索" : "";
+  }
+  if (form.sourceMode) {
+    const combinedOption = [...form.sourceMode.options].find((option) => option.value === "combined");
+    if (domesticSelected) {
+      if (combinedOption) combinedOption.textContent = "综合搜索（国内平台 + 官网）";
+      form.sourceMode.value = "combined";
+      form.sourceMode.disabled = true;
+      form.sourceMode.title = "国内线索统一使用综合搜索";
+    } else {
+      if (combinedOption) combinedOption.textContent = "综合搜索（地图 + 官网）";
+      form.sourceMode.disabled = false;
+      form.sourceMode.title = "";
+    }
+  }
+}
+
 function finderGoalText(countryName, model = "", domesticRegion = "") {
   if (domesticRegion) {
     const region = selectedDomesticRegion(domesticRegion);
@@ -1317,6 +1341,7 @@ function finderGoalText(countryName, model = "", domesticRegion = "") {
 function syncFinderGoalToSelection() {
   const form = $("#finderForm");
   if (!form) return;
+  updateFinderMarketControls();
   form.goal.value = finderGoalText(form.country.value, form.model.value, form.domesticRegion?.value || "");
   updateFinderKeywordsFromForm();
   updateSocialProspectingQueries();
@@ -3525,6 +3550,7 @@ function normalizeFinderPayload(raw = {}, form = $("#finderForm")) {
     marketLabel: market.label,
     domesticRegion: market.domesticRegion,
     model,
+    sourceMode: market.isDomestic ? "combined" : (raw.sourceMode || "combined"),
     cityFocus: raw.cityFocus || "",
   };
 }
@@ -5313,6 +5339,7 @@ function bindForms() {
     updateSocialProspectingQueries();
   });
   $("#finderForm").addEventListener("change", () => {
+    updateFinderMarketControls();
     updateFinderKeywordsFromForm();
     updateSocialProspectingQueries();
   });
