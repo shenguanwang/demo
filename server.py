@@ -7770,6 +7770,11 @@ def discover(params: dict[str, list[str]]) -> dict:
             try:
                 for item in web_results:
                     origin, source_type = source_details(item["url"])
+                    if is_china_discovery and source_mode in ("all", "combined", "dealer") and origin in {
+                        "YouTube", "Facebook", "Instagram", "TikTok", "LinkedIn",
+                        "Telegram", "X / Twitter", "Threads", "Pinterest", "Reddit", "VK",
+                    }:
+                        continue
                     item["origin"] = origin
                     item["source_type"] = source_type
                     item["source_url"] = item["url"]
@@ -7831,7 +7836,8 @@ def discover(params: dict[str, list[str]]) -> dict:
         if source_mode in ("all", "social", "combined")
         else [source_mode] if source_mode in platform_queries else []
     )
-    if is_china_discovery and source_mode == "combined":
+    social_source_modes = {"social", *platform_queries.keys()}
+    if is_china_discovery and source_mode not in social_source_modes:
         selected_platforms = []
     platform_queries.update({
         "instagram": ("instagram.com", "Instagram", "Instagram 公开主页或内容"),
@@ -7856,7 +7862,9 @@ def discover(params: dict[str, list[str]]) -> dict:
         "officialWebsiteProfiles": 0,
     }
     reverse_platforms = set(selected_platforms)
-    if source_mode in ("all", "combined", "social", "youtube"):
+    if source_mode in ("all", "combined", "social", "youtube") and (
+        not is_china_discovery or source_mode in ("social", "youtube")
+    ):
         reverse_platforms.add("youtube")
     if reverse_platforms:
         website_social_results = social_accounts_from_business_websites(
@@ -8007,7 +8015,9 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["account_type"],
             )
             raw_results.append(item)
-    if source_mode in ("all", "combined", "youtube", "social"):
+    if source_mode in ("all", "combined", "youtube", "social") and (
+        not is_china_discovery or source_mode in ("social", "youtube")
+    ):
         youtube_searches = []
         city = next(
             (cities[0] for key, cities in COUNTRY_HINTS.items() if key.lower() in country.lower()),
