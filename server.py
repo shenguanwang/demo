@@ -6113,6 +6113,27 @@ def audit_customer_website(website: str) -> dict:
     return result
 
 
+def official_contact_entry(pages: list[dict]) -> dict:
+    contact_words = (
+        "contact", "contact-us", "contacts", "inquiry", "enquiry", "request",
+        "quote", "get-a-quote", "callback", "appointment", "book", "location",
+        "showroom", "sales", "support", "whatsapp", "tel:", "mailto:",
+        "联系我们", "联系", "询价", "销售", "展厅",
+    )
+    for page in pages or []:
+        url = normalize_public_url(str(page.get("url") or ""))
+        html_text = str(page.get("html") or "")
+        visible_text = clean_text(html_text or str(page.get("text") or ""))
+        path = safe_urlparse(url).path.lower()
+        haystack = f"{url} {path} {visible_text[:5000]}".lower()
+        if any(word.lower() in haystack for word in contact_words):
+            return {
+                "url": url,
+                "excerpt": visible_text[:700],
+            }
+    return {}
+
+
 def company_domain_candidates(company: str) -> list[str]:
     stop_words = {
         "auto", "autos", "car", "cars", "motor", "motors", "group", "llc",
@@ -8636,6 +8657,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             continue
         official_contact_url = ""
         official_contact_excerpt = ""
+        official_contact_entry_url = ""
+        official_contact_entry_excerpt = ""
         if item.get("google_official_pages") and any(contacts.get(key) for key in ("email", "phone", "whatsapp")):
             first_official_page = (item.get("google_official_pages") or [{}])[0]
             official_contact_url = first_official_page.get("url", "") or customer_website
@@ -8653,6 +8676,10 @@ def discover(params: dict[str, list[str]]) -> dict:
                     official_contact_excerpt = clean_text(official_page.get("html", ""))[:700]
                 if all(contacts.get(key) for key in ("email", "phone", "whatsapp")):
                     break
+        if customer_website and target_type != "individual" and not any(contacts.get(key) for key in ("email", "phone", "whatsapp")):
+            contact_entry = official_contact_entry(website_audit.get("pages") or official_site_pages(customer_website))
+            official_contact_entry_url = contact_entry.get("url", "")
+            official_contact_entry_excerpt = contact_entry.get("excerpt", "")
         if is_social_profile_url(item["url"]) and item["url"] not in contacts["social_accounts"]:
             contacts["social_accounts"].insert(0, item["url"])
         if item.get("account_type") == "个人决策人":
@@ -8745,7 +8772,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             {"value": value, "sources": [{"url": contact_source_url, "name": contact_source_name, "excerpt": contact_source_excerpt[:260]}]}
             for value in contacts.get("whatsapps") or ([contacts["whatsapp"]] if contacts["whatsapp"] else [])
         ]
-        contactable = bool(verified_email_sources or phone_sources or whatsapp_sources)
+        has_contact_entry = bool(official_contact_entry_url)
+        contactable = bool(verified_email_sources or phone_sources or whatsapp_sources or has_contact_entry)
         official_source_count = 1 if customer_website else 0
         lead_evidence = list(item.get("google_evidence") or [])
         add_unique_evidence(
@@ -8767,6 +8795,17 @@ def discover(params: dict[str, list[str]]) -> dict:
                     social_profile.get("description", "") or f"{origin} 主页 Website 外链指向 {customer_website}",
                     "社媒主页 Website 外链",
                     "公司官网",
+                ),
+            )
+        if official_contact_entry_url:
+            add_unique_evidence(
+                lead_evidence,
+                evidence_item(
+                    official_contact_entry_url,
+                    f"{company} contact entry",
+                    official_contact_entry_excerpt or f"{customer_website} provides a public contact entry.",
+                    "Official website",
+                    "Website contact entry",
                 ),
             )
         evidence_source_count = len(lead_evidence)
@@ -8942,6 +8981,8 @@ def discover(params: dict[str, list[str]]) -> dict:
                     "official": official_source_count,
                     "independentDomains": max(1, len(source_domains)),
                     "contactable": contactable,
+                    "contactEntry": has_contact_entry,
+                    "contactEntryUrl": official_contact_entry_url,
                     "websiteReachable": bool(website_audit.get("reachable")),
                     "websiteVehicleRelated": bool(website_audit.get("vehicleRelated")),
                     "websiteAuditReason": website_audit.get("reason", ""),
