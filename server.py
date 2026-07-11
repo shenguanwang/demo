@@ -5252,6 +5252,23 @@ def apify_keyword_query(query: str) -> str:
     return value or str(query or "").strip()
 
 
+def apify_query_plan(query_variants: list[str], source_mode: str) -> tuple[list[str], int]:
+    if source_mode in ("all", "combined"):
+        query_limit, result_limit = 4, 20
+    elif source_mode == "social":
+        query_limit, result_limit = 6, 32
+    else:
+        query_limit, result_limit = 8, 40
+    queries = []
+    for query in query_variants:
+        cleaned = apify_keyword_query(query)
+        if cleaned and cleaned.lower() not in {item.lower() for item in queries}:
+            queries.append(cleaned)
+        if len(queries) >= query_limit:
+            break
+    return queries, result_limit
+
+
 def apify_search_input(platform: str, query: str, limit: int) -> dict:
     query = apify_keyword_query(query)
     payload = {
@@ -7960,6 +7977,10 @@ def discover(params: dict[str, list[str]]) -> dict:
         "queries": 0,
         "rawResults": 0,
         "apifyResults": 0,
+        "apifyByPlatform": {},
+        "rawByPlatform": {},
+        "profileByPlatform": {},
+        "acceptedByPlatform": {},
         "profileResults": 0,
         "acceptedResults": 0,
         "officialWebsiteProfiles": 0,
@@ -8022,9 +8043,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             executor.shutdown(wait=False, cancel_futures=True)
         apify_results = []
         if platform in APIFY_SOCIAL_ACTORS:
-            apify_query_limit = 1 if source_mode in ("all", "combined") else 4 if source_mode == "social" else 6
-            apify_result_limit = 6 if source_mode in ("all", "combined") else 16 if source_mode == "social" else 24
-            apify_queries = query_variants[:apify_query_limit]
+            apify_queries, apify_result_limit = apify_query_plan(query_variants, source_mode)
             try:
                 apify_results = search_apify_social(
                     platform,
@@ -8037,6 +8056,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 apify_results = []
         if apify_results:
             social_search_stats["apifyResults"] += len(apify_results)
+            social_search_stats["apifyByPlatform"][origin] = social_search_stats["apifyByPlatform"].get(origin, 0) + len(apify_results)
             social_results.extend(apify_results)
         if source_mode == platform and len(social_results) < 3:
             try:
@@ -8054,6 +8074,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 social_search_stats["officialWebsiteProfiles"] += len(local_social_results)
                 social_results.extend(local_social_results)
         social_search_stats["rawResults"] += len(social_results)
+        social_search_stats["rawByPlatform"][origin] = social_search_stats["rawByPlatform"].get(origin, 0) + len(social_results)
         expected_domains = {
             "instagram": ("instagram.com",),
             "facebook": ("facebook.com", "fb.com"),
@@ -8080,6 +8101,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 continue
             seen_platform_urls.add(identity)
             social_search_stats["profileResults"] += 1
+            social_search_stats["profileByPlatform"][origin] = social_search_stats["profileByPlatform"].get(origin, 0) + 1
             item["url"] = item_url
             item["origin"] = origin
             item["source_type"] = source_type
@@ -8270,6 +8292,9 @@ def discover(params: dict[str, list[str]]) -> dict:
                 and bool(item.get("youtube_discovery_candidate"))
             )
             social_search_stats["acceptedResults"] += 1
+            social_search_stats["acceptedByPlatform"][item.get("origin", "")] = (
+                social_search_stats["acceptedByPlatform"].get(item.get("origin", ""), 0) + 1
+            )
         if not is_google_places and item.get("origin") != "OpenStreetMap" and not is_social_result:
             business_match = re.search(
                 r"\b(dealer|dealership|showroom|importer|exporter|trading|distributor|"
@@ -8837,7 +8862,13 @@ def discover(params: dict[str, list[str]]) -> dict:
 
     leads.sort(key=lead_sales_priority)
     leads = limit_duplicate_customer_websites(leads)
-    return {"ok": True, "count": len(leads), "leads": leads, "notice": notice}
+    return {
+        "ok": True,
+        "count": len(leads),
+        "leads": leads,
+        "notice": notice,
+        "stats": {"social": social_search_stats},
+    }
 
 
 def compact_text(value, limit: int = 2000) -> str:
