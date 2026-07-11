@@ -1177,7 +1177,7 @@ function saveState() {
 }
 
 function evaluateLeadScore(text, options = {}) {
-  const value = `${String(text || "")} ${String(options.model || "")}`.toLowerCase();
+  const value = String(text || "").toLowerCase();
   const contactCount = [options.email, options.phone, options.whatsapp].filter(Boolean).length;
   const hasHuaweiFit = /huawei|harmonyos|harmony intelligent mobility|\bhima\b|\baito\b|luxeed|stelato|maextro|\bm9\b|\bm8\b|\bs800\b|\bs9\b|\br7\b|问界|智界|享界|尊界|鸿蒙智行|华为汽车|华为系/.test(value);
   const dimensions = {
@@ -3057,7 +3057,7 @@ function normalizeLead(raw) {
     }
   );
   const scoreModelVersion = Number(raw.scoreModelVersion || 0);
-  const baseScore = scoreModelVersion >= 9
+  const baseScore = scoreModelVersion >= 10
     ? Number(raw.baseScore ?? raw.score ?? fallbackEvaluation.score)
     : fallbackEvaluation.score;
   const manualScoreAdjustment = Math.max(-20, Math.min(20, Number(raw.manualScoreAdjustment || 0)));
@@ -3167,16 +3167,16 @@ function normalizeLead(raw) {
     googleReviews: Number(raw.googleReviews || 0),
     businessStatus: raw.businessStatus || "",
     baseScore,
-    scoreModelVersion: scoreModelVersion >= 9 ? scoreModelVersion : 9,
+    scoreModelVersion: scoreModelVersion >= 10 ? scoreModelVersion : 10,
     manualScoreAdjustment,
     scoreTier,
-    scoreDimensions: scoreModelVersion >= 9 && raw.scoreDimensions
+    scoreDimensions: scoreModelVersion >= 10 && raw.scoreDimensions
       ? raw.scoreDimensions
       : fallbackEvaluation.dimensions,
-    scoreBreakdown: scoreModelVersion >= 9 && Array.isArray(raw.scoreBreakdown) && raw.scoreBreakdown.length
+    scoreBreakdown: scoreModelVersion >= 10 && Array.isArray(raw.scoreBreakdown) && raw.scoreBreakdown.length
       ? raw.scoreBreakdown
       : fallbackBreakdown,
-    scoreBasis: scoreModelVersion >= 9 && raw.scoreBasis
+    scoreBasis: scoreModelVersion >= 10 && raw.scoreBasis
       ? raw.scoreBasis
       : "100分线索模型：汽车业务15、地区匹配15、中国新能源12、华为系12、联系方式12、官网10、进口分销10、经营活跃6、决策人4、采购意向4",
     model: raw.model || "问界 M9",

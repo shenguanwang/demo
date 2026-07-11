@@ -394,6 +394,8 @@ def ai_review_lead_candidate(
         "requiredJson": {
             "automotive": "boolean",
             "target_country_match": "boolean",
+            "chinese_nev_evidence": "boolean, true only if supplied text explicitly mentions Chinese EV/NEV or Chinese vehicle brands",
+            "huawei_series_evidence": "boolean, true only if supplied text explicitly mentions Huawei/AITO/HIMA/HarmonyOS/问界/智界/享界/尊界/鸿蒙智行",
             "reject": "boolean",
             "confidence": "integer 0-100",
             "business_type": "short string",
@@ -418,6 +420,8 @@ def ai_review_lead_candidate(
         "model": get_ai_model("fast"),
         "automotive": bool(result.get("automotive")),
         "targetCountryMatch": bool(result.get("target_country_match")),
+        "chineseNevEvidence": bool(result.get("chinese_nev_evidence")),
+        "huaweiSeriesEvidence": bool(result.get("huawei_series_evidence")),
         "reject": bool(result.get("reject")),
         "confidence": max(0, min(100, int(result.get("confidence") or 0))),
         "businessType": clean_text(str(result.get("business_type") or ""))[:80],
@@ -7455,8 +7459,7 @@ def lead_opportunity_score(
     has_decision_maker: bool = False,
     allow_competitor_auto: bool = True,
 ) -> tuple[int, list[dict], dict, str]:
-    requested_model_text = clean_text(requested_model).lower()
-    lower = clean_text(f"{text} {lead_type} {requested_model}").lower()
+    lower = clean_text(f"{text} {lead_type}").lower()
     dimensions = {
         "automotiveFit": 0,
         "countryFit": 0,
@@ -7506,18 +7509,14 @@ def lead_opportunity_score(
         "比亚迪", "吉利", "极氪", "奇瑞", "捷途", "广汽埃安", "蔚来", "小鹏",
         "理想", "零跑", "红旗", "长安", "深蓝", "岚图", "阿维塔", "腾势",
     )
-    requested_huawei_model = bool(re.search(r"\b(aito|m9|m8|s800|s9|r7)\b", requested_model_text, re.I)) or any(
-        term in requested_model_text
-        for term in ("华为", "鸿蒙", "问界", "智界", "享界", "尊界", "huawei", "hima", "aito", "luxeed", "stelato", "maextro")
-    )
-    if any(term in lower for term in chinese_nev_terms) or requested_huawei_model or "新能源" in requested_model:
+    if any(term in lower for term in chinese_nev_terms):
         set_dimension("chineseNev", "经营或关注中国新能源汽车品牌", 12)
 
     huawei_terms = (
         "huawei", "harmonyos", "harmony intelligent mobility", "hima", "aito", "luxeed",
         "stelato", "maextro", "问界", "智界", "享界", "尊界", "鸿蒙智行", "华为汽车",
     )
-    if any(term in lower for term in huawei_terms) or requested_huawei_model:
+    if any(term in lower for term in huawei_terms):
         set_dimension("huaweiFit", "包含华为、鸿蒙智行或华为系车型信号", 12)
         set_dimension("chineseNev", "华为系车型属于中国新能源/智能电动车线索", 12)
 
@@ -8757,21 +8756,6 @@ def discover(params: dict[str, list[str]]) -> dict:
             else "先核实主体"
         )
         recommended_models = recommend_models(combined, model)
-        score, score_breakdown, score_dimensions, score_tier = lead_opportunity_score(
-            combined,
-            bool(customer_website),
-            contactable,
-            int(item.get("google_reviews") or 0),
-            requested_model=model,
-            lead_type=lead_type,
-            is_competitor=is_competitor,
-            target_country_match=True,
-            has_email=bool(verified_email_sources),
-            has_phone=bool(phone_sources),
-            has_whatsapp=bool(whatsapp_sources),
-            has_decision_maker=bool(contacts["contact_name"] or contacts["contact_role"]),
-            allow_competitor_auto=country_meta.get("code") != "cn",
-        )
         confidence, confidence_label = confidence_score(
             customer_website,
             source_url,
@@ -8816,6 +8800,26 @@ def discover(params: dict[str, list[str]]) -> dict:
                         ai_review["businessType"],
                         *business_signals,
                     ]))[:6]
+        scoring_text = combined
+        if ai_review and ai_review.get("chineseNevEvidence"):
+            scoring_text = f"{scoring_text} Chinese new energy vehicle"
+        if ai_review and ai_review.get("huaweiSeriesEvidence"):
+            scoring_text = f"{scoring_text} Huawei AITO HIMA HarmonyOS"
+        score, score_breakdown, score_dimensions, score_tier = lead_opportunity_score(
+            scoring_text,
+            bool(customer_website),
+            contactable,
+            int(item.get("google_reviews") or 0),
+            requested_model=model,
+            lead_type=lead_type,
+            is_competitor=is_competitor,
+            target_country_match=True,
+            has_email=bool(verified_email_sources),
+            has_phone=bool(phone_sources),
+            has_whatsapp=bool(whatsapp_sources),
+            has_decision_maker=bool(contacts["contact_name"] or contacts["contact_role"]),
+            allow_competitor_auto=country_meta.get("code") != "cn",
+        )
         contact_reason = (
             f"该线索与“{target_label}”目标匹配，"
             f"信息可信度为{confidence_label}（{confidence}%），"
