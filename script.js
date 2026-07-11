@@ -1616,10 +1616,25 @@ function activeDiscoveryJob() {
   return discoveryJobs.find((job) => String(job.id) === String(activeDiscoveryJobFilter)) || null;
 }
 
+function discoveryJobPreviewLeads(job) {
+  const found = Array.isArray(job?.result?.leads) ? job.result.leads : [];
+  return found.map((lead) => normalizeLead({
+    ...lead,
+    sourceMode: lead.sourceMode || job?.payload?.sourceMode || job?.sourceMode || "",
+    discoverySource: lead.discoverySource || job?.payload?.sourceMode || job?.sourceMode || "",
+    discoveryJobId: job?.id || "",
+    discoveryJobLabel: discoveryJobLabel(job)
+  }));
+}
+
 function renderLeads() {
-  const filteredLeads = reviewLeads.filter((lead) => discoveryJobLeadMatches(lead, activeDiscoveryJobFilter));
-  const summary = $("#candidateLeadSummary");
   const job = activeDiscoveryJob();
+  let filteredLeads = reviewLeads.filter((lead) => discoveryJobLeadMatches(lead, activeDiscoveryJobFilter));
+  const showingJobPreview = Boolean(job && !filteredLeads.length && Array.isArray(job.result?.leads) && job.result.leads.length);
+  if (showingJobPreview) {
+    filteredLeads = discoveryJobPreviewLeads(job);
+  }
+  const summary = $("#candidateLeadSummary");
   if (summary) {
     summary.textContent = job
       ? `${discoveryJobLabel(job)}：显示 ${filteredLeads.length} 条候选客户`
@@ -4455,7 +4470,12 @@ function discoveryJobImportedCount(job) {
 
 function discoveryJobResultText(job) {
   const count = discoveryJobRawCount(job);
-  if (job.imported) return `已导入 ${discoveryJobImportedCount(job)} 条`;
+  if (job.imported) {
+    const importedCount = discoveryJobImportedCount(job);
+    if (importedCount) return `已导入 ${importedCount} 条`;
+    if (count) return `发现 ${count} 条`;
+    return "已导入 0 条";
+  }
   if (job.status === "completed") return count ? `发现 ${count} 条` : "无可导入线索";
   if (job.status === "failed") return "执行失败";
   if (job.status === "canceled") return "已取消";
