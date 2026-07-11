@@ -128,7 +128,7 @@ ADMIN_SETTING_DEFINITIONS = {
     "APIFY_FACEBOOK_ACTOR_ID": {"type": "text", "label": "Apify Facebook Actor ID", "group": "social", "status": "reserved", "use": "Override Facebook Actor, for example apify/facebook-pages-scraper"},
     "APIFY_INSTAGRAM_ACTOR_ID": {"type": "text", "label": "Apify Instagram Actor ID", "group": "social", "status": "reserved", "use": "Override Instagram Actor, for example apify/instagram-search-scraper"},
     "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example clockworks/tiktok-scraper"},
-    "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor"},
+    "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor, for example harvestapi/linkedin-company-search"},
     "APIFY_YOUTUBE_ACTOR_ID": {"type": "text", "label": "Apify YouTube Actor ID", "group": "social", "status": "reserved", "use": "Override YouTube Actor, for example streamers/youtube-scraper"},
     "APIFY_TWITTER_ACTOR_ID": {"type": "text", "label": "Apify X / Twitter Actor ID", "group": "social", "status": "reserved", "use": "Override X / Twitter Actor, for example apidojo/tweet-scraper"},
     "AI_PROVIDER": {"type": "text", "label": "AI Provider", "group": "ai", "status": "active", "use": "deepseek / qwen; used for lead verification"},
@@ -5358,7 +5358,7 @@ APIFY_SOCIAL_ACTORS = {
     "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "apify/facebook-pages-scraper"),
     "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-search-scraper"),
     "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
-    "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", ""),
+    "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", "harvestapi/linkedin-company-search"),
     "youtube": ("APIFY_YOUTUBE_ACTOR_ID", "streamers/youtube-scraper"),
     "twitter": ("APIFY_TWITTER_ACTOR_ID", "apidojo/tweet-scraper"),
 }
@@ -5426,6 +5426,14 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
             "maxItems": limit,
             "sort": "Latest",
         })
+    elif platform == "linkedin":
+        payload.update({
+            "keywords": [query],
+            "query": query,
+            "search": query,
+            "limit": limit,
+            "maxItems": limit,
+        })
     return payload
 
 
@@ -5442,7 +5450,7 @@ def first_text_value(item: dict, keys: tuple[str, ...]) -> str:
 def apify_item_url(platform: str, item: dict) -> str:
     url = first_text_value(item, (
         "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "channelUrl", "webUrl", "link", "externalUrl", "inputUrl",
-        "tweetUrl", "twitterUrl", "authorUrl", "videoUrl",
+        "tweetUrl", "twitterUrl", "authorUrl", "videoUrl", "linkedinUrl", "linkedin_url", "companyUrl",
     ))
     if not url and isinstance(item.get("ig_business"), dict):
         profile = item.get("ig_business", {}).get("profile")
@@ -5467,6 +5475,8 @@ def apify_item_url(platform: str, item: dict) -> str:
             url = f"https://www.linkedin.com/company/{username}"
         elif platform == "twitter":
             url = f"https://x.com/{username}"
+    if platform == "linkedin" and url and "linkedin.com/" not in url.lower() and not url.startswith("http"):
+        url = f"https://www.linkedin.com/company/{url.strip('/').lstrip('@')}"
     return normalize_public_url(str(url or ""))
 
 
@@ -5493,13 +5503,18 @@ def normalize_apify_items(
             continue
         title = first_text_value(item, (
             "name", "title", "fullName", "username", "userName", "channelName", "pageName", "displayName",
-            "authorName", "authorUserName", "screenName",
+            "authorName", "authorUserName", "screenName", "companyName",
         )) or safe_urlparse(url).path.strip("/").replace("/", " ")
         snippet_parts = [
-            first_text_value(item, ("description", "biography", "bio", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName")),
-            first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount", "views", "viewCount")),
+            first_text_value(item, ("description", "biography", "bio", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName", "industry", "specialties")),
+            first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount", "views", "viewCount", "employeeCount", "companySize")),
         ]
         snippet = clean_text(" ".join(part for part in snippet_parts if part))
+        customer_website = normalize_public_url(first_text_value(item, (
+            "website", "websiteUrl", "companyWebsite", "externalWebsite", "homepage",
+        )))
+        if not is_business_website_url(customer_website):
+            customer_website = ""
         normalized.append({
             "title": title[:180],
             "url": url,
@@ -5508,7 +5523,7 @@ def normalize_apify_items(
             "origin": origin,
             "source_type": f"{source_type} · Apify",
             "source_url": url,
-            "customer_website": "",
+            "customer_website": customer_website,
             "skip_fetch": True,
             "apifyPlatform": platform,
         })
@@ -8078,14 +8093,6 @@ def discover(params: dict[str, list[str]]) -> dict:
         "reddit": ("reddit.com", "Reddit", "Reddit 公开社区或用户"),
         "vk": ("vk.com", "VK", "VK 公开主页"),
     }
-    selected_platforms = (
-        list(platform_queries)
-        if source_mode in ("all", "social", "combined")
-        else [source_mode] if source_mode in platform_queries else []
-    )
-    social_source_modes = {"social", *platform_queries.keys()}
-    if is_china_discovery and source_mode not in social_source_modes:
-        selected_platforms = []
     platform_queries.update({
         "instagram": ("instagram.com", "Instagram", "Instagram 公开主页或内容"),
         "facebook": ("facebook.com", "Facebook", "Facebook 公开主页、群组或内容"),
@@ -8098,6 +8105,14 @@ def discover(params: dict[str, list[str]]) -> dict:
         "reddit": ("reddit.com", "Reddit", "Reddit 公开社区、用户或帖子"),
         "vk": ("vk.com", "VK", "VK 公开主页或内容"),
     })
+    selected_platforms = (
+        list(platform_queries)
+        if source_mode in ("all", "social", "combined")
+        else [source_mode] if source_mode in platform_queries else []
+    )
+    social_source_modes = {"social", *platform_queries.keys()}
+    if is_china_discovery and source_mode not in social_source_modes:
+        selected_platforms = []
     role_query = "dealership owner import manager sales director" if account_scope in ("person", "both") else ""
     company_query = "car dealer importer automotive trading" if account_scope in ("company", "both") else ""
     social_search_stats = {
