@@ -5314,7 +5314,7 @@ def apify_keyword_query(query: str) -> str:
 
 
 def apify_query_plan(query_variants: list[str], source_mode: str, platform: str = "") -> tuple[list[str], int]:
-    if platform == "tiktok":
+    if platform in {"instagram", "facebook", "tiktok", "linkedin"}:
         if source_mode in ("all", "combined", "social"):
             query_limit, result_limit = 2, 18
         else:
@@ -8147,11 +8147,12 @@ def discover(params: dict[str, list[str]]) -> dict:
     ):
         reverse_platforms.add("youtube")
     if reverse_platforms:
+        reverse_seed_limit = min(8 if source_mode in platform_queries else 24, result_limit)
         website_social_results = social_accounts_from_business_websites(
             country,
             target_type,
             reverse_platforms,
-            seed_limit=min(24, result_limit),
+            seed_limit=reverse_seed_limit,
         )
         social_search_stats["officialWebsiteProfiles"] = len(website_social_results)
         for item in website_social_results:
