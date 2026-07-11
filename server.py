@@ -7832,6 +7832,9 @@ def discover(params: dict[str, list[str]]) -> dict:
     target_profile = TARGET_PROFILES.get(target_type, TARGET_PROFILES["dealer"])
     target_label = target_profile["label"]
     source_mode = (params.get("sourceMode") or ["combined"])[0]
+    disabled_social_source_modes = {"telegram", "twitter", "threads", "pinterest", "reddit", "vk"}
+    if source_mode in disabled_social_source_modes:
+        source_mode = "social"
     account_scope = (params.get("accountScope") or ["both"])[0]
     domestic_region = (params.get("domesticRegion") or [""])[0].strip()
     city_focus = (params.get("cityFocus") or [""])[0].strip()
@@ -8086,24 +8089,12 @@ def discover(params: dict[str, list[str]]) -> dict:
         "facebook": ("facebook.com", "Facebook", "社交媒体公开主页"),
         "tiktok": ("tiktok.com", "TikTok", "短视频公开账号"),
         "linkedin": ("linkedin.com", "LinkedIn", "企业与职业社交平台"),
-        "telegram": ("t.me", "Telegram", "Telegram 公开频道或群组"),
-        "twitter": ("x.com", "X / Twitter", "X / Twitter 公开主页或帖子"),
-        "threads": ("threads.net", "Threads", "Threads 公开主页"),
-        "pinterest": ("pinterest.com", "Pinterest", "Pinterest 公开主页"),
-        "reddit": ("reddit.com", "Reddit", "Reddit 公开社区或用户"),
-        "vk": ("vk.com", "VK", "VK 公开主页"),
     }
     platform_queries.update({
         "instagram": ("instagram.com", "Instagram", "Instagram 公开主页或内容"),
         "facebook": ("facebook.com", "Facebook", "Facebook 公开主页、群组或内容"),
         "tiktok": ("tiktok.com", "TikTok", "TikTok 公开账号或视频"),
         "linkedin": ("linkedin.com", "LinkedIn", "LinkedIn 公司、个人或动态"),
-        "telegram": ("t.me", "Telegram", "Telegram 公开频道或群组"),
-        "twitter": ("x.com", "X / Twitter", "X / Twitter 公开主页或帖子"),
-        "threads": ("threads.net", "Threads", "Threads 公开主页或内容"),
-        "pinterest": ("pinterest.com", "Pinterest", "Pinterest 公开主页、图板或内容"),
-        "reddit": ("reddit.com", "Reddit", "Reddit 公开社区、用户或帖子"),
-        "vk": ("vk.com", "VK", "VK 公开主页或内容"),
     })
     selected_platforms = (
         list(platform_queries)

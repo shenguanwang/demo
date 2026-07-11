@@ -2458,13 +2458,7 @@ const reviewSourceOptions = [
   ["facebook", "Facebook 公开主页"],
   ["tiktok", "TikTok 公开账号"],
   ["youtube", "YouTube 公开频道"],
-  ["linkedin", "LinkedIn 公司 / 个人主页"],
-  ["telegram", "Telegram 公开频道 / 群组"],
-  ["twitter", "X / Twitter 公开主页"],
-  ["threads", "Threads 公开主页"],
-  ["pinterest", "Pinterest 公开主页"],
-  ["reddit", "Reddit 公开社区 / 用户"],
-  ["vk", "VK 公开主页"]
+  ["linkedin", "LinkedIn 公司 / 个人主页"]
 ];
 
 function classifySourceText(value) {
