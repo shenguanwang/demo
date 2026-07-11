@@ -5314,7 +5314,7 @@ def apify_query_plan(query_variants: list[str], source_mode: str, platform: str 
         if source_mode in ("all", "combined", "social"):
             query_limit, result_limit = 2, 18
         else:
-            query_limit, result_limit = 3, 24
+            query_limit, result_limit = 2, 16
     elif source_mode in ("all", "combined"):
         query_limit, result_limit = 3, 18
     elif source_mode == "social":
