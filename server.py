@@ -3494,6 +3494,104 @@ def local_source_query_variants(
     return list(dict.fromkeys(queries))
 
 
+AUTOHOME_CITY_SLUGS = {
+    "北京": "beijing",
+    "天津": "tianjin",
+    "石家庄": "shijiazhuang",
+    "太原": "taiyuan",
+    "呼和浩特": "huhehaote",
+    "上海": "shanghai",
+    "杭州": "hangzhou",
+    "南京": "nanjing",
+    "苏州": "suzhou",
+    "宁波": "ningbo",
+    "合肥": "hefei",
+    "济南": "jinan",
+    "福州": "fuzhou",
+    "广州": "guangzhou",
+    "深圳": "shenzhen",
+    "佛山": "foshan",
+    "东莞": "dongguan",
+    "南宁": "nanning",
+    "海口": "haikou",
+    "武汉": "wuhan",
+    "长沙": "changsha",
+    "郑州": "zhengzhou",
+    "成都": "chengdu",
+    "重庆": "chongqing",
+    "昆明": "kunming",
+    "贵阳": "guiyang",
+    "西安": "xian",
+    "兰州": "lanzhou",
+    "银川": "yinchuan",
+    "西宁": "xining",
+    "乌鲁木齐": "wulumuqi",
+    "沈阳": "shenyang",
+    "大连": "dalian",
+    "长春": "changchun",
+    "哈尔滨": "haerbin",
+}
+
+
+def search_autohome_dealers(cities: list[str], limit: int = 24) -> list[dict]:
+    results: list[dict] = []
+    seen: set[str] = set()
+    for city in cities:
+        slug = AUTOHOME_CITY_SLUGS.get(city)
+        if not slug:
+            continue
+        url = f"https://dealer.autohome.com.cn/{slug}/"
+        try:
+            page = fetch_text(url, timeout=DISCOVERY_SEARCH_TIMEOUT)
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+            continue
+        blocks = re.findall(
+            r'<div class="tw-block tw-relative tw-group">([\s\S]*?)(?=<div class="tw-block tw-relative tw-group">|</main>|</body>)',
+            page,
+            flags=re.I,
+        )
+        if not blocks:
+            blocks = re.findall(r'<a[^>]+href="/\d+/[^"]*"[\s\S]{0,2600}?950\d{8}', page, flags=re.I)
+        for block in blocks:
+            name_match = re.search(r'<a[^>]+href="(/(\d+)/[^"]*)"[^>]*class="[^"]*tw-text-\[20px\][^"]*"[^>]*>([\s\S]*?)</a>', block, flags=re.I)
+            if not name_match:
+                name_match = re.search(r'<a[^>]+href="(/(\d+)/[^"]*)"[^>]*>([^<]{2,80})</a>', block, flags=re.I)
+            if not name_match:
+                continue
+            path = name_match.group(1).split("#", 1)[0]
+            dealer_id = name_match.group(2)
+            name = clean_text(name_match.group(3))
+            if not name or dealer_id in seen:
+                continue
+            address_match = re.search(r'href="/' + re.escape(dealer_id) + r'/contact\.html[^"]*"[^>]*>([\s\S]*?)</a>', block, flags=re.I)
+            if not address_match:
+                address_match = re.search(r'(北京市|天津市|上海市|重庆市|河北省|山西省|内蒙古|江苏省|浙江省|山东省|广东省|四川省|辽宁省|吉林省|黑龙江省)[^<]{6,120}', block)
+            address = clean_text(address_match.group(1) if address_match else "")
+            phone_match = re.search(r'(950\d{8}|400[-\s]?\d{3}[-\s]?\d{4}|400\d{7})', block)
+            phone = clean_text(phone_match.group(1)) if phone_match else ""
+            source_url = urllib.parse.urljoin("https://dealer.autohome.com.cn", path)
+            snippet_parts = [
+                f"{name} 是汽车之家登记的{city}汽车经销商。",
+                address,
+                f"电话: {phone}" if phone else "",
+            ]
+            seen.add(dealer_id)
+            results.append({
+                "title": name,
+                "url": source_url,
+                "source_url": source_url,
+                "customer_website": source_url,
+                "snippet": " ".join(part for part in snippet_parts if part),
+                "contact": phone,
+                "origin": "汽车之家经销商",
+                "source_type": "国内汽车平台经销商目录",
+                "skip_fetch": True,
+            })
+            if len(results) >= limit:
+                return results
+    return results
+
+
 def discovery_cities(country: str, city_focus: str = "", domestic_region: str = "") -> list[str]:
     cities = [city_focus.strip()] if city_focus.strip() else []
     country_text = normalize_country_match_text(country)
@@ -7865,6 +7963,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
         except (OSError, ValueError, TimeoutError):
             pass
+    if is_china_discovery and source_mode in ("all", "combined", "dealer"):
+        raw_results += search_autohome_dealers(cities, limit=min(24, max(8, result_limit // 2)))
     if source_mode in ("all", "combined", "dealer"):
         search_variants = list(dict.fromkeys(commercial_query_variants))
         if is_china_discovery and source_mode in ("all", "combined"):
