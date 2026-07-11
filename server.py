@@ -129,7 +129,6 @@ ADMIN_SETTING_DEFINITIONS = {
     "APIFY_INSTAGRAM_ACTOR_ID": {"type": "text", "label": "Apify Instagram Actor ID", "group": "social", "status": "reserved", "use": "Override Instagram Actor, for example apify/instagram-search-scraper"},
     "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example clockworks/tiktok-scraper"},
     "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor, for example harvestapi/linkedin-company-search"},
-    "APIFY_YOUTUBE_ACTOR_ID": {"type": "text", "label": "Apify YouTube Actor ID", "group": "social", "status": "reserved", "use": "Override YouTube Actor, for example streamers/youtube-scraper"},
     "AI_PROVIDER": {"type": "text", "label": "AI Provider", "group": "ai", "status": "active", "use": "deepseek / qwen; used for lead verification"},
     "DEEPSEEK_API_KEY": {"type": "secret", "label": "DeepSeek API Key", "group": "ai", "status": "active", "use": "AI lead verification"},
     "DEEPSEEK_BASE_URL": {"type": "url", "label": "DeepSeek Base URL", "group": "ai", "status": "active", "use": "OpenAI-compatible endpoint"},
@@ -5232,7 +5231,6 @@ APIFY_SOCIAL_ACTORS = {
     "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-search-scraper"),
     "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
     "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", "harvestapi/linkedin-company-search"),
-    "youtube": ("APIFY_YOUTUBE_ACTOR_ID", "streamers/youtube-scraper"),
 }
 
 
@@ -5267,15 +5265,7 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
         "limit": limit,
         "proxy": {"useApifyProxy": True},
     }
-    if platform == "youtube":
-        payload.update({
-            "searchKeywords": query,
-            "searchQueries": [query],
-            "maxResults": limit,
-            "maxResultsShorts": 0,
-            "maxResultStreams": 0,
-        })
-    elif platform == "instagram":
+    if platform == "instagram":
         payload = {
             "search": query,
             "searchType": "user",
@@ -5335,8 +5325,6 @@ def apify_item_url(platform: str, item: dict) -> str:
             url = f"https://www.tiktok.com/@{username}"
         elif platform == "facebook":
             url = f"https://www.facebook.com/{username}"
-        elif platform == "youtube":
-            url = f"https://www.youtube.com/{username if username.startswith('@') else '@' + username}"
         elif platform == "linkedin":
             url = f"https://www.linkedin.com/company/{username}"
     if platform == "linkedin" and url and "linkedin.com/" not in url.lower() and not url.startswith("http"):
@@ -8140,33 +8128,6 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
         max_youtube_queries = 45 if source_mode == "youtube" else 32
         youtube_searches = list(dict.fromkeys(youtube_searches))[:max_youtube_queries]
-        try:
-            apify_youtube_results = search_apify_social(
-                "youtube",
-                [query for query, _account_type in youtube_searches[:1 if source_mode in ("all", "combined") else 2]],
-                "YouTube",
-                "YouTube 鍏紑棰戦亾",
-                limit=6 if source_mode in ("all", "combined") else 10,
-            )
-        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
-            apify_youtube_results = []
-        for item in apify_youtube_results:
-            youtube_analysis = analyze_social_business_profile(
-                f"{item.get('title', '')} {item.get('snippet', '')} {item.get('url', '')}",
-                "YouTube",
-                "company account",
-            )
-            youtube_discovery_candidate = is_youtube_automotive_lead(
-                item.get("title", ""),
-                item.get("snippet", ""),
-                item.get("url", ""),
-            )
-            if not youtube_discovery_candidate:
-                continue
-            item["account_type"] = "company account"
-            item["social_analysis"] = youtube_analysis
-            item["youtube_discovery_candidate"] = youtube_discovery_candidate
-            raw_results.append(item)
         for youtube_query, youtube_account_type in youtube_searches:
             try:
                 youtube_items = search_youtube_channels(youtube_query, limit=25, country=country)
