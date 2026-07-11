@@ -2880,6 +2880,36 @@ DISCOVERY_KEYWORD_TERMS = (
     "automobile distributor",
 )
 
+SOCIAL_HIGH_INTENT_TERMS = (
+    "car dealer",
+    "used car dealer",
+    "car showroom",
+    "motors showroom",
+    "auto trading",
+    "automotive trading",
+    "car importer",
+    "vehicle importer",
+    "parallel import cars",
+    "car export",
+    "vehicle export",
+    "car distributor",
+    "vehicle distributor",
+    "fleet vehicle supplier",
+    "luxury car showroom",
+    "new energy vehicle dealer",
+    "electric vehicle dealer",
+    "Chinese EV dealer",
+    "Chinese car importer",
+    "Chinese vehicle distributor",
+    "AITO dealer",
+    "Huawei AITO",
+    "Huawei car",
+    "HIMA car",
+    "BYD dealer",
+    "Denza dealer",
+    "Zeekr dealer",
+)
+
 OBVIOUS_IRRELEVANT_LEAD_PATTERNS = (
     r"\b(cgtn|china global television|news channel|news network|television network|tv network|broadcasting|"
     r"newsroom|journalist|newspaper|magazine|media outlet|press agency|public radio|radio station|"
@@ -5189,34 +5219,40 @@ def social_search_variants(
     queries: list[str] = []
     markets = [market]
     if market.lower() in {"uae", "united arab emirates", "emirates"}:
-        markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
+        markets.extend([
+            "Dubai", "Abu Dhabi", "Sharjah", "Ajman", "Ras Al Khaimah",
+            "Jebel Ali", "Al Quoz", "Mussafah", "Deira",
+        ])
     market_text = normalize_country_match_text(market)
     for key, hints in COUNTRY_HINTS.items():
         meta = COUNTRY_SEARCH_META.get(key, {})
         aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
         if any((token := normalize_country_match_text(alias)) and token in market_text for alias in aliases):
-            markets = [*hints[:4], *markets]
+            markets = [*hints[:8], *markets]
             break
     markets = list(dict.fromkeys(place for place in markets if place))
-    broad_terms = (
-        "car dealer",
-        "used cars",
-        "cars for sale",
-        "motors",
-        "auto trading",
-        "automotive trading",
-        "car showroom",
-        "luxury cars",
-        "imported cars",
-        "vehicle importer",
-    )
+    target_priority_terms = {
+        "dealer": ("car dealer", "used car dealer", "car showroom", "motors showroom", "cars for sale"),
+        "parallel": ("parallel import cars", "imported cars", "car importer", "auto trading", "Chinese car importer"),
+        "importer": ("car importer", "vehicle importer", "automotive importer", "car distributor", "Chinese vehicle distributor"),
+        "fleet": ("fleet vehicle supplier", "fleet sales", "car rental fleet", "corporate fleet", "vehicle procurement"),
+        "corporate": ("fleet procurement", "corporate vehicles", "vehicle supplier", "car supplier", "fleet sales"),
+        "government": ("vehicle supplier", "fleet tender", "government fleet", "public procurement vehicles", "automotive company"),
+        "buying": ("vehicle procurement", "car buyer", "sourcing vehicles", "fleet purchase", "RFQ vehicles"),
+        "individual": ("luxury cars", "electric vehicles", "Chinese EV", "SUV dealer", "cars for sale"),
+    }.get(target_type, company_terms)
+    broad_terms = list(dict.fromkeys([*target_priority_terms, *SOCIAL_HIGH_INTENT_TERMS]))
+    apify_first_terms = list(dict.fromkeys([*target_priority_terms, *SOCIAL_HIGH_INTENT_TERMS[:18]]))
     if platform in {"instagram", "facebook", "tiktok"}:
         site_variants = {
             "instagram": ("instagram.com",),
             "facebook": ("facebook.com",),
             "tiktok": ("tiktok.com",),
         }.get(platform, (site,))
-        for place in markets:
+        for place in markets[:8]:
+            for term in apify_first_terms[:18]:
+                queries.append(f"{place} {term}")
+        for place in markets[:8]:
             for variant in site_variants:
                 queries.append(f"site:{variant} {place} \"{company_terms[0]}\" contact phone email")
                 queries.append(f"site:{variant} {place} \"{company_terms[0]}\" about bio contacts")
@@ -5225,7 +5261,10 @@ def social_search_variants(
                     queries.append(f"site:{variant} {place} \"{term}\"")
         return list(dict.fromkeys(queries))
     if platform == "linkedin":
-        for place in markets:
+        for place in markets[:8]:
+            for term in apify_first_terms[:18]:
+                queries.append(f"{place} {term}")
+        for place in markets[:8]:
             queries.append(f"site:linkedin.com/company {place} \"{company_terms[0]}\" contact email phone")
             queries.append(f"site:linkedin.com/company {place} \"{company_terms[0]}\" about")
             for term in broad_terms:
@@ -5272,11 +5311,11 @@ def apify_keyword_query(query: str) -> str:
 
 def apify_query_plan(query_variants: list[str], source_mode: str) -> tuple[list[str], int]:
     if source_mode in ("all", "combined"):
-        query_limit, result_limit = 4, 20
+        query_limit, result_limit = 6, 30
     elif source_mode == "social":
-        query_limit, result_limit = 6, 32
+        query_limit, result_limit = 10, 60
     else:
-        query_limit, result_limit = 8, 40
+        query_limit, result_limit = 14, 80
     queries = []
     for query in query_variants:
         cleaned = apify_keyword_query(query)
