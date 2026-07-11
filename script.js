@@ -4810,6 +4810,17 @@ async function loadDiscoveryJobs(options = {}) {
       elapsed: discoveryJobElapsedText(active) || "后台持续运行",
       message: active.message || "任务仍在云端执行，可以关闭当前页面。"
     });
+  } else {
+    const progressBox = $("#finderStatus")?.closest(".insight-box");
+    if (progressBox?.dataset.progressState === "running") {
+      setFinderProgress({
+        percent: 100,
+        stage: "done",
+        state: "error",
+        title: "没有正在运行的云端任务",
+        message: "服务器没有找到正在执行的获客任务；如果页面还显示运行中，请刷新后重新执行。"
+      });
+    }
   }
   if (autoImport) autoImportCompletedDiscoveryJobs();
   return discoveryJobs;
@@ -5040,7 +5051,7 @@ async function runCloudDiscovery(data, words, onProgress) {
     });
   }
 
-  const deadline = Date.now() + 12 * 60 * 1000;
+  const deadline = Date.now() + 8 * 60 * 1000;
   let consecutiveReadErrors = 0;
   while (Date.now() < deadline) {
     await new Promise((resolve) => setTimeout(resolve, document.hidden ? 5000 : 1800));
@@ -5051,6 +5062,11 @@ async function runCloudDiscovery(data, words, onProgress) {
         id: startResult.job.id
       })}`, { cache: "no-store" });
       statusResult = await statusResponse.json().catch(() => ({}));
+      if (statusResponse.status === 404) {
+        const missingError = new Error("云端任务记录不存在，可能是服务重启或任务已中断。请重新执行。");
+        missingError.code = "JOB_MISSING";
+        throw missingError;
+      }
       if (!statusResponse.ok || !statusResult.ok) {
         throw new Error(statusResult.error || `HTTP ${statusResponse.status}`);
       }
@@ -5084,7 +5100,7 @@ async function runCloudDiscovery(data, words, onProgress) {
       throw canceledError;
     }
   }
-  const timeoutError = new Error("页面等待已超过 12 分钟，任务仍在云端后台运行。");
+  const timeoutError = new Error("页面等待已超过 8 分钟，已停止等待。请缩小来源范围或重新执行。");
   timeoutError.code = "JOB_WAIT_TIMEOUT";
   throw timeoutError;
 }
@@ -5318,7 +5334,7 @@ function bindForms() {
       })
       .catch((error) => {
         const elapsedSeconds = searchProgress.stop();
-        const backgroundOnly = ["JOB_WAIT_TIMEOUT", "JOB_STATUS_UNAVAILABLE"].includes(error.code);
+        const backgroundOnly = error.code === "JOB_STATUS_UNAVAILABLE";
         const canceled = error.code === "JOB_CANCELED";
         setFinderProgress({
           percent: backgroundOnly ? 80 : 100,
