@@ -1177,15 +1177,16 @@ function saveState() {
 }
 
 function evaluateLeadScore(text, options = {}) {
-  const value = String(text || "").toLowerCase();
+  const value = `${String(text || "")} ${String(options.model || "")}`.toLowerCase();
   const contactCount = [options.email, options.phone, options.whatsapp].filter(Boolean).length;
+  const hasHuaweiFit = /huawei|harmonyos|harmony intelligent mobility|\bhima\b|\baito\b|luxeed|stelato|maextro|\bm9\b|\bm8\b|\bs800\b|\bs9\b|\br7\b|问界|智界|享界|尊界|鸿蒙智行|华为汽车|华为系/.test(value);
   const dimensions = {
     automotiveFit: /vehicle importer|car importer|automotive importer|parallel import|car distributor|vehicle distributor|authorized dealer|dealership|car dealer|auto dealer|car showroom|vehicle showroom|auto trading|automotive trading|vehicle sales|fleet sales|汽车进口|汽车经销|汽车展厅|汽车贸易|汽车销售|车队采购/.test(value)
       ? 15
       : /automotive|vehicles|cars|motors|new cars|used cars|汽车|车辆|新车|二手车/.test(value) ? 10 : 0,
     countryFit: options.countryMatch ? 15 : 0,
-    chineseNev: /chinese ev|china ev|chinese electric vehicle|chinese new energy vehicle|byd|geely|zeekr|chery|jetour|gac aion|nio|xpeng|li auto|leapmotor|hongqi|changan|deepal|voyah|avatr|denza|中国新能源|中国电动车|中国电动汽车|中国新能源汽车|比亚迪|吉利|极氪|奇瑞|捷途|广汽埃安|蔚来|小鹏|理想|零跑|红旗|长安|深蓝|岚图|阿维塔|腾势/.test(value) ? 12 : 0,
-    huaweiFit: /huawei|harmonyos|harmony intelligent mobility|\bhima\b|\baito\b|luxeed|stelato|maextro|问界|智界|享界|尊界|鸿蒙智行|华为汽车/.test(value) ? 12 : 0,
+    chineseNev: hasHuaweiFit || /chinese ev|china ev|chinese electric vehicle|chinese new energy vehicle|byd|geely|zeekr|chery|jetour|gac aion|nio|xpeng|li auto|leapmotor|hongqi|changan|deepal|voyah|avatr|denza|中国新能源|中国电动车|中国电动汽车|中国新能源汽车|比亚迪|吉利|极氪|奇瑞|捷途|广汽埃安|蔚来|小鹏|理想|零跑|红旗|长安|深蓝|岚图|阿维塔|腾势/.test(value) ? 12 : 0,
+    huaweiFit: hasHuaweiFit ? 12 : 0,
     contactCompleteness: contactCount >= 3 ? 12 : contactCount === 2 ? 8 : contactCount === 1 || options.hasContact ? 4 : 0,
     websiteTrust: options.hasOfficialWebsite ? 10 : 0,
     tradeQualification: /import.{0,8}(license|licence|permit)|export.{0,8}(license|licence|permit)|licensed importer|customs (registration|registered|code)|trade license|commercial registration|进出口资质|进出口许可证|进口许可证|出口许可证|海关注册|海关备案|报关资质|贸易许可证|授权进口商/.test(value)
@@ -3056,7 +3057,7 @@ function normalizeLead(raw) {
     }
   );
   const scoreModelVersion = Number(raw.scoreModelVersion || 0);
-  const baseScore = scoreModelVersion >= 6
+  const baseScore = scoreModelVersion >= 9
     ? Number(raw.baseScore ?? raw.score ?? fallbackEvaluation.score)
     : fallbackEvaluation.score;
   const manualScoreAdjustment = Math.max(-20, Math.min(20, Number(raw.manualScoreAdjustment || 0)));
@@ -3166,16 +3167,16 @@ function normalizeLead(raw) {
     googleReviews: Number(raw.googleReviews || 0),
     businessStatus: raw.businessStatus || "",
     baseScore,
-    scoreModelVersion: scoreModelVersion || 8,
+    scoreModelVersion: scoreModelVersion >= 9 ? scoreModelVersion : 9,
     manualScoreAdjustment,
     scoreTier,
-    scoreDimensions: scoreModelVersion >= 6 && raw.scoreDimensions
+    scoreDimensions: scoreModelVersion >= 9 && raw.scoreDimensions
       ? raw.scoreDimensions
       : fallbackEvaluation.dimensions,
-    scoreBreakdown: scoreModelVersion >= 6 && Array.isArray(raw.scoreBreakdown) && raw.scoreBreakdown.length
+    scoreBreakdown: scoreModelVersion >= 9 && Array.isArray(raw.scoreBreakdown) && raw.scoreBreakdown.length
       ? raw.scoreBreakdown
       : fallbackBreakdown,
-    scoreBasis: scoreModelVersion >= 6 && raw.scoreBasis
+    scoreBasis: scoreModelVersion >= 9 && raw.scoreBasis
       ? raw.scoreBasis
       : "100分线索模型：汽车业务15、地区匹配15、中国新能源12、华为系12、联系方式12、官网10、进口分销10、经营活跃6、决策人4、采购意向4",
     model: raw.model || "问界 M9",

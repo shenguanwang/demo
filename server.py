@@ -7455,7 +7455,8 @@ def lead_opportunity_score(
     has_decision_maker: bool = False,
     allow_competitor_auto: bool = True,
 ) -> tuple[int, list[dict], dict, str]:
-    lower = clean_text(f"{text} {lead_type}").lower()
+    requested_model_text = clean_text(requested_model).lower()
+    lower = clean_text(f"{text} {lead_type} {requested_model}").lower()
     dimensions = {
         "automotiveFit": 0,
         "countryFit": 0,
@@ -7505,15 +7506,20 @@ def lead_opportunity_score(
         "比亚迪", "吉利", "极氪", "奇瑞", "捷途", "广汽埃安", "蔚来", "小鹏",
         "理想", "零跑", "红旗", "长安", "深蓝", "岚图", "阿维塔", "腾势",
     )
-    if any(term in lower for term in chinese_nev_terms):
+    requested_huawei_model = bool(re.search(r"\b(aito|m9|m8|s800|s9|r7)\b", requested_model_text, re.I)) or any(
+        term in requested_model_text
+        for term in ("华为", "鸿蒙", "问界", "智界", "享界", "尊界", "huawei", "hima", "aito", "luxeed", "stelato", "maextro")
+    )
+    if any(term in lower for term in chinese_nev_terms) or requested_huawei_model or "新能源" in requested_model:
         set_dimension("chineseNev", "经营或关注中国新能源汽车品牌", 12)
 
     huawei_terms = (
         "huawei", "harmonyos", "harmony intelligent mobility", "hima", "aito", "luxeed",
         "stelato", "maextro", "问界", "智界", "享界", "尊界", "鸿蒙智行", "华为汽车",
     )
-    if any(term in lower for term in huawei_terms):
+    if any(term in lower for term in huawei_terms) or requested_huawei_model:
         set_dimension("huaweiFit", "包含华为、鸿蒙智行或华为系车型信号", 12)
+        set_dimension("chineseNev", "华为系车型属于中国新能源/智能电动车线索", 12)
 
     contact_count = sum((bool(has_email), bool(has_phone), bool(has_whatsapp)))
     if contact_count == 3:
