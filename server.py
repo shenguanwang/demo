@@ -99,7 +99,7 @@ MAX_ACTIVE_DISCOVERY_JOBS_PER_USER = 3
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
-DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "900")))
+DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "480")))
 YOUTUBE_MAX_VIDEO_AGE_DAYS = 365 * 5
 DISCOVERY_SCHEDULER_STOP = threading.Event()
 DISCOVERY_SCHEDULER_STARTED = False
@@ -5309,13 +5309,18 @@ def apify_keyword_query(query: str) -> str:
     return value or str(query or "").strip()
 
 
-def apify_query_plan(query_variants: list[str], source_mode: str) -> tuple[list[str], int]:
-    if source_mode in ("all", "combined"):
-        query_limit, result_limit = 6, 30
+def apify_query_plan(query_variants: list[str], source_mode: str, platform: str = "") -> tuple[list[str], int]:
+    if platform == "tiktok":
+        if source_mode in ("all", "combined", "social"):
+            query_limit, result_limit = 2, 18
+        else:
+            query_limit, result_limit = 3, 24
+    elif source_mode in ("all", "combined"):
+        query_limit, result_limit = 3, 18
     elif source_mode == "social":
-        query_limit, result_limit = 10, 60
+        query_limit, result_limit = 3, 24
     else:
-        query_limit, result_limit = 14, 80
+        query_limit, result_limit = 4, 30
     queries = []
     for query in query_variants:
         cleaned = apify_keyword_query(query)
@@ -5542,18 +5547,18 @@ def search_apify_social(
 
     def run_query(query: str) -> list[dict]:
         actor = apify_actor_url_part(actor_id)
-        params = urllib.parse.urlencode({"token": token, "timeout": "180", "memory": "1024"})
+        params = urllib.parse.urlencode({"token": token, "timeout": "75", "memory": "512"})
         url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?{params}"
         try:
-            items = post_json_value(url, apify_search_input(platform, query, min(25, limit)), timeout=180)
+            items = post_json_value(url, apify_search_input(platform, query, min(20, limit)), timeout=85)
         except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
             return []
         return normalize_apify_items(platform, items, query, origin, source_type, limit)
 
-    executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(queries))))
+    executor = ThreadPoolExecutor(max_workers=min(2, max(1, len(queries))))
     futures = [executor.submit(run_query, query) for query in queries]
     try:
-        for future in as_completed(futures, timeout=190):
+        for future in as_completed(futures, timeout=95):
             if len(results) >= limit:
                 break
             try:
@@ -7956,11 +7961,14 @@ def discover(params: dict[str, list[str]]) -> dict:
     google_primary_results: list[dict] = []
     notice = ""
     is_china_discovery = country_meta.get("code") == "cn"
+    social_source_modes = {"social", "instagram", "facebook", "tiktok", "linkedin"}
     use_geo_sources = not is_china_discovery or source_mode in ("google", "osm")
-    if use_geo_sources and source_mode in ("all", "combined", "google"):
+    include_support_sources = source_mode in social_source_modes and not is_china_discovery
+    if (use_geo_sources and source_mode in ("all", "combined", "google")) or include_support_sources:
         try:
-            google_city_limit = min(10, max(4, result_limit // max(1, len(cities))))
-            for city in cities:
+            active_cities = (cities[:3] or [market]) if include_support_sources else cities
+            google_city_limit = 3 if include_support_sources else min(10, max(4, result_limit // max(1, len(cities))))
+            for city in active_cities:
                 try:
                     google_primary_results += search_google_places(
                         country,
@@ -8005,41 +8013,44 @@ def discover(params: dict[str, list[str]]) -> dict:
         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
             if source_mode == "google":
                 notice = f"{exc}。请在本机配置密钥后重试。"
-    if use_geo_sources and source_mode in ("all", "combined", "osm"):
+    if (use_geo_sources and source_mode in ("all", "combined", "osm")) or include_support_sources:
         try:
             raw_results += search_osm_dealers(
                 country,
-                limit=min(result_limit, 20 if source_mode in ("all", "combined") else 30),
+                limit=min(result_limit, 8 if include_support_sources else 20 if source_mode in ("all", "combined") else 30),
                 target_type=target_type,
             )
         except (OSError, ValueError, TimeoutError):
             pass
     if is_china_discovery and source_mode in ("all", "combined", "dealer"):
         raw_results += search_autohome_dealers(cities, limit=min(24, max(8, result_limit // 2)))
-    if source_mode in ("all", "combined", "dealer"):
+    if source_mode in ("all", "combined", "dealer") or include_support_sources:
         search_variants = list(dict.fromkeys(commercial_query_variants))
         if is_china_discovery and source_mode in ("all", "combined"):
             max_web_queries = 16
+        elif include_support_sources:
+            max_web_queries = 4
         else:
             max_web_queries = 18 if source_mode in ("all", "combined") and google_primary_results else 36 if source_mode in ("all", "combined") else 12
         search_variants = search_variants[:max_web_queries]
-        per_query_limit = 5 if is_china_discovery and source_mode in ("all", "combined") else 8 if source_mode in ("all", "combined") else 6
+        per_query_limit = 5 if is_china_discovery and source_mode in ("all", "combined") else 4 if include_support_sources else 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
-        executor = ThreadPoolExecutor(max_workers=min(4, len(search_variants)))
-        futures = [
-            executor.submit(search_web, search_query, per_query_limit, None, country)
-            for search_query in search_variants
-        ]
-        try:
-            for future in as_completed(futures, timeout=max(20, DISCOVERY_SEARCH_TIMEOUT * 2)):
-                try:
-                    web_results_by_query.append(future.result(timeout=1))
-                except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
-                    continue
-        except FuturesTimeoutError:
-            pass
-        finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+        if search_variants:
+            executor = ThreadPoolExecutor(max_workers=min(4, len(search_variants)))
+            futures = [
+                executor.submit(search_web, search_query, per_query_limit, None, country)
+                for search_query in search_variants
+            ]
+            try:
+                for future in as_completed(futures, timeout=max(20, DISCOVERY_SEARCH_TIMEOUT * 2)):
+                    try:
+                        web_results_by_query.append(future.result(timeout=1))
+                    except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+                        continue
+            except FuturesTimeoutError:
+                pass
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
         for web_results in web_results_by_query:
             try:
                 for item in web_results:
@@ -8158,14 +8169,16 @@ def discover(params: dict[str, list[str]]) -> dict:
             query_variants = query_variants[:8]
         elif source_mode == "social":
             query_variants = query_variants[:12]
+        elif source_mode == platform:
+            query_variants = query_variants[:6]
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
-        executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants))))
+        executor = ThreadPoolExecutor(max_workers=min(2, max(1, len(query_variants))))
         futures = [
             executor.submit(
                 search_web,
                 search_query,
-                4 if source_mode == "combined" else 8,
+                4 if source_mode in ("combined", platform) else 8,
                 freshness_days,
                 country,
             )
@@ -8183,7 +8196,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             executor.shutdown(wait=False, cancel_futures=True)
         apify_results = []
         if platform in APIFY_SOCIAL_ACTORS:
-            apify_queries, apify_result_limit = apify_query_plan(query_variants, source_mode)
+            apify_queries, apify_result_limit = apify_query_plan(query_variants, source_mode, platform)
             try:
                 apify_results = search_apify_social(
                     platform,
