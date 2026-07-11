@@ -4754,6 +4754,87 @@ def search_bing(query: str, limit: int = 8, freshness_days: int | None = None) -
     return items
 
 
+def resolve_baidu_result_url(url: str) -> str:
+    raw_href = html.unescape(str(url or "")).strip()
+    if raw_href.startswith("/link?"):
+        raw_href = "https://www.baidu.com" + raw_href
+    if not raw_href.startswith(("http://", "https://")):
+        return ""
+    href = normalize_public_url(raw_href)
+    if not href or "baidu.com/link" not in href:
+        return href
+    try:
+        req = urllib.request.Request(
+            href,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/124 Safari/537.36",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.6",
+            },
+            method="HEAD",
+        )
+        with urllib.request.urlopen(req, timeout=6) as response:
+            return normalize_public_url(response.geturl())
+    except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+        return href
+
+
+def search_baidu(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
+    params = {"wd": query, "rn": max(10, min(20, limit * 2))}
+    if freshness_days:
+        params["gpc"] = f"stf={int(time.time() - freshness_days * 86400)},{int(time.time())}|stftype=1"
+    req = urllib.request.Request(
+        "https://www.baidu.com/s?" + urllib.parse.urlencode(params),
+        headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/124 Safari/537.36",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.6",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=DISCOVERY_SEARCH_TIMEOUT) as response:
+        raw = response.read(600_000)
+        charset = response.headers.get_content_charset() or "utf-8"
+        page = raw.decode(charset, errors="ignore")
+    items: list[dict] = []
+    blocks = re.findall(
+        r'<div[^>]+class="[^"]*(?:result|c-container)[^"]*"[\s\S]*?(?=<div[^>]+class="[^"]*(?:result|c-container)|</body>)',
+        page,
+        flags=re.I,
+    )
+    if not blocks:
+        blocks = re.findall(r'<h3[\s\S]*?</h3>[\s\S]{0,1200}', page, flags=re.I)
+    for block in blocks:
+        link = re.search(r'<h3[^>]*>[\s\S]*?<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)</a>', block, flags=re.I)
+        if not link:
+            link = re.search(r'<a[^>]+href="([^"]+)"[^>]*>([\s\S]{1,300}?)</a>', block, flags=re.I)
+        if not link:
+            continue
+        href = html.unescape(link.group(1))
+        if href.startswith("/link?"):
+            href = "https://www.baidu.com" + href
+        if not href.startswith(("http://", "https://")):
+            continue
+        title = clean_text(link.group(2))
+        if not title:
+            continue
+        snippet_match = re.search(r'<span[^>]+class="[^"]*(?:content-right|c-abstract|c-span-last)[^"]*"[^>]*>([\s\S]*?)</span>', block, flags=re.I)
+        if not snippet_match:
+            snippet_match = re.search(r'<div[^>]+class="[^"]*(?:c-abstract|c-row|content)[^"]*"[^>]*>([\s\S]{1,900}?)</div>', block, flags=re.I)
+        snippet = clean_text(snippet_match.group(1)) if snippet_match else ""
+        href = resolve_baidu_result_url(href)
+        domain = safe_urlparse(href).netloc.lower()
+        if href and is_valid_http_url(href) and "." in domain and "baidu.com" not in domain and "javascript" not in domain:
+            items.append({
+                "title": title,
+                "url": href,
+                "snippet": snippet,
+                "apiSource": "Baidu Search",
+            })
+        if len(items) >= limit:
+            break
+    return items
+
+
 def search_duckduckgo(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
     params = {"q": query, "kl": "us-en"}
     if freshness_days:
@@ -4895,16 +4976,58 @@ def search_serpapi(query: str, limit: int = 8, freshness_days: int | None = None
     return items
 
 
+def search_serpapi_baidu(query: str, limit: int = 8, freshness_days: int | None = None) -> list[dict]:
+    api_key = get_serpapi_api_key()
+    if not api_key:
+        return []
+    params = {
+        "engine": "baidu",
+        "q": query,
+        "api_key": api_key,
+        "ct": "2",
+        "rn": max(1, min(20, limit)),
+    }
+    if freshness_days:
+        start = int(time.time() - freshness_days * 86400)
+        end = int(time.time())
+        params["gpc"] = f"stf={start},{end}|stftype=1"
+    data = fetch_json(
+        "https://serpapi.com/search.json?" + urllib.parse.urlencode(params),
+        timeout=DISCOVERY_SEARCH_TIMEOUT,
+    )
+    items: list[dict] = []
+    for result in data.get("organic_results") or []:
+        if not isinstance(result, dict):
+            continue
+        href = normalize_public_url(str(result.get("link") or result.get("url") or ""))
+        domain = safe_urlparse(href).netloc.lower()
+        if href and is_valid_http_url(href) and "." in domain:
+            items.append({
+                "title": clean_text(str(result.get("title") or "")),
+                "url": href,
+                "snippet": clean_text(str(result.get("snippet") or result.get("displayed_link") or "")),
+                "apiSource": "SerpApi Baidu Search",
+            })
+        if len(items) >= limit:
+            break
+    return items
+
+
 def search_web(query: str, limit: int = 8, freshness_days: int | None = None, country: str = "") -> list[dict]:
     collected: list[dict] = []
-    executor = ThreadPoolExecutor(max_workers=5)
-    futures = [
+    is_china_search = country_search_meta(country).get("code") == "cn" if country else False
+    executor = ThreadPoolExecutor(max_workers=6 if is_china_search else 5)
+    futures = []
+    if is_china_search:
+        futures.append(executor.submit(search_serpapi_baidu, query, limit, freshness_days))
+        futures.append(executor.submit(search_baidu, query, limit, freshness_days))
+    futures.extend([
         executor.submit(search_brave_api, query, limit, freshness_days, country),
         executor.submit(search_serpapi, query, limit, freshness_days, country),
         executor.submit(search_duckduckgo, query, limit, freshness_days),
         executor.submit(search_bing, query, limit, freshness_days),
         executor.submit(search_brave, query, limit, freshness_days),
-    ]
+    ])
     try:
         for future in as_completed(futures, timeout=DISCOVERY_SEARCH_TIMEOUT):
             try:
