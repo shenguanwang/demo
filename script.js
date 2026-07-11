@@ -1347,6 +1347,13 @@ function syncFinderGoalToSelection() {
   updateSocialProspectingQueries();
 }
 
+function showDomesticDiscoveryNotice() {
+  window.alert(
+    "国内线索搜索功能正在测试中，数据可能不完整或不准确。\\n\\n" +
+    "当前会优先抓取汽车之家等公开汽车平台，并用百度/搜索引擎做补充；联系方式、地区、客户类型仍需要在线索审核里人工核验后再联系。"
+  );
+}
+
 function chooseMarket(countryName) {
   const country = countries.find((item) => item.name === countryName);
   if (!country) return;
@@ -5347,7 +5354,10 @@ function bindForms() {
     if ($("#finderForm").domesticRegion) $("#finderForm").domesticRegion.value = "";
     syncFinderGoalToSelection();
   });
-  $("#finderForm").domesticRegion?.addEventListener("change", syncFinderGoalToSelection);
+  $("#finderForm").domesticRegion?.addEventListener("change", (event) => {
+    if (event.currentTarget.value) showDomesticDiscoveryNotice();
+    syncFinderGoalToSelection();
+  });
   $("#finderForm").model?.addEventListener("change", syncFinderGoalToSelection);
   $(".social-search-box").addEventListener("click", (event) => {
     const link = event.target.closest("[data-social-platform]");
