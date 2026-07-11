@@ -127,9 +127,10 @@ ADMIN_SETTING_DEFINITIONS = {
     "APIFY_API_TOKEN": {"type": "secret", "label": "Apify API Token", "group": "social", "status": "active", "use": "Apify Actors for social and directory discovery"},
     "APIFY_FACEBOOK_ACTOR_ID": {"type": "text", "label": "Apify Facebook Actor ID", "group": "social", "status": "reserved", "use": "Override Facebook Actor, for example apify/facebook-pages-scraper"},
     "APIFY_INSTAGRAM_ACTOR_ID": {"type": "text", "label": "Apify Instagram Actor ID", "group": "social", "status": "reserved", "use": "Override Instagram Actor, for example apify/instagram-search-scraper"},
-    "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example apify/tiktok-scraper"},
+    "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example clockworks/tiktok-scraper"},
     "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor"},
-    "APIFY_YOUTUBE_ACTOR_ID": {"type": "text", "label": "Apify YouTube Actor ID", "group": "social", "status": "reserved", "use": "Override YouTube Actor, for example apify/youtube-scraper"},
+    "APIFY_YOUTUBE_ACTOR_ID": {"type": "text", "label": "Apify YouTube Actor ID", "group": "social", "status": "reserved", "use": "Override YouTube Actor, for example streamers/youtube-scraper"},
+    "APIFY_TWITTER_ACTOR_ID": {"type": "text", "label": "Apify X / Twitter Actor ID", "group": "social", "status": "reserved", "use": "Override X / Twitter Actor, for example apidojo/tweet-scraper"},
     "AI_PROVIDER": {"type": "text", "label": "AI Provider", "group": "ai", "status": "active", "use": "deepseek / qwen; used for lead verification"},
     "DEEPSEEK_API_KEY": {"type": "secret", "label": "DeepSeek API Key", "group": "ai", "status": "active", "use": "AI lead verification"},
     "DEEPSEEK_BASE_URL": {"type": "url", "label": "DeepSeek Base URL", "group": "ai", "status": "active", "use": "OpenAI-compatible endpoint"},
@@ -5356,9 +5357,10 @@ def social_search_variants(
 APIFY_SOCIAL_ACTORS = {
     "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "apify/facebook-pages-scraper"),
     "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-search-scraper"),
-    "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "apify/tiktok-scraper"),
+    "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
     "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", ""),
-    "youtube": ("APIFY_YOUTUBE_ACTOR_ID", "apify/youtube-scraper"),
+    "youtube": ("APIFY_YOUTUBE_ACTOR_ID", "streamers/youtube-scraper"),
+    "twitter": ("APIFY_TWITTER_ACTOR_ID", "apidojo/tweet-scraper"),
 }
 
 
@@ -5394,7 +5396,13 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
         "proxy": {"useApifyProxy": True},
     }
     if platform == "youtube":
-        payload.update({"searchKeywords": query, "maxResultsShorts": 0, "maxResultStreams": 0})
+        payload.update({
+            "searchKeywords": query,
+            "searchQueries": [query],
+            "maxResults": limit,
+            "maxResultsShorts": 0,
+            "maxResultStreams": 0,
+        })
     elif platform == "instagram":
         payload = {
             "search": query,
@@ -5404,9 +5412,20 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
             "liveSearch": False,
         }
     elif platform == "facebook":
-        payload.update({"searchType": "pages"})
+        payload.update({"searchType": "pages", "maxPages": limit})
     elif platform == "tiktok":
-        payload.update({"searchSection": "users"})
+        payload.update({
+            "searchSection": "users",
+            "searchQueries": [query],
+            "maxProfilesPerQuery": limit,
+            "maxItems": limit,
+        })
+    elif platform == "twitter":
+        payload.update({
+            "searchTerms": [query],
+            "maxItems": limit,
+            "sort": "Latest",
+        })
     return payload
 
 
@@ -5423,6 +5442,7 @@ def first_text_value(item: dict, keys: tuple[str, ...]) -> str:
 def apify_item_url(platform: str, item: dict) -> str:
     url = first_text_value(item, (
         "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "channelUrl", "webUrl", "link", "externalUrl", "inputUrl",
+        "tweetUrl", "twitterUrl", "authorUrl", "videoUrl",
     ))
     if not url and isinstance(item.get("ig_business"), dict):
         profile = item.get("ig_business", {}).get("profile")
@@ -5445,6 +5465,8 @@ def apify_item_url(platform: str, item: dict) -> str:
             url = f"https://www.youtube.com/{username if username.startswith('@') else '@' + username}"
         elif platform == "linkedin":
             url = f"https://www.linkedin.com/company/{username}"
+        elif platform == "twitter":
+            url = f"https://x.com/{username}"
     return normalize_public_url(str(url or ""))
 
 
@@ -5471,10 +5493,11 @@ def normalize_apify_items(
             continue
         title = first_text_value(item, (
             "name", "title", "fullName", "username", "userName", "channelName", "pageName", "displayName",
+            "authorName", "authorUserName", "screenName",
         )) or safe_urlparse(url).path.strip("/").replace("/", " ")
         snippet_parts = [
-            first_text_value(item, ("description", "biography", "bio", "about", "text", "snippet", "summary", "categoryName", "businessCategoryName")),
-            first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount")),
+            first_text_value(item, ("description", "biography", "bio", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName")),
+            first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount", "views", "viewCount")),
         ]
         snippet = clean_text(" ".join(part for part in snippet_parts if part))
         normalized.append({
