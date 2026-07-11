@@ -3698,6 +3698,21 @@ def is_youtube_automotive_lead(title: str, snippet: str, url: str = "") -> bool:
     text = clean_text(f"{title} {snippet} {url}").lower()
     if not text:
         return False
+    sales_terms_pattern = (
+        r"\b(car dealer|cars dealer|dealership|auto trading|automotive trading|"
+        r"car showroom|motors showroom|used cars for sale|cars for sale|new cars for sale|luxury cars for sale|"
+        r"car importer|vehicle importer|vehicle distributor|fleet sales|"
+        r"vehicle procurement|inventory|stock vehicles|available for sale|"
+        r"whatsapp|contact us|call us|showroom address)\b"
+    )
+    if re.search(
+        r"\b(car review|reviews?|test drive|first drive|walkaround|pov|"
+        r"owner review|comparison|top 10|news|launch event|trailer|"
+        r"vlog|blogger|youtuber|influencer|media|magazine|tv channel)\b",
+        text,
+        re.I,
+    ) and not re.search(sales_terms_pattern, text, re.I):
+        return False
     if re.search(
         r"\b(motion capture|mocap|robotics?|humanoid|sensor|sensors|software|"
         r"gaming|game studio|animation|biomechanics|wearable technology|"
@@ -3745,6 +3760,26 @@ def is_youtube_automotive_lead(title: str, snippet: str, url: str = "") -> bool:
         re.I,
     )
     return bool(has_auto_subject and has_trade_context)
+
+
+def youtube_query_plan(searches: list[tuple[str, str]], source_mode: str) -> tuple[list[tuple[str, str]], int]:
+    if source_mode == "youtube":
+        query_limit, per_query_limit = 6, 8
+    elif source_mode == "social":
+        query_limit, per_query_limit = 4, 6
+    else:
+        query_limit, per_query_limit = 4, 6
+    deduped: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for query, account_type in searches:
+        key = clean_text(query).lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append((query, account_type))
+        if len(deduped) >= query_limit:
+            break
+    return deduped, per_query_limit
 
 
 def discovery_source_bucket(item: dict) -> str:
@@ -7966,7 +8001,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     google_primary_results: list[dict] = []
     notice = ""
     is_china_discovery = country_meta.get("code") == "cn"
-    social_source_modes = {"social", "instagram", "facebook", "tiktok", "linkedin"}
+    social_source_modes = {"social", "instagram", "facebook", "tiktok", "linkedin", "youtube"}
     use_geo_sources = not is_china_discovery or source_mode in ("google", "osm")
     include_support_sources = source_mode in social_source_modes and not is_china_discovery
     if (use_geo_sources and source_mode in ("all", "combined", "google")) or include_support_sources:
@@ -8147,7 +8182,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     ):
         reverse_platforms.add("youtube")
     if reverse_platforms:
-        reverse_seed_limit = min(8 if source_mode in platform_queries else 24, result_limit)
+        reverse_seed_limit = min(8 if source_mode in platform_queries or source_mode == "youtube" else 24, result_limit)
         website_social_results = social_accounts_from_business_websites(
             country,
             target_type,
@@ -8307,11 +8342,10 @@ def discover(params: dict[str, list[str]]) -> dict:
                 (query, "owner or manager account")
                 for query in city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, "owner manager founder")
             )
-        max_youtube_queries = 45 if source_mode == "youtube" else 10 if source_mode == "social" else 24
-        youtube_searches = list(dict.fromkeys(youtube_searches))[:max_youtube_queries]
+        youtube_searches, youtube_per_query_limit = youtube_query_plan(youtube_searches, source_mode)
         for youtube_query, youtube_account_type in youtube_searches:
             try:
-                youtube_items = search_youtube_channels(youtube_query, limit=25, country=country)
+                youtube_items = search_youtube_channels(youtube_query, limit=youtube_per_query_limit, country=country)
             except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
                 youtube_items = []
             for item in youtube_items:
@@ -8341,7 +8375,6 @@ def discover(params: dict[str, list[str]]) -> dict:
                 if (
                     not any(term and term in location_text for term in location_terms)
                     and not youtube_analysis.get("isCommercial")
-                    and not youtube_discovery_candidate
                 ):
                     continue
                 item["origin"] = "YouTube"
