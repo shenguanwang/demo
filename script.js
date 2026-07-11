@@ -1349,8 +1349,7 @@ function syncFinderGoalToSelection() {
 
 function showDomesticDiscoveryNotice() {
   window.alert(
-    "国内线索搜索功能正在测试中，数据可能不完整或不准确。\\n\\n" +
-    "当前会优先抓取汽车之家等公开汽车平台，并用百度/搜索引擎做补充；联系方式、地区、客户类型仍需要在线索审核里人工核验后再联系。"
+    "国内线索搜索正在测试中，当前数据线索较少，结果可能不准确。"
   );
 }
 
