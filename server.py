@@ -3743,6 +3743,24 @@ def balance_discovery_sources(items: list[dict]) -> list[dict]:
     return balanced
 
 
+def soften_dominant_discovery_sources(items: list[dict], source_mode: str, result_limit: int) -> list[dict]:
+    if source_mode == "youtube":
+        return items
+    youtube_soft_cap = max(6, min(14, max(1, result_limit // 3)))
+    kept: list[dict] = []
+    delayed: list[dict] = []
+    origin_counts: dict[str, int] = {}
+    for item in items:
+        origin = str(item.get("origin") or "")
+        if origin == "YouTube":
+            origin_counts[origin] = origin_counts.get(origin, 0) + 1
+            if origin_counts[origin] > youtube_soft_cap:
+                delayed.append(item)
+                continue
+        kept.append(item)
+    return kept + delayed
+
+
 TARGET_PROFILES = {
     "importer": {
         "label": "汽车进口商",
@@ -5294,14 +5312,23 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
         payload.update({"searchType": "pages", "maxPages": limit})
     elif platform == "tiktok":
         payload.update({
-            "searchSection": "users",
+            "searchSection": "",
             "searchQueries": [query],
+            "search": query,
             "maxProfilesPerQuery": limit,
             "maxItems": limit,
+            "resultsPerPage": min(20, limit),
+            "shouldDownloadVideos": False,
+            "shouldDownloadCovers": False,
+            "shouldDownloadAvatars": False,
+            "shouldDownloadSubtitles": False,
         })
     elif platform == "linkedin":
         payload.update({
-            "keywords": [query],
+            "searchQuery": query[:300],
+            "locations": [],
+            "scraperMode": "short",
+            "takePages": max(1, min(2, (limit + 49) // 50)),
             "query": query,
             "search": query,
             "limit": limit,
@@ -5320,11 +5347,35 @@ def first_text_value(item: dict, keys: tuple[str, ...]) -> str:
     return ""
 
 
+def nested_text_value(item: dict, paths: tuple[tuple[str, ...], ...]) -> str:
+    for path in paths:
+        value = item
+        for key in path:
+            if not isinstance(value, dict):
+                value = None
+                break
+            value = value.get(key)
+        if isinstance(value, str) and value.strip():
+            return clean_text(value)
+        if isinstance(value, (int, float)):
+            return str(value)
+    return ""
+
+
 def apify_item_url(platform: str, item: dict) -> str:
     url = first_text_value(item, (
         "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "channelUrl", "webUrl", "link", "externalUrl", "inputUrl",
         "videoUrl", "linkedinUrl", "linkedin_url", "companyUrl",
     ))
+    if not url:
+        url = nested_text_value(item, (
+            ("authorMeta", "profileUrl"),
+            ("authorMeta", "url"),
+            ("author", "profileUrl"),
+            ("author", "url"),
+            ("company", "url"),
+            ("company", "linkedinUrl"),
+        ))
     if not url and isinstance(item.get("ig_business"), dict):
         profile = item.get("ig_business", {}).get("profile")
         if isinstance(profile, dict):
@@ -5334,6 +5385,13 @@ def apify_item_url(platform: str, item: dict) -> str:
                 if username:
                     url = f"https://www.instagram.com/{username.lstrip('@')}/"
     username = first_text_value(item, ("username", "userName", "handle", "screenName", "channelId", "id"))
+    if not username:
+        username = nested_text_value(item, (
+            ("authorMeta", "name"),
+            ("author", "uniqueId"),
+            ("author", "username"),
+            ("company", "universalName"),
+        ))
     if not url and username:
         username = username.lstrip("@")
         if platform == "instagram":
@@ -5373,14 +5431,36 @@ def normalize_apify_items(
         title = first_text_value(item, (
             "name", "title", "fullName", "username", "userName", "channelName", "pageName", "displayName",
             "authorName", "authorUserName", "screenName", "companyName",
+        )) or nested_text_value(item, (
+            ("authorMeta", "nickName"),
+            ("authorMeta", "name"),
+            ("author", "nickname"),
+            ("author", "uniqueId"),
+            ("company", "name"),
         )) or safe_urlparse(url).path.strip("/").replace("/", " ")
         snippet_parts = [
             first_text_value(item, ("description", "biography", "bio", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName", "industry", "specialties")),
+            nested_text_value(item, (
+                ("authorMeta", "signature"),
+                ("author", "signature"),
+                ("company", "description"),
+                ("company", "industry"),
+            )),
             first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount", "views", "viewCount", "employeeCount", "companySize")),
+            nested_text_value(item, (
+                ("authorMeta", "fans"),
+                ("authorMeta", "heart"),
+                ("company", "followersCount"),
+                ("company", "companySize"),
+            )),
         ]
         snippet = clean_text(" ".join(part for part in snippet_parts if part))
         customer_website = normalize_public_url(first_text_value(item, (
             "website", "websiteUrl", "companyWebsite", "externalWebsite", "homepage",
+        )) or nested_text_value(item, (
+            ("authorMeta", "bioLink"),
+            ("author", "bioLink"),
+            ("company", "website"),
         )))
         if not is_business_website_url(customer_website):
             customer_website = ""
@@ -8195,6 +8275,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 raw_results.append(item)
     raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
     raw_results = balance_discovery_sources(raw_results)
+    raw_results = soften_dominant_discovery_sources(raw_results, source_mode, result_limit)
     raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
     if source_mode == "dealer":
         def dealer_source_priority(item: dict) -> tuple:
