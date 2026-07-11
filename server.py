@@ -5494,24 +5494,39 @@ def search_apify_social(
         return []
     results: list[dict] = []
     seen: set[str] = set()
-    for query in queries:
-        if len(results) >= limit:
-            break
+
+    def run_query(query: str) -> list[dict]:
         actor = apify_actor_url_part(actor_id)
         params = urllib.parse.urlencode({"token": token, "timeout": "180", "memory": "1024"})
         url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?{params}"
         try:
             items = post_json_value(url, apify_search_input(platform, query, min(25, limit)), timeout=180)
         except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
-            continue
-        for item in normalize_apify_items(platform, items, query, origin, source_type, limit):
-            identity = item["url"].lower().rstrip("/")
-            if identity in seen:
-                continue
-            seen.add(identity)
-            results.append(item)
+            return []
+        return normalize_apify_items(platform, items, query, origin, source_type, limit)
+
+    executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(queries))))
+    futures = [executor.submit(run_query, query) for query in queries]
+    try:
+        for future in as_completed(futures, timeout=190):
             if len(results) >= limit:
                 break
+            try:
+                query_items = future.result(timeout=1)
+            except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+                continue
+            for item in query_items:
+                identity = item["url"].lower().rstrip("/")
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                results.append(item)
+                if len(results) >= limit:
+                    break
+    except FuturesTimeoutError:
+        pass
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
     return results
 
 
@@ -8228,7 +8243,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 (query, "owner or manager account")
                 for query in city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, "owner manager founder")
             )
-        max_youtube_queries = 45 if source_mode == "youtube" else 32
+        max_youtube_queries = 45 if source_mode == "youtube" else 10 if source_mode == "social" else 24
         youtube_searches = list(dict.fromkeys(youtube_searches))[:max_youtube_queries]
         for youtube_query, youtube_account_type in youtube_searches:
             try:
