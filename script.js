@@ -3642,16 +3642,7 @@ function updateSocialProspectingQueries() {
   ].map((query) =>
     `<a href="https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="LinkedIn">${escapeHtml(query)} ↗</a>`
   ).join("");
-  $("#extraSocialSearchLinks").innerHTML = [
-    ["Telegram", "https://www.google.com/search?q=", `site:t.me ${place} car dealer OR motors OR showroom`],
-    ["X", "https://www.google.com/search?q=", `site:x.com ${place} car dealer OR motors OR showroom`],
-    ["Threads", "https://www.google.com/search?q=", `site:threads.net ${place} car dealer OR motors OR showroom`],
-    ["Pinterest", "https://www.google.com/search?q=", `site:pinterest.com ${place} car dealer OR motors OR showroom`],
-    ["Reddit", "https://www.google.com/search?q=", `site:reddit.com ${place} car dealer OR motors OR showroom`],
-    ["VK", "https://www.google.com/search?q=", `site:vk.com ${place} car dealer OR motors OR showroom`]
-  ].map(([platform, baseUrl, query]) =>
-    `<a href="${baseUrl}${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="${escapeHtml(platform)}">${escapeHtml(platform)} ↗</a>`
-  ).join("");
+  $("#extraSocialSearchLinks").innerHTML = "";
 }
 
 function socialPlatformFromUrl(url) {

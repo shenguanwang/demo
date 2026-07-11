@@ -130,7 +130,6 @@ ADMIN_SETTING_DEFINITIONS = {
     "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example clockworks/tiktok-scraper"},
     "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor, for example harvestapi/linkedin-company-search"},
     "APIFY_YOUTUBE_ACTOR_ID": {"type": "text", "label": "Apify YouTube Actor ID", "group": "social", "status": "reserved", "use": "Override YouTube Actor, for example streamers/youtube-scraper"},
-    "APIFY_TWITTER_ACTOR_ID": {"type": "text", "label": "Apify X / Twitter Actor ID", "group": "social", "status": "reserved", "use": "Override X / Twitter Actor, for example apidojo/tweet-scraper"},
     "AI_PROVIDER": {"type": "text", "label": "AI Provider", "group": "ai", "status": "active", "use": "deepseek / qwen; used for lead verification"},
     "DEEPSEEK_API_KEY": {"type": "secret", "label": "DeepSeek API Key", "group": "ai", "status": "active", "use": "AI lead verification"},
     "DEEPSEEK_BASE_URL": {"type": "url", "label": "DeepSeek Base URL", "group": "ai", "status": "active", "use": "OpenAI-compatible endpoint"},
@@ -144,8 +143,6 @@ ADMIN_SETTING_DEFINITIONS = {
     "TIKTOK_API_KEY": {"type": "secret", "label": "TikTok API Key", "group": "social", "status": "reserved", "use": "后续 TikTok 公开账号/商业接口"},
     "LINKEDIN_CLIENT_ID": {"type": "text", "label": "LinkedIn Client ID", "group": "social", "status": "reserved", "use": "后续 LinkedIn OAuth 接入"},
     "LINKEDIN_CLIENT_SECRET": {"type": "secret", "label": "LinkedIn Client Secret", "group": "social", "status": "reserved", "use": "后续 LinkedIn OAuth 接入"},
-    "TELEGRAM_BOT_TOKEN": {"type": "secret", "label": "Telegram Bot Token", "group": "social", "status": "reserved", "use": "后续 Telegram 频道/群组接口"},
-    "X_BEARER_TOKEN": {"type": "secret", "label": "X / Twitter Bearer Token", "group": "social", "status": "reserved", "use": "后续 X 搜索接口"},
     "REDDIT_CLIENT_ID": {"type": "text", "label": "Reddit Client ID", "group": "social", "status": "reserved", "use": "后续 Reddit 社区接口"},
     "REDDIT_CLIENT_SECRET": {"type": "secret", "label": "Reddit Client Secret", "group": "social", "status": "reserved", "use": "后续 Reddit 社区接口"},
     "PUBLIC_BASE_URL": {"type": "url", "label": "公开访问地址", "group": "runtime", "status": "active", "use": "回调/公开链接"},
@@ -5155,97 +5152,6 @@ def search_web(query: str, limit: int = 8, freshness_days: int | None = None, co
     return results
 
 
-def telegram_directory_terms(market: str, target_type: str) -> list[str]:
-    markets = [market]
-    if market.lower() in {"uae", "united arab emirates", "emirates"}:
-        markets.extend(["Dubai", "Abu Dhabi", "Sharjah", "Ajman"])
-    market_text = normalize_country_match_text(market)
-    for key, hints in COUNTRY_HINTS.items():
-        meta = COUNTRY_SEARCH_META.get(key, {})
-        aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
-        if any((token := normalize_country_match_text(alias)) and token in market_text for alias in aliases):
-            markets = [*hints[:4], *markets]
-            break
-    markets = list(dict.fromkeys(place for place in markets if place))
-    intent_terms = {
-        "dealer": ("car dealer", "used cars", "cars for sale", "motors", "car showroom"),
-        "parallel": ("car importer", "imported cars", "auto trading", "cars for sale"),
-        "importer": ("vehicle importer", "car distributor", "auto trading", "imported cars"),
-        "fleet": ("car rental", "fleet company", "vehicle procurement"),
-        "corporate": ("fleet procurement", "corporate vehicles", "car supplier"),
-        "government": ("vehicle supplier", "fleet tender", "automotive company"),
-        "buying": ("car buyer", "used cars", "luxury cars", "cars for sale"),
-        "individual": ("car buyer", "luxury cars", "electric vehicles", "cars for sale"),
-    }.get(target_type, ("car dealer", "used cars", "cars for sale", "motors", "car showroom"))
-    terms: list[str] = []
-    for place in markets:
-        for term in intent_terms:
-            terms.append(f"{place} {term}")
-            terms.append(f"{place} {term} telegram")
-    return list(dict.fromkeys(terms))
-
-
-TELEGRAM_DIRECTORY_SEARCH_URLS = (
-    ("TGStat", "https://tgstat.com/search?query={query}"),
-    ("Telemetr", "https://telemetr.io/en/channels?search={query}"),
-    ("TelegramChannels", "https://telegramchannels.me/search?search={query}"),
-)
-
-
-def search_telegram_directories(query: str, limit: int = 8) -> list[dict]:
-    results: list[dict] = []
-    seen: set[str] = set()
-    encoded = urllib.parse.quote_plus(query)
-    expected_domains = ("t.me", "telegram.me", "telegram.dog", "tgstat.", "telemetr.", "telegramchannels.", "tgram.", "tlgrm.")
-    generic_titles = {
-        "channel", "channels", "group", "groups", "feedback", "stickers", "support",
-        "search", "this form", "username", "https://t.me/username",
-    }
-    for source_name, template in TELEGRAM_DIRECTORY_SEARCH_URLS:
-        if len(results) >= limit:
-            break
-        url = template.format(query=encoded)
-        try:
-            page, final_url = fetch_document(url, timeout=4)
-        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
-            continue
-        base_url = final_url or url
-        for match in re.finditer(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]{0,500}?)</a>', page, flags=re.I):
-            href = html.unescape(match.group(1)).strip()
-            if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
-                continue
-            candidate_url = urllib.parse.urljoin(base_url, href)
-            candidate_url = normalize_social_profile_url(candidate_url)
-            if not is_valid_http_url(candidate_url):
-                continue
-            parsed = safe_urlparse(candidate_url)
-            domain = parsed.netloc.lower().removeprefix("www.")
-            identity = candidate_url.lower().rstrip("/")
-            if (
-                identity in seen
-                or not any(expected in domain for expected in expected_domains)
-                or not is_social_profile_url(candidate_url)
-            ):
-                continue
-            title = clean_text(match.group(2)) or parsed.path.strip("/") or domain
-            if not title or len(title) < 2:
-                title = candidate_url
-            title_key = title.lower().strip()
-            if title_key in generic_titles or "/username" in candidate_url.lower():
-                continue
-            seen.add(identity)
-            results.append(
-                {
-                    "title": title[:160],
-                    "url": candidate_url,
-                    "snippet": f"{source_name} public Telegram directory result for {query}",
-                }
-            )
-            if len(results) >= limit:
-                break
-    return results
-
-
 def social_search_variants(
     platform: str,
     site: str,
@@ -5287,49 +5193,16 @@ def social_search_variants(
         "imported cars",
         "vehicle importer",
     )
-    if platform == "telegram":
-        telegram_sites = (
-            "t.me",
-            "tgstat.com",
-            "telemetr.io",
-            "telegramchannels.me",
-            "tgram.io",
-            "tlgrm.eu",
-        )
-        for place in markets:
-            for telegram_site in telegram_sites:
-                queries.append(f"site:{telegram_site} {place} \"{company_terms[0]}\" contact phone email")
-                queries.append(f"site:{telegram_site} {place} \"{company_terms[0]}\" \u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b \u0442\u0435\u043b\u0435\u0444\u043e\u043d")
-            for term in broad_terms:
-                for telegram_site in telegram_sites:
-                    queries.append(f"site:{telegram_site} {place} \"{term}\"")
-                queries.append(f"{place} {term} Telegram channel")
-                queries.append(f"{place} {term} Telegram group")
-        return list(dict.fromkeys(queries))
-    if platform == "twitter":
-        for place in markets:
-            queries.append(f"site:x.com {place} \"{company_terms[0]}\" contact phone email")
-            queries.append(f"site:twitter.com {place} \"{company_terms[0]}\" bio contact")
-            for term in broad_terms:
-                queries.append(f"site:x.com {place} \"{term}\"")
-                queries.append(f"site:twitter.com {place} \"{term}\"")
-        return list(dict.fromkeys(queries))
-    if platform in {"instagram", "facebook", "tiktok", "threads", "pinterest", "reddit", "vk"}:
+    if platform in {"instagram", "facebook", "tiktok"}:
         site_variants = {
             "instagram": ("instagram.com",),
             "facebook": ("facebook.com",),
             "tiktok": ("tiktok.com",),
-            "threads": ("threads.net",),
-            "pinterest": ("pinterest.com",),
-            "reddit": ("reddit.com/r", "reddit.com/user"),
-            "vk": ("vk.com",),
         }.get(platform, (site,))
         for place in markets:
             for variant in site_variants:
                 queries.append(f"site:{variant} {place} \"{company_terms[0]}\" contact phone email")
                 queries.append(f"site:{variant} {place} \"{company_terms[0]}\" about bio contacts")
-                if platform in {"vk", "reddit"}:
-                    queries.append(f"site:{variant} {place} \"{company_terms[0]}\" \u043a\u043e\u043d\u0442\u0430\u043a\u0442\u044b \u0442\u0435\u043b\u0435\u0444\u043e\u043d")
             for term in broad_terms:
                 for variant in site_variants:
                     queries.append(f"site:{variant} {place} \"{term}\"")
@@ -5360,7 +5233,6 @@ APIFY_SOCIAL_ACTORS = {
     "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
     "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", "harvestapi/linkedin-company-search"),
     "youtube": ("APIFY_YOUTUBE_ACTOR_ID", "streamers/youtube-scraper"),
-    "twitter": ("APIFY_TWITTER_ACTOR_ID", "apidojo/tweet-scraper"),
 }
 
 
@@ -5420,12 +5292,6 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
             "maxProfilesPerQuery": limit,
             "maxItems": limit,
         })
-    elif platform == "twitter":
-        payload.update({
-            "searchTerms": [query],
-            "maxItems": limit,
-            "sort": "Latest",
-        })
     elif platform == "linkedin":
         payload.update({
             "keywords": [query],
@@ -5450,7 +5316,7 @@ def first_text_value(item: dict, keys: tuple[str, ...]) -> str:
 def apify_item_url(platform: str, item: dict) -> str:
     url = first_text_value(item, (
         "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "channelUrl", "webUrl", "link", "externalUrl", "inputUrl",
-        "tweetUrl", "twitterUrl", "authorUrl", "videoUrl", "linkedinUrl", "linkedin_url", "companyUrl",
+        "videoUrl", "linkedinUrl", "linkedin_url", "companyUrl",
     ))
     if not url and isinstance(item.get("ig_business"), dict):
         profile = item.get("ig_business", {}).get("profile")
@@ -5473,8 +5339,6 @@ def apify_item_url(platform: str, item: dict) -> str:
             url = f"https://www.youtube.com/{username if username.startswith('@') else '@' + username}"
         elif platform == "linkedin":
             url = f"https://www.linkedin.com/company/{username}"
-        elif platform == "twitter":
-            url = f"https://x.com/{username}"
     if platform == "linkedin" and url and "linkedin.com/" not in url.lower() and not url.startswith("http"):
         url = f"https://www.linkedin.com/company/{url.strip('/').lstrip('@')}"
     return normalize_public_url(str(url or ""))
@@ -8104,8 +7968,6 @@ def discover(params: dict[str, list[str]]) -> dict:
     social_source_modes = {"social", *platform_queries.keys()}
     if is_china_discovery and source_mode not in social_source_modes:
         selected_platforms = []
-    role_query = "dealership owner import manager sales director" if account_scope in ("person", "both") else ""
-    company_query = "car dealer importer automotive trading" if account_scope in ("company", "both") else ""
     social_search_stats = {
         "queries": 0,
         "rawResults": 0,
@@ -8147,29 +8009,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             query_variants = query_variants[:8]
         elif source_mode == "social":
             query_variants = query_variants[:12]
-        elif source_mode == "telegram":
-            query_variants = query_variants[:4]
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
-        if platform == "telegram":
-            directory_terms = telegram_directory_terms(market, target_type)
-            directory_terms = directory_terms[:3 if source_mode == "telegram" else 2]
-            social_search_stats["queries"] += len(directory_terms)
-            executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(directory_terms))))
-            futures = [
-                executor.submit(search_telegram_directories, directory_query, 6)
-                for directory_query in directory_terms
-            ]
-            try:
-                for future in as_completed(futures, timeout=DISCOVERY_SEARCH_TIMEOUT):
-                    try:
-                        social_results.extend(future.result(timeout=1))
-                    except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
-                        continue
-            except FuturesTimeoutError:
-                pass
-            finally:
-                executor.shutdown(wait=False, cancel_futures=True)
         executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(query_variants))))
         futures = [
             executor.submit(
@@ -8974,26 +8815,9 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"{social_search_stats['acceptedResults']} 条通过商业账号初筛。"
             "若仍为 0，通常是搜索引擎未收录当地账号；可改用单个平台搜索或本机 Chrome 登录态采集。"
         )
-    if source_mode == "telegram" and not leads:
-        notice = (
-            f"Telegram 公开搜索已执行 {social_search_stats['queries']} 组 t.me 查询，"
-            f"搜索引擎返回 {social_search_stats['rawResults']} 条候选，"
-            f"其中 {social_search_stats['profileResults']} 条可识别为公开频道或群组。"
-            "如果仍为 0，通常是 Telegram 频道/群没有被 Google、Bing、DuckDuckGo 或 Brave 收录；"
-            "Telegram 没有免费的全网官方搜索 API，建议把 Telegram 作为补充来源，主来源继续使用 Google Maps、YouTube 和官网目录。"
-        )
-    if source_mode == "telegram" and not leads:
-        notice = (
-            f"Telegram 公开搜索已执行 {social_search_stats['queries']} 组查询，"
-            f"覆盖 t.me、TGStat、Telemetr、TelegramChannels、Tgram、Tlgrm 等公开索引；"
-            f"搜索引擎返回 {social_search_stats['rawResults']} 条候选，"
-            f"其中 {social_search_stats['profileResults']} 条可识别为频道、群组或目录页。"
-            "如果仍为 0，说明这些关键词在公开搜索索引里没有可用记录；"
-            "要拿 Telegram 私域/未收录数据，需要登录态采集或 Telegram 客户端 API。"
-        )
     if excluded_brand_bound_dealers:
         notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定主机厂的单品牌 4S/授权店。"
-    if freshness_days and source_mode in ("social", "youtube", "instagram", "facebook", "tiktok", "linkedin", "telegram", "twitter", "threads", "pinterest", "reddit", "vk") and not leads and not notice:
+    if freshness_days and source_mode in ("social", "youtube", "instagram", "facebook", "tiktok", "linkedin") and not leads and not notice:
         notice = f"没有找到可确认发布日期且在最近 {freshness_days} 天内的线索。可以放宽到 30 天，或更换 Instagram、Facebook、LinkedIn 来源。"
     if source_mode == "google" and not leads and not notice:
         notice = "Google Maps 没有返回符合条件的企业，请调整中文目标描述或目标国家。"
