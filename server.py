@@ -5375,6 +5375,7 @@ def apify_keyword_query(query: str) -> str:
     value = re.sub(r"\bsite:\S+", " ", str(query or ""), flags=re.I)
     value = value.replace('"', " ")
     value = re.sub(r"\b(contact|contacts|phone|email|whatsapp|about|bio)\b", " ", value, flags=re.I)
+    value = re.sub(r"\bOR\b", " ", value, flags=re.I)
     value = re.sub(r"\s+", " ", value).strip()
     return value or str(query or "").strip()
 
@@ -5472,7 +5473,7 @@ def normalize_apify_items(
             "name", "title", "fullName", "username", "userName", "channelName", "pageName", "displayName",
         )) or safe_urlparse(url).path.strip("/").replace("/", " ")
         snippet_parts = [
-            first_text_value(item, ("description", "bio", "about", "text", "snippet", "summary", "categoryName")),
+            first_text_value(item, ("description", "biography", "bio", "about", "text", "snippet", "summary", "categoryName", "businessCategoryName")),
             first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount")),
         ]
         snippet = clean_text(" ".join(part for part in snippet_parts if part))
@@ -5510,10 +5511,10 @@ def search_apify_social(
         if len(results) >= limit:
             break
         actor = apify_actor_url_part(actor_id)
-        params = urllib.parse.urlencode({"token": token, "timeout": "45", "memory": "1024"})
+        params = urllib.parse.urlencode({"token": token, "timeout": "180", "memory": "1024"})
         url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?{params}"
         try:
-            items = post_json_value(url, apify_search_input(platform, query, min(10, limit)), timeout=60)
+            items = post_json_value(url, apify_search_input(platform, query, min(25, limit)), timeout=180)
         except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
             continue
         for item in normalize_apify_items(platform, items, query, origin, source_type, limit):
@@ -8163,14 +8164,16 @@ def discover(params: dict[str, list[str]]) -> dict:
             executor.shutdown(wait=False, cancel_futures=True)
         apify_results = []
         if platform in APIFY_SOCIAL_ACTORS:
-            apify_queries = query_variants[:1 if source_mode in ("all", "combined") else 2]
+            apify_query_limit = 1 if source_mode in ("all", "combined") else 4 if source_mode == "social" else 6
+            apify_result_limit = 6 if source_mode in ("all", "combined") else 16 if source_mode == "social" else 24
+            apify_queries = query_variants[:apify_query_limit]
             try:
                 apify_results = search_apify_social(
                     platform,
                     apify_queries,
                     origin,
                     source_type,
-                    limit=6 if source_mode in ("all", "combined") else 10,
+                    limit=apify_result_limit,
                 )
             except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                 apify_results = []
