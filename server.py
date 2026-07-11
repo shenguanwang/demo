@@ -5245,7 +5245,7 @@ def social_search_variants(
 
 
 APIFY_SOCIAL_ACTORS = {
-    "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "apify/facebook-pages-scraper"),
+    "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "apify/facebook-search-scraper"),
     "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-search-scraper"),
     "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
     "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", "harvestapi/linkedin-company-search"),
@@ -5309,7 +5309,13 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
             "liveSearch": False,
         }
     elif platform == "facebook":
-        payload.update({"searchType": "pages", "maxPages": limit})
+        payload.update({
+            "categories": [query],
+            "locations": [],
+            "resultsLimit": limit,
+            "searchType": "pages",
+            "maxPages": limit,
+        })
     elif platform == "tiktok":
         payload.update({
             "searchSection": "",
