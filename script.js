@@ -1340,15 +1340,28 @@ function visibleForeignCountries() {
 }
 
 function renderUserCountryOptions() {
-  const select = $("#userAssignedCountries");
-  if (!select) return;
-  select.innerHTML = countries.map((country) =>
-    `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`
-  ).join("");
+  const container = $("#userAssignedCountries");
+  if (!container) return;
+  container.innerHTML = countryCheckboxListHtml("new-user-country", []);
 }
 
-function selectedUserCountryValues(select) {
-  return Array.from(select?.selectedOptions || []).map((option) => option.value).filter(Boolean);
+function countryCheckboxListHtml(name, selected = []) {
+  const selectedKeys = new Set((Array.isArray(selected) ? selected : []).map(countryKey));
+  return countries.map((country) => {
+    const id = `${name}-${countryKey(country.name).replace(/[^a-z0-9]+/gi, "-")}`;
+    return `
+      <label class="user-country-option" for="${escapeHtml(id)}">
+        <input id="${escapeHtml(id)}" type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(country.name)}" ${selectedKeys.has(countryKey(country.name)) ? "checked" : ""}>
+        <span>${escapeHtml(country.name)}</span>
+      </label>
+    `;
+  }).join("");
+}
+
+function selectedUserCountryValues(container) {
+  return Array.from(container?.querySelectorAll("input[type='checkbox']:checked") || [])
+    .map((input) => input.value)
+    .filter(Boolean);
 }
 
 function assignedCountrySummary(values = []) {
@@ -5930,7 +5943,7 @@ function bindForms() {
           username: data.username,
           password: data.password,
           role: data.role || "user",
-          assignedCountries: selectedUserCountryValues(form.assignedCountries)
+          assignedCountries: selectedUserCountryValues($("#userAssignedCountries"))
         })
       });
       const result = await response.json().catch(() => ({}));
@@ -6002,14 +6015,7 @@ function bindForms() {
         await loadUserActivity(username);
       }
       if (button.dataset.userAction === "countries") {
-        const current = (button.dataset.countries || "").split("|").filter(Boolean);
-        const input = window.prompt(
-          `请输入 ${username} 负责的国外国家，多个用逗号分隔；留空表示全部国外国家：`,
-          current.join(", ")
-        );
-        if (input === null) return;
-        const assignedCountries = input.split(/[,，;；|]/).map((item) => item.trim()).filter(Boolean);
-        await updateUser(username, { assignedCountries });
+        renderUserCountryEditor(username, (button.dataset.countries || "").split("|").filter(Boolean));
       }
       if (button.dataset.userAction === "status") {
         const nextStatus = button.dataset.status === "enabled" ? "disabled" : "enabled";
@@ -6044,6 +6050,21 @@ function bindForms() {
     if (event.target.closest("[data-close-user-activity]")) {
       event.currentTarget.hidden = true;
       event.currentTarget.innerHTML = "";
+    }
+    const saveButton = event.target.closest("[data-save-user-countries]");
+    if (saveButton) {
+      const username = saveButton.dataset.username || "";
+      const panel = event.currentTarget;
+      saveButton.disabled = true;
+      updateUser(username, {
+        assignedCountries: selectedUserCountryValues(panel.querySelector("[data-user-country-editor]"))
+      }).then(() => {
+        panel.hidden = true;
+        panel.innerHTML = "";
+      }).catch((error) => {
+        window.alert(error.message || "区域保存失败，请稍后重试。");
+        saveButton.disabled = false;
+      });
     }
   });
 
@@ -6649,6 +6670,28 @@ async function loadUserActivity(username) {
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
   renderUserActivity(result);
+}
+
+function renderUserCountryEditor(username, selected = []) {
+  const panel = $("#userActivityPanel");
+  if (!panel) return;
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div>
+        <h3>${escapeHtml(username)} 负责区域</h3>
+        <span>勾选负责的国外国家；全不勾选表示全部国外国家。国内区域不受影响。</span>
+      </div>
+      <button class="ghost compact" type="button" data-close-user-activity>关闭</button>
+    </div>
+    <div class="user-country-checklist user-country-checklist-wide" data-user-country-editor>
+      ${countryCheckboxListHtml(`edit-user-country-${username}`, selected)}
+    </div>
+    <div class="result-actions">
+      <button class="ghost" type="button" data-close-user-activity>取消</button>
+      <button class="primary" type="button" data-save-user-countries data-username="${escapeHtml(username)}">确认</button>
+    </div>
+  `;
 }
 
 async function loadUsers() {
