@@ -2423,6 +2423,16 @@ textarea {
   line-height: 1.25;
 }
 
+.user-form .user-country-option {
+  display: flex;
+  grid-template-columns: none;
+  gap: 8px;
+}
+
+.user-country-option span {
+  min-width: 0;
+}
+
 .user-form .user-country-option input,
 .user-country-option input {
   flex: 0 0 auto;
