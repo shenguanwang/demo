@@ -1952,7 +1952,7 @@ def authenticate_user(username: str, password: str) -> dict | None:
 
 def normalize_user_role(role: str | None) -> str:
     value = str(role or "user").strip().lower()
-    if value not in {"user", "admin"}:
+    if value not in {"user", "operator", "admin"}:
         raise ValueError("用户角色无效")
     return value
 

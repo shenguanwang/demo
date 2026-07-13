@@ -4396,6 +4396,22 @@ function formatSyncTime(value) {
   return `${date.getFullYear()}年${pad(date.getMonth() + 1)}月${pad(date.getDate())}日 ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 }
 
+function userRoleLabel(role) {
+  if (role === "admin") return "管理员";
+  if (role === "operator") return "运营";
+  return "销售";
+}
+
+function userRoleOptions(selectedRole = "user") {
+  return [
+    ["user", "销售"],
+    ["operator", "运营"],
+    ["admin", "管理员"]
+  ].map(([value, label]) =>
+    `<option value="${value}" ${value === selectedRole ? "selected" : ""}>${label}</option>`
+  ).join("");
+}
+
 function renderAdminKpis() {
   const panel = $("#adminKpiPanel");
   if (!panel) return;
@@ -4434,7 +4450,7 @@ function renderAdminKpis() {
   if (rows) {
     rows.innerHTML = users.length ? users.map((user) => `
       <tr>
-        <td><strong>${escapeHtml(user.username || "-")}</strong><br><small>${user.role === "admin" ? "管理员" : "销售"}</small></td>
+        <td><strong>${escapeHtml(user.username || "-")}</strong><br><small>${escapeHtml(userRoleLabel(user.role))}</small></td>
         <td><span class="user-status ${user.status === "disabled" ? "disabled" : ""}">${user.status === "disabled" ? "已禁用" : "启用中"}</span></td>
         <td>${Number(user.pending || 0)}</td>
         <td>${Number(user.verified || 0)}</td>
@@ -6022,17 +6038,34 @@ function bindForms() {
         if (!confirm(`确认${nextStatus === "disabled" ? "禁用" : "启用"}用户 ${username} 吗？`)) return;
         await updateUser(username, { status: nextStatus });
       }
-      if (button.dataset.userAction === "role") {
-        const nextRole = button.dataset.role === "admin" ? "user" : "admin";
-        if (!confirm(`确认将用户 ${username} 设为${nextRole === "admin" ? "管理员" : "普通用户"}吗？`)) return;
-        await updateUser(username, { role: nextRole });
-      }
       if (button.dataset.userAction === "delete") {
         if (!confirm(`确认永久删除用户 ${username} 吗？该用户的线索、客户、报价和获客任务也会一并删除。`)) return;
         await updateUser(username, { action: "delete" });
       }
     } catch (error) {
       window.alert(error.message || "操作失败，请稍后重试。");
+    }
+  });
+
+  $("#userRows")?.addEventListener("change", async (event) => {
+    const selector = event.target.closest("[data-user-action='role-select']");
+    if (!selector) return;
+    const username = selector.dataset.username;
+    const previousRole = selector.dataset.role || "user";
+    const nextRole = selector.value || "user";
+    if (nextRole === previousRole) return;
+    if (!confirm(`确认将用户 ${username} 的角色改为${userRoleLabel(nextRole)}吗？`)) {
+      selector.value = previousRole;
+      return;
+    }
+    selector.disabled = true;
+    try {
+      await updateUser(username, { role: nextRole });
+    } catch (error) {
+      selector.value = previousRole;
+      window.alert(error.message || "修改角色失败，请稍后重试。");
+    } finally {
+      selector.disabled = false;
     }
   });
 
@@ -6610,7 +6643,7 @@ function renderUsers(users = []) {
     <tr>
       <td>${index + 1}</td>
       <td><strong>${escapeHtml(user.username)}</strong>${user.builtIn ? `<br><small>系统内置</small>` : ""}</td>
-      <td>${user.role === "admin" ? "管理员" : "普通用户"}</td>
+      <td>${escapeHtml(userRoleLabel(user.role))}</td>
       <td>${escapeHtml(assignedCountrySummary(user.assignedCountries))}</td>
       <td>${escapeHtml(formatSyncTime(user.createdAt))}</td>
       <td>
@@ -6624,10 +6657,12 @@ function renderUsers(users = []) {
         <button type="button" data-user-action="activity" data-username="${escapeHtml(user.username)}">记录</button>
         <button type="button" data-user-action="countries" data-countries="${escapeHtml((user.assignedCountries || []).join("|"))}" data-username="${escapeHtml(user.username)}">区域</button>
         <button type="button" data-user-action="password" data-username="${escapeHtml(user.username)}">改密码</button>
-        <button type="button" data-user-action="role" data-role="${escapeHtml(user.role)}" data-username="${escapeHtml(user.username)}">${user.role === "admin" ? "设为普通用户" : "设为管理员"}</button>
+        <select class="user-role-select" data-user-action="role-select" data-role="${escapeHtml(user.role)}" data-username="${escapeHtml(user.username)}" aria-label="修改 ${escapeHtml(user.username)} 的角色">
+          ${userRoleOptions(user.role)}
+        </select>
         <button type="button" data-user-action="status" data-status="${user.status}" data-username="${escapeHtml(user.username)}">${user.status === "disabled" ? "启用" : "禁用"}</button>
         <button class="danger" type="button" data-user-action="delete" data-username="${escapeHtml(user.username)}">删除</button>`}</div></td>
-    </tr>`).join("") : `<tr><td colspan="8">暂无普通用户。管理员可通过左侧表单添加。</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="8">暂无用户。管理员可通过左侧表单添加。</td></tr>`;
 }
 
 function renderUserActivity(data = {}) {
