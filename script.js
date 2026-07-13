@@ -374,6 +374,63 @@ function customerWebsiteKey(value) {
   return hostname || "";
 }
 
+function canonicalLeadUrl(value) {
+  try {
+    const raw = String(value || "").trim();
+    if (!raw || !/^(?:https?:\/\/|www\.)/i.test(raw)) return "";
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    const hostname = url.hostname.replace(/^www\./, "").toLowerCase();
+    const pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return `${hostname}${pathname}`.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+function normalizedLeadIdentityText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
+function leadRejectionFingerprints(lead) {
+  const fingerprints = new Set();
+  const company = normalizedLeadIdentityText(lead?.company);
+  const country = normalizedLeadIdentityText(lead?.country);
+  if (company && country) fingerprints.add(`company:${country}:${company}`);
+
+  const website = customerWebsiteKey(lead?.customerWebsite);
+  if (website) fingerprints.add(`website:${website}`);
+
+  const evidenceSources = Array.isArray(lead?.evidenceSources) ? lead.evidenceSources : [];
+  const socialProfiles = Array.isArray(lead?.socialProfiles) ? lead.socialProfiles : [];
+  [
+    lead?.sourceUrl,
+    ...evidenceSources.map((item) => item?.url),
+    ...socialProfiles.map((item) => item?.url)
+  ].forEach((value) => {
+    const key = canonicalLeadUrl(value);
+    if (key) fingerprints.add(`url:${key}`);
+  });
+
+  const email = String(lead?.email || "").trim().toLowerCase();
+  if (email) fingerprints.add(`email:${email}`);
+  [lead?.phone, lead?.whatsapp].forEach((value) => {
+    const digits = String(value || "").replace(/\D/g, "");
+    if (digits.length >= 7) fingerprints.add(`phone:${digits}`);
+  });
+  return fingerprints;
+}
+
+function matchesRejectedLeadMemory(lead, rejectedFingerprintSet) {
+  for (const fingerprint of leadRejectionFingerprints(lead)) {
+    if (rejectedFingerprintSet.has(fingerprint)) return true;
+  }
+  return false;
+}
+
 function limitDuplicateCustomerWebsites(leads, existingRecords = []) {
   const counts = new Map();
   (Array.isArray(existingRecords) ? existingRecords : []).forEach((record) => {
@@ -506,7 +563,6 @@ let adminKpiSnapshot = null;
 let adminKpiLoading = false;
 let adminSettingsSnapshot = null;
 let adminApiShowAll = false;
-let loginEventsShowAll = false;
 let crmViewFilter = "all";
 let navigationBound = false;
 
@@ -1297,6 +1353,27 @@ function renderCountries() {
   updateFinderMarketControls();
 }
 
+function reviewRecommendationHtml(lead) {
+  const fullReason = String(lead.contactReason || lead.reason || "").trim();
+  const marker = /\s*AI\u590d\u6838\s*[:\uFF1A]\s*/i;
+  const markerMatch = fullReason.match(marker);
+  let recommendation = fullReason;
+  let aiReason = String(lead.aiReview?.reason || "").trim();
+  if (markerMatch) {
+    const markerIndex = markerMatch.index ?? -1;
+    if (markerIndex >= 0) {
+      recommendation = fullReason.slice(0, markerIndex).trim();
+      aiReason = aiReason || fullReason.slice(markerIndex + markerMatch[0].length).trim();
+    }
+  }
+  return `
+    <div class="review-recommendation">
+      <p><strong>推荐联系理由：</strong><span>${escapeHtml(recommendation || "等待核验")}</span></p>
+      ${aiReason ? `<p class="review-ai-result"><strong>AI复核：</strong><span>${escapeHtml(aiReason)}</span></p>` : ""}
+    </div>
+  `;
+}
+
 function selectedDomesticRegion(value = "") {
   return domesticRegions.find((item) => item.value === value) || domesticRegions[0];
 }
@@ -2021,7 +2098,7 @@ function renderReview() {
           <dd>${escapeHtml([...(lead.intentSignals || []), ...(lead.businessSignals || [])].join("、") || "汽车业务匹配，待进一步确认采购意向")}</dd>
         </div>
       </dl>
-      <p class="review-recommendation"><strong>推荐联系理由：</strong>${escapeHtml(lead.contactReason || lead.reason)}</p>
+      ${reviewRecommendationHtml(lead)}
       ${(lead.reviewNotes || (lead.attachments || []).length) ? `
         <section class="lead-review-notes">
           ${lead.reviewNotes ? `<p><strong>人工备注</strong>${escapeHtml(lead.reviewNotes)}</p>` : ""}
@@ -3181,6 +3258,7 @@ function normalizeLead(raw) {
     businessSignals: Array.isArray(raw.businessSignals) ? raw.businessSignals : [],
     intentSignals: Array.isArray(raw.intentSignals) ? raw.intentSignals : [],
     contactReason: raw.contactReason || "",
+    aiReview: raw.aiReview && typeof raw.aiReview === "object" ? { ...raw.aiReview } : {},
     rejectReason: raw.rejectReason || "",
     rejectedAt: raw.rejectedAt || "",
     reviewNotes: raw.reviewNotes || "",
@@ -4822,6 +4900,11 @@ async function loadDiscoveryJobs(options = {}) {
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
   discoveryJobs = (Array.isArray(result.jobs) ? result.jobs : [])
     .filter((job) => !hiddenDiscoveryJobIds.has(String(job?.id || "")));
+  const restoredAiReviews = backfillAiReviewsFromDiscoveryJobs();
+  if (restoredAiReviews) {
+    renderReview();
+    saveState();
+  }
   renderDiscoveryJobs();
   renderReviewFilterOptions();
   const active = discoveryJobs.find((job) => ["queued", "running"].includes(job.status));
@@ -4969,6 +5052,40 @@ function discoveryJobLabel(job) {
   return `${job.country || "未指定市场"} · ${job.model || "未指定车型"} · ${formatJobTime(job.createdAt || job.updatedAt)}`;
 }
 
+function backfillAiReviewsFromDiscoveryJobs() {
+  const jobsById = new Map(discoveryJobs.map((job) => [String(job?.id || ""), job]));
+  let restored = 0;
+  [...reviewLeads, ...customers, ...rejectedLeads].forEach((lead) => {
+    if (lead?.aiReview?.reason || !lead?.discoveryJobId) return;
+    const job = jobsById.get(String(lead.discoveryJobId));
+    const candidates = Array.isArray(job?.result?.leads) ? job.result.leads : [];
+    const company = normalizedLeadIdentityText(lead.company);
+    const companyMatches = candidates.filter((candidate) => (
+      normalizedLeadIdentityText(candidate?.company) === company
+      && candidate?.aiReview
+      && typeof candidate.aiReview === "object"
+      && Object.keys(candidate.aiReview).length
+    ));
+    if (!companyMatches.length) return;
+
+    const leadUrls = new Set([
+      lead.sourceUrl,
+      lead.customerWebsite,
+      lead.source
+    ].map(canonicalLeadUrl).filter(Boolean));
+    const matched = companyMatches.find((candidate) => [
+      candidate?.sourceUrl,
+      candidate?.customerWebsite,
+      candidate?.source
+    ].map(canonicalLeadUrl).filter(Boolean).some((url) => leadUrls.has(url)))
+      || (companyMatches.length === 1 ? companyMatches[0] : null);
+    if (!matched) return;
+    lead.aiReview = { ...matched.aiReview };
+    restored += 1;
+  });
+  return restored;
+}
+
 function mergeDiscoveryResult(result, sourceMode = "", job = null) {
   const found = Array.isArray(result?.leads) ? result.leads : [];
   const normalizedFound = found
@@ -4984,9 +5101,13 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
   const existing = new Set(
     [...reviewLeads, ...customers].map((lead) => `${lead.company}|${lead.source}`.toLowerCase())
   );
+  const rejectedFingerprintSet = new Set(
+    rejectedLeads.flatMap((lead) => [...leadRejectionFingerprints(lead)])
+  );
   const normalizedFresh = normalizedFound
-    .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()));
-  const fresh = limitDuplicateCustomerWebsites(normalizedFresh, [...reviewLeads, ...customers]);
+    .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()))
+    .filter((lead) => !matchesRejectedLeadMemory(lead, rejectedFingerprintSet));
+  const fresh = limitDuplicateCustomerWebsites(normalizedFresh, [...reviewLeads, ...customers, ...rejectedLeads]);
   if (fresh.length) {
     reviewLeads = [...fresh, ...reviewLeads];
     refreshAllLeadViews();
@@ -5569,11 +5690,19 @@ function bindForms() {
   $("#reviewGrid").addEventListener("click", (event) => {
     const row = event.target.closest("[data-review-lead-row]");
     if (row && !event.target.closest("input, button, a, summary, details")) {
+      const listScroll = row.closest(".review-list-scroll");
+      const previousScrollTop = listScroll?.scrollTop || 0;
       selectedReviewLeadId = row.dataset.reviewLeadRow;
       editingReviewLeadId = "";
       rejectingReviewLeadId = "";
       closeOpenReviewDetails();
       renderReview();
+      const nextListScroll = document.querySelector("#reviewGrid .review-list-scroll");
+      const selectedRow = document.querySelector(
+        `[data-review-lead-row="${CSS.escape(selectedReviewLeadId)}"]`
+      );
+      selectedRow?.focus({ preventScroll: true });
+      if (nextListScroll) nextListScroll.scrollTop = previousScrollTop;
       return;
     }
     const sectionButton = event.target.closest("[data-section]");
@@ -5773,7 +5902,7 @@ function bindForms() {
   });
 
   $("#refreshUsers")?.addEventListener("click", () => loadUsers().catch((error) => {
-    $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
+    $("#userRows").innerHTML = `<tr><td colspan="7">${escapeHtml(error.message)}</td></tr>`;
   }));
 
   $("#cancelPasswordChange")?.addEventListener("click", resetAccountPasswordForm);
@@ -5783,11 +5912,6 @@ function bindForms() {
   $("#toggleAdminApis")?.addEventListener("click", () => {
     adminApiShowAll = !adminApiShowAll;
     renderAdminSettings(adminSettingsSnapshot || {});
-  });
-  $("#reloadLoginEvents")?.addEventListener("click", () => loadLoginEvents());
-  $("#toggleLoginEvents")?.addEventListener("click", () => {
-    loginEventsShowAll = !loginEventsShowAll;
-    loadLoginEvents();
   });
   $("#clearAdminSettingsForm")?.addEventListener("click", () => {
     const form = $("#adminSettingsForm");
@@ -5827,6 +5951,9 @@ function bindForms() {
         if (password === null) return;
         await updateUser(username, { password });
       }
+      if (button.dataset.userAction === "activity") {
+        await loadUserActivity(username);
+      }
       if (button.dataset.userAction === "status") {
         const nextStatus = button.dataset.status === "enabled" ? "disabled" : "enabled";
         if (!confirm(`确认${nextStatus === "disabled" ? "禁用" : "启用"}用户 ${username} 吗？`)) return;
@@ -5854,6 +5981,13 @@ function bindForms() {
     setTimeout(() => {
       $("#copyEmail").textContent = "复制英文";
     }, 1200);
+  });
+
+  $("#userActivityPanel")?.addEventListener("click", (event) => {
+    if (event.target.closest("[data-close-user-activity]")) {
+      event.currentTarget.hidden = true;
+      event.currentTarget.innerHTML = "";
+    }
   });
 
   $("#openOutlookDraft")?.addEventListener("click", () => openOutlookDraft());
@@ -6267,67 +6401,6 @@ function compactUserAgent(value = "") {
   return [browser, os].filter(Boolean).join(" / ");
 }
 
-function renderLoginEvents(data = {}) {
-  const list = $("#loginEventsList");
-  const summary = $("#loginEventsSummary");
-  if (!list) return;
-  const events = Array.isArray(data.events) ? data.events : [];
-  const accounts = Array.isArray(data.accounts) ? data.accounts : [];
-  if (summary) {
-    summary.textContent = accounts.length
-      ? `${accounts.length} 个账号，${data.onlineCount || 0} 个在线，最近显示 ${events.length} 条登录`
-      : "暂无账号在线记录";
-  }
-  list.innerHTML = `
-    <div class="table-wrap"><table>
-      <thead><tr><th>账号</th><th>在线</th><th>最后活跃</th><th>最近 IP</th><th>设备 / 浏览器</th></tr></thead>
-      <tbody>
-        ${accounts.length ? accounts.map((account) => `
-          <tr>
-            <td>${escapeHtml(account.username || "")}</td>
-            <td><span class="user-status ${account.online ? "" : "disabled"}">${account.online ? "在线" : "离线"}</span></td>
-            <td>${escapeHtml(account.lastSeenAt ? formatJobTime(account.lastSeenAt) : "暂无")}</td>
-            <td>${escapeHtml(account.ip || "unknown")}</td>
-            <td title="${escapeHtml(account.userAgent || "")}">${escapeHtml(compactUserAgent(account.userAgent))}</td>
-          </tr>
-        `).join("") : `<tr><td colspan="5">暂无在线记录</td></tr>`}
-      </tbody>
-    </table></div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>登录时间</th><th>账号</th><th>IP 地址</th><th>设备 / 浏览器</th></tr></thead>
-      <tbody>
-        ${events.length ? events.map((event) => `
-          <tr>
-            <td>${escapeHtml(formatJobTime(event.createdAt || ""))}</td>
-            <td>${escapeHtml(event.username || "")}</td>
-            <td>${escapeHtml(event.ip || "unknown")}</td>
-            <td title="${escapeHtml(event.userAgent || "")}">${escapeHtml(compactUserAgent(event.userAgent))}</td>
-          </tr>
-        `).join("") : `<tr><td colspan="4">暂无登录记录。下次登录后会显示 IP、时间和浏览器。</td></tr>`}
-      </tbody>
-    </table></div>
-  `;
-  const toggle = $("#toggleLoginEvents");
-  if (toggle) toggle.textContent = loginEventsShowAll ? "收起" : "查看全部";
-}
-
-async function loadLoginEvents() {
-  if (currentSession?.role !== "admin") return;
-  try {
-    const params = new URLSearchParams();
-    if (loginEventsShowAll) params.set("all", "1");
-    const response = await apiFetch(`/api/admin/login-events${params.size ? `?${params}` : ""}`, { cache: "no-store" });
-    const result = await response.json().catch(() => ({}));
-    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-    renderLoginEvents(result);
-  } catch (error) {
-    const summary = $("#loginEventsSummary");
-    if (summary) summary.textContent = `登录记录读取失败：${error.message}`;
-    const list = $("#loginEventsList");
-    if (list) list.innerHTML = `<p class="empty">登录记录读取失败，请稍后重试。</p>`;
-  }
-}
-
 function customApiRowHtml(item = {}) {
   const id = item.id || `new-${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const type = item.type === "text" ? "text" : "secret";
@@ -6396,7 +6469,6 @@ async function loadAdminSettings() {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderAdminSettings(result);
-    loadLoginEvents();
     setAdminSettingsStatus("设置已读取。密钥输入框留空表示保持不变。", "success");
   } catch (error) {
     setAdminSettingsStatus(error.message || "设置读取失败。", "error");
@@ -6456,19 +6528,74 @@ function renderUsers(users = []) {
       <td><strong>${escapeHtml(user.username)}</strong>${user.builtIn ? `<br><small>系统内置</small>` : ""}</td>
       <td>${user.role === "admin" ? "管理员" : "普通用户"}</td>
       <td>${escapeHtml(formatSyncTime(user.createdAt))}</td>
+      <td>
+        <span class="user-status ${user.online ? "online" : "disabled"}">${user.online ? "在线" : "离线"}</span>
+        <br><small>${escapeHtml(user.lastSeenAt ? formatJobTime(user.lastSeenAt) : "暂无记录")}</small>
+      </td>
       <td><span class="user-status ${user.status === "disabled" ? "disabled" : ""}">${user.status === "disabled" ? "已禁用" : "启用中"}</span></td>
-      <td><div class="user-actions">${user.builtIn ? `<span class="meta">受保护</span>` : `
+      <td><div class="user-actions">${user.builtIn ? `
+        <button type="button" data-user-action="activity" data-username="${escapeHtml(user.username)}">记录</button>
+        <span class="meta">受保护</span>` : `
+        <button type="button" data-user-action="activity" data-username="${escapeHtml(user.username)}">记录</button>
         <button type="button" data-user-action="password" data-username="${escapeHtml(user.username)}">改密码</button>
         <button type="button" data-user-action="role" data-role="${escapeHtml(user.role)}" data-username="${escapeHtml(user.username)}">${user.role === "admin" ? "设为普通用户" : "设为管理员"}</button>
         <button type="button" data-user-action="status" data-status="${user.status}" data-username="${escapeHtml(user.username)}">${user.status === "disabled" ? "启用" : "禁用"}</button>
         <button class="danger" type="button" data-user-action="delete" data-username="${escapeHtml(user.username)}">删除</button>`}</div></td>
-    </tr>`).join("") : `<tr><td colspan="6">暂无普通用户。管理员可通过左侧表单添加。</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="7">暂无普通用户。管理员可通过左侧表单添加。</td></tr>`;
+}
+
+function renderUserActivity(data = {}) {
+  const panel = $("#userActivityPanel");
+  if (!panel) return;
+  const user = data.user || {};
+  const presence = data.presence || {};
+  const events = Array.isArray(data.events) ? data.events : [];
+  panel.hidden = false;
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div>
+        <h3>${escapeHtml(user.username || presence.username || "账号")} 操作记录</h3>
+        <span>${presence.online ? "当前在线" : "当前离线"} · 最近 ${events.length} 条登录记录</span>
+      </div>
+      <button class="ghost compact" type="button" data-close-user-activity>关闭</button>
+    </div>
+    <div class="user-activity-summary">
+      <span><b>在线状态</b>${presence.online ? "在线" : "离线"}</span>
+      <span><b>最后活跃</b>${escapeHtml(presence.lastSeenAt ? formatJobTime(presence.lastSeenAt) : "暂无记录")}</span>
+      <span><b>最近 IP</b>${escapeHtml(presence.ip || "unknown")}</span>
+      <span><b>设备</b>${escapeHtml(compactUserAgent(presence.userAgent || ""))}</span>
+    </div>
+    <div class="table-wrap"><table>
+      <thead><tr><th>时间</th><th>IP 地址</th><th>设备 / 浏览器</th></tr></thead>
+      <tbody>
+        ${events.length ? events.map((event) => `
+          <tr>
+            <td>${escapeHtml(formatJobTime(event.createdAt || ""))}</td>
+            <td>${escapeHtml(event.ip || "unknown")}</td>
+            <td title="${escapeHtml(event.userAgent || "")}">${escapeHtml(compactUserAgent(event.userAgent))}</td>
+          </tr>
+        `).join("") : `<tr><td colspan="3">暂无登录记录。</td></tr>`}
+      </tbody>
+    </table></div>
+  `;
+}
+
+async function loadUserActivity(username) {
+  const panel = $("#userActivityPanel");
+  if (panel) {
+    panel.hidden = false;
+    panel.innerHTML = `<p class="empty">正在读取 ${escapeHtml(username)} 的记录…</p>`;
+  }
+  const response = await apiFetch(`/api/users/${encodeURIComponent(username)}/activity`, { cache: "no-store" });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  renderUserActivity(result);
 }
 
 async function loadUsers() {
   if (currentSession?.role !== "admin") return;
   const rows = $("#userRows");
-  if (rows) rows.innerHTML = `<tr><td colspan="6">正在读取用户列表…</td></tr>`;
+  if (rows) rows.innerHTML = `<tr><td colspan="7">正在读取用户列表…</td></tr>`;
   const response = await apiFetch("/api/users", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -6561,7 +6688,7 @@ async function init() {
     console.error("Cloud workspace load failed:", error);
   });
   loadUsers().catch((error) => {
-    if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="6">${escapeHtml(error.message)}</td></tr>`;
+    if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="7">${escapeHtml(error.message)}</td></tr>`;
   });
   loadAdminSettings();
   setInterval(renderBeijingGreeting, 1_000);

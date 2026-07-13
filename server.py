@@ -1733,6 +1733,38 @@ def login_event_row(row) -> dict:
     }
 
 
+def presence_rows_by_user() -> dict[str, tuple]:
+    initialize_state_store()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT username, last_seen_at, ip_address, user_agent FROM user_presence")
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute("SELECT username, last_seen_at, ip_address, user_agent FROM user_presence").fetchall()
+    return {
+        str(row[0]): row
+        for row in rows
+        if not hmac.compare_digest(str(row[0] or ""), HIDDEN_ADMIN_USERNAME)
+    }
+
+
+def presence_payload(username: str, user: dict | None = None, row: tuple | None = None) -> dict:
+    now = datetime.now(timezone.utc)
+    last_seen = str(row[1]) if row else ""
+    last_seen_dt = parse_timestamp(last_seen)
+    return {
+        "username": username,
+        "role": (user or {}).get("role", "user"),
+        "status": (user or {}).get("status", "enabled"),
+        "online": bool(last_seen_dt and (now - last_seen_dt) <= timedelta(minutes=10)),
+        "lastSeenAt": last_seen,
+        "ip": row[2] if row else "",
+        "userAgent": row[3] if row else "",
+    }
+
+
 def purge_hidden_admin_tracking() -> None:
     initialize_state_store()
     if DATABASE_URL:
@@ -1807,16 +1839,7 @@ def list_login_events(username: str = "", limit: int = 30) -> list[dict]:
 def list_account_presence() -> list[dict]:
     initialize_state_store()
     users = {user["username"]: user for user in list_users()}
-    if DATABASE_URL:
-        with postgres_connection() as connection:
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT username, last_seen_at, ip_address, user_agent FROM user_presence")
-                rows = cursor.fetchall()
-    else:
-        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            rows = connection.execute("SELECT username, last_seen_at, ip_address, user_agent FROM user_presence").fetchall()
-    now = datetime.now(timezone.utc)
-    presence_by_user = {row[0]: row for row in rows}
+    presence_by_user = presence_rows_by_user()
     for username in presence_by_user:
         if hmac.compare_digest(str(username or ""), HIDDEN_ADMIN_USERNAME):
             continue
@@ -1825,19 +1848,7 @@ def list_account_presence() -> list[dict]:
     for username, user in users.items():
         if hmac.compare_digest(str(username or ""), HIDDEN_ADMIN_USERNAME):
             continue
-        row = presence_by_user.get(username)
-        last_seen = str(row[1]) if row else ""
-        last_seen_dt = parse_timestamp(last_seen)
-        online = bool(last_seen_dt and (now - last_seen_dt) <= timedelta(minutes=10))
-        accounts.append({
-            "username": username,
-            "role": user.get("role", "user"),
-            "status": user.get("status", "enabled"),
-            "online": online,
-            "lastSeenAt": last_seen,
-            "ip": row[2] if row else "",
-            "userAgent": row[3] if row else "",
-        })
+        accounts.append(presence_payload(username, user, presence_by_user.get(username)))
     accounts.sort(key=lambda item: (not item["online"], item.get("username", "")))
     return accounts
 
@@ -1888,6 +1899,15 @@ def list_users() -> list[dict]:
             continue
         created_at = row[3].isoformat() if hasattr(row[3], "isoformat") else str(row[3])
         users.append({"username": row[0], "role": row[1], "status": row[2], "createdAt": created_at, "builtIn": False})
+    presence_by_user = presence_rows_by_user()
+    for user in users:
+        presence = presence_payload(user["username"], user, presence_by_user.get(user["username"]))
+        user.update({
+            "online": presence["online"],
+            "lastSeenAt": presence["lastSeenAt"],
+            "ip": presence["ip"],
+            "userAgent": presence["userAgent"],
+        })
     return users
 
 
@@ -9617,6 +9637,26 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 self.send_json(200, {"ok": True, "users": list_users()})
             except (OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path.startswith("/api/users/") and parsed.path.endswith("/activity"):
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            username = urllib.parse.unquote(parsed.path.split("/")[-2])
+            try:
+                user = get_user(username)
+                if not user or user.get("hidden"):
+                    self.send_json(404, {"ok": False, "error": "用户不存在"})
+                    return
+                purge_hidden_admin_tracking()
+                presence = presence_payload(username, user, presence_rows_by_user().get(username))
+                self.send_json(200, {
+                    "ok": True,
+                    "user": {key: value for key, value in user.items() if key != "passwordHash"},
+                    "presence": presence,
+                    "events": list_login_events(username, 80),
+                })
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/admin/kpi":
