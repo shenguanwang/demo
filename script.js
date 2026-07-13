@@ -1323,8 +1323,44 @@ function summarizeLead(lead) {
   return `${lead.city || lead.country} 的${lead.type}，${grade}。建议结合官网信息推荐${lead.model}。`;
 }
 
+function userAssignedCountries() {
+  return Array.isArray(currentSession?.assignedCountries) ? currentSession.assignedCountries : [];
+}
+
+function countryAllowedForSession(country) {
+  if (currentSession?.role === "admin") return true;
+  const assigned = userAssignedCountries();
+  if (!assigned.length) return true;
+  const key = countryKey(country?.name || country || "");
+  return assigned.some((item) => countryKey(item) === key);
+}
+
+function visibleForeignCountries() {
+  return countries.filter((country) => countryAllowedForSession(country));
+}
+
+function renderUserCountryOptions() {
+  const select = $("#userAssignedCountries");
+  if (!select) return;
+  select.innerHTML = countries.map((country) =>
+    `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`
+  ).join("");
+}
+
+function selectedUserCountryValues(select) {
+  return Array.from(select?.selectedOptions || []).map((option) => option.value).filter(Boolean);
+}
+
+function assignedCountrySummary(values = []) {
+  const assigned = Array.isArray(values) ? values : [];
+  if (!assigned.length) return "全部国外国家";
+  if (assigned.length <= 2) return assigned.join("、");
+  return `${assigned.slice(0, 2).join("、")} 等 ${assigned.length} 个国家`;
+}
+
 function renderCountries() {
-  $("#countryGrid").innerHTML = countries.map((country) => `
+  const marketCountries = visibleForeignCountries();
+  $("#countryGrid").innerHTML = marketCountries.map((country) => `
     <article class="country-card" data-country="${escapeHtml(country.name)}" tabindex="0" role="button">
       <div class="country-rank">
         <span class="tag">${country.rank}</span>
@@ -1338,10 +1374,15 @@ function renderCountries() {
   `).join("");
   const select = $("#finderCountry");
   const current = select.value;
-  select.innerHTML = countries.map((country) =>
+  const selectCountries = marketCountries.length ? marketCountries : countries;
+  select.innerHTML = selectCountries.map((country) =>
     `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`
   ).join("");
-  if (countries.some((country) => country.name === current)) select.value = current;
+  if (selectCountries.some((country) => country.name === current)) {
+    select.value = current;
+  } else if (selectCountries[0]) {
+    select.value = selectCountries[0].name;
+  }
   const domesticSelect = $("#finderDomesticRegion");
   if (domesticSelect) {
     const domesticCurrent = domesticSelect.value;
@@ -5885,11 +5926,17 @@ function bindForms() {
       const response = await apiFetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: data.username, password: data.password, role: data.role || "user" })
+        body: JSON.stringify({
+          username: data.username,
+          password: data.password,
+          role: data.role || "user",
+          assignedCountries: selectedUserCountryValues(form.assignedCountries)
+        })
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
       form.reset();
+      renderUserCountryOptions();
       status.textContent = `已添加用户：${result.user.username}`;
       status.classList.add("success");
       await loadUsers();
@@ -5902,7 +5949,7 @@ function bindForms() {
   });
 
   $("#refreshUsers")?.addEventListener("click", () => loadUsers().catch((error) => {
-    $("#userRows").innerHTML = `<tr><td colspan="7">${escapeHtml(error.message)}</td></tr>`;
+    $("#userRows").innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
   }));
 
   $("#cancelPasswordChange")?.addEventListener("click", resetAccountPasswordForm);
@@ -5953,6 +6000,16 @@ function bindForms() {
       }
       if (button.dataset.userAction === "activity") {
         await loadUserActivity(username);
+      }
+      if (button.dataset.userAction === "countries") {
+        const current = (button.dataset.countries || "").split("|").filter(Boolean);
+        const input = window.prompt(
+          `请输入 ${username} 负责的国外国家，多个用逗号分隔；留空表示全部国外国家：`,
+          current.join(", ")
+        );
+        if (input === null) return;
+        const assignedCountries = input.split(/[,，;；|]/).map((item) => item.trim()).filter(Boolean);
+        await updateUser(username, { assignedCountries });
       }
       if (button.dataset.userAction === "status") {
         const nextStatus = button.dataset.status === "enabled" ? "disabled" : "enabled";
@@ -6527,6 +6584,7 @@ function renderUsers(users = []) {
       <td>${index + 1}</td>
       <td><strong>${escapeHtml(user.username)}</strong>${user.builtIn ? `<br><small>系统内置</small>` : ""}</td>
       <td>${user.role === "admin" ? "管理员" : "普通用户"}</td>
+      <td>${escapeHtml(assignedCountrySummary(user.assignedCountries))}</td>
       <td>${escapeHtml(formatSyncTime(user.createdAt))}</td>
       <td>
         <span class="user-status ${user.online ? "online" : "disabled"}">${user.online ? "在线" : "离线"}</span>
@@ -6537,11 +6595,12 @@ function renderUsers(users = []) {
         <button type="button" data-user-action="activity" data-username="${escapeHtml(user.username)}">记录</button>
         <span class="meta">受保护</span>` : `
         <button type="button" data-user-action="activity" data-username="${escapeHtml(user.username)}">记录</button>
+        <button type="button" data-user-action="countries" data-countries="${escapeHtml((user.assignedCountries || []).join("|"))}" data-username="${escapeHtml(user.username)}">区域</button>
         <button type="button" data-user-action="password" data-username="${escapeHtml(user.username)}">改密码</button>
         <button type="button" data-user-action="role" data-role="${escapeHtml(user.role)}" data-username="${escapeHtml(user.username)}">${user.role === "admin" ? "设为普通用户" : "设为管理员"}</button>
         <button type="button" data-user-action="status" data-status="${user.status}" data-username="${escapeHtml(user.username)}">${user.status === "disabled" ? "启用" : "禁用"}</button>
         <button class="danger" type="button" data-user-action="delete" data-username="${escapeHtml(user.username)}">删除</button>`}</div></td>
-    </tr>`).join("") : `<tr><td colspan="7">暂无普通用户。管理员可通过左侧表单添加。</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="8">暂无普通用户。管理员可通过左侧表单添加。</td></tr>`;
 }
 
 function renderUserActivity(data = {}) {
@@ -6595,7 +6654,7 @@ async function loadUserActivity(username) {
 async function loadUsers() {
   if (currentSession?.role !== "admin") return;
   const rows = $("#userRows");
-  if (rows) rows.innerHTML = `<tr><td colspan="7">正在读取用户列表…</td></tr>`;
+  if (rows) rows.innerHTML = `<tr><td colspan="8">正在读取用户列表…</td></tr>`;
   const response = await apiFetch("/api/users", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -6658,6 +6717,7 @@ async function init() {
   }
   const startupSteps = [
     ["北京时间", renderBeijingGreeting],
+    ["用户区域", renderUserCountryOptions],
     ["市场", renderCountries],
     ["关键词", renderKeywords],
     ["线索", renderLeads],
@@ -6688,7 +6748,7 @@ async function init() {
     console.error("Cloud workspace load failed:", error);
   });
   loadUsers().catch((error) => {
-    if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="7">${escapeHtml(error.message)}</td></tr>`;
+    if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
   });
   loadAdminSettings();
   setInterval(renderBeijingGreeting, 1_000);

@@ -6,7 +6,7 @@
   <title>华为系新能源汽车海外获客工作台</title>
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
-  <link rel="stylesheet" href="./styles.css?v=20260713-user-activity">
+  <link rel="stylesheet" href="./styles.css?v=20260713-user-regions">
 </head>
 <body>
   <aside class="sidebar">
@@ -531,6 +531,10 @@
           <div class="panel-head"><h3>添加用户</h3><span>初始状态：启用</span></div>
           <label>用户名<input name="username" autocomplete="off" minlength="3" maxlength="32" required placeholder="3-32 位字母、数字或 _ . -"></label>
           <label>角色<select name="role"><option value="user">普通用户</option><option value="admin">管理员</option></select></label>
+          <label>负责国家（国外）
+            <select name="assignedCountries" id="userAssignedCountries" multiple size="6"></select>
+            <small>不选表示负责全部国外国家；国内区域不受影响。</small>
+          </label>
           <label>密码<input name="password" type="password" autocomplete="new-password" minlength="6" required placeholder="至少 6 位"></label>
           <label>确认密码<input name="confirmPassword" type="password" autocomplete="new-password" minlength="6" required placeholder="再次输入密码"></label>
           <p class="form-status" id="userFormStatus" role="status"></p>
@@ -539,8 +543,8 @@
         <div class="panel user-table-panel">
           <div class="panel-head"><div><h3>用户列表</h3><span id="userCount">0 位用户</span></div><button class="ghost compact" id="refreshUsers" type="button">刷新</button></div>
           <div class="table-wrap"><table>
-            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>创建时间</th><th>在线</th><th>状态</th><th>操作</th></tr></thead>
-            <tbody id="userRows"><tr><td colspan="7">正在读取用户列表…</td></tr></tbody>
+            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>负责区域</th><th>创建时间</th><th>在线</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="userRows"><tr><td colspan="8">正在读取用户列表…</td></tr></tbody>
           </table></div>
           <div class="user-activity-panel" id="userActivityPanel" hidden></div>
         </div>
@@ -1061,6 +1065,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260713-user-activity"></script>
+  <script src="./script.js?v=20260713-user-regions"></script>
 </body>
 </html>

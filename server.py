@@ -845,10 +845,12 @@ def initialize_state_store() -> None:
                         password_hash TEXT NOT NULL,
                         role TEXT NOT NULL DEFAULT 'user',
                         status TEXT NOT NULL DEFAULT 'enabled',
+                        assigned_countries JSONB NOT NULL DEFAULT '[]'::jsonb,
                         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                     )
                     """
                 )
+                cursor.execute("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS assigned_countries JSONB NOT NULL DEFAULT '[]'::jsonb")
                 cursor.execute(
                     """
                     CREATE TABLE IF NOT EXISTS app_settings (
@@ -934,10 +936,16 @@ def initialize_state_store() -> None:
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user',
                 status TEXT NOT NULL DEFAULT 'enabled',
+                assigned_countries TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL
             )
             """
         )
+        try:
+            connection.execute("ALTER TABLE app_users ADD COLUMN assigned_countries TEXT NOT NULL DEFAULT '[]'")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
         connection.execute(
             """
             CREATE TABLE IF NOT EXISTS app_settings (
@@ -1888,17 +1896,16 @@ def list_users() -> list[dict]:
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT username, role, status, created_at FROM app_users ORDER BY created_at ASC")
+                cursor.execute("SELECT username, role, status, created_at, assigned_countries FROM app_users ORDER BY created_at ASC")
                 rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            rows = connection.execute("SELECT username, role, status, created_at FROM app_users ORDER BY created_at ASC").fetchall()
-    users = [{"username": AUTH_USERNAME, "role": "admin", "status": "enabled", "createdAt": "系统内置", "builtIn": True}]
+            rows = connection.execute("SELECT username, role, status, created_at, assigned_countries FROM app_users ORDER BY created_at ASC").fetchall()
+    users = [user_row_public(AUTH_USERNAME, "admin", "enabled", "系统内置", [], True)]
     for row in rows:
         if row[0] in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
             continue
-        created_at = row[3].isoformat() if hasattr(row[3], "isoformat") else str(row[3])
-        users.append({"username": row[0], "role": row[1], "status": row[2], "createdAt": created_at, "builtIn": False})
+        users.append(user_row_public(row[0], row[1], row[2], row[3], row[4] if len(row) > 4 else [], False))
     presence_by_user = presence_rows_by_user()
     for user in users:
         presence = presence_payload(user["username"], user, presence_by_user.get(user["username"]))
@@ -1913,21 +1920,25 @@ def list_users() -> list[dict]:
 
 def get_user(username: str) -> dict | None:
     if hmac.compare_digest(username, AUTH_USERNAME):
-        return {"username": AUTH_USERNAME, "role": "admin", "status": "enabled", "builtIn": True}
+        return user_row_public(AUTH_USERNAME, "admin", "enabled", "系统内置", [], True)
     if hmac.compare_digest(username, HIDDEN_ADMIN_USERNAME):
-        return {"username": HIDDEN_ADMIN_USERNAME, "role": "admin", "status": "enabled", "builtIn": True, "hidden": True}
+        user = user_row_public(HIDDEN_ADMIN_USERNAME, "admin", "enabled", "系统内置", [], True)
+        user["hidden"] = True
+        return user
     initialize_state_store()
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT username, password_hash, role, status, created_at FROM app_users WHERE username = %s", (username,))
+                cursor.execute("SELECT username, password_hash, role, status, created_at, assigned_countries FROM app_users WHERE username = %s", (username,))
                 row = cursor.fetchone()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            row = connection.execute("SELECT username, password_hash, role, status, created_at FROM app_users WHERE username = ?", (username,)).fetchone()
+            row = connection.execute("SELECT username, password_hash, role, status, created_at, assigned_countries FROM app_users WHERE username = ?", (username,)).fetchone()
     if not row:
         return None
-    return {"username": row[0], "passwordHash": row[1], "role": row[2], "status": row[3], "builtIn": False}
+    user = user_row_public(row[0], row[2], row[3], row[4], row[5] if len(row) > 5 else [], False)
+    user["passwordHash"] = row[1]
+    return user
 
 
 def authenticate_user(username: str, password: str) -> dict | None:
@@ -1946,7 +1957,67 @@ def normalize_user_role(role: str | None) -> str:
     return value
 
 
-def create_user(username: str, password: str, role: str | None = None) -> dict:
+def normalize_assigned_countries(value) -> list[str]:
+    if value in (None, "", "all"):
+        return []
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except json.JSONDecodeError:
+            parsed = [part.strip() for part in re.split(r"[,;|]\s*", value) if part.strip()]
+    else:
+        parsed = value
+    if not isinstance(parsed, list):
+        return []
+    countries = []
+    for item in parsed:
+        text = clean_text(str(item or ""))[:120]
+        if not text or re.search(r"China|中国", text, re.I):
+            continue
+        countries.append(text)
+    return list(dict.fromkeys(countries))
+
+
+def assigned_country_matches(assigned: list[str], country: str) -> bool:
+    if not assigned:
+        return True
+    country_text = normalize_country_match_text(country)
+    country_meta = country_search_meta(country)
+    country_aliases = [country, country_meta.get("location", ""), *(country_meta.get("aliases") or ())]
+    country_tokens = {normalize_country_match_text(alias) for alias in country_aliases if normalize_country_match_text(alias)}
+    for item in assigned:
+        item_text = normalize_country_match_text(item)
+        item_meta = country_search_meta(item)
+        item_aliases = [item, item_meta.get("location", ""), *(item_meta.get("aliases") or ())]
+        item_tokens = {normalize_country_match_text(alias) for alias in item_aliases if normalize_country_match_text(alias)}
+        if country_text in item_text or item_text in country_text or country_tokens.intersection(item_tokens):
+            return True
+    return False
+
+
+def ensure_user_can_access_country(user: dict, country: str) -> None:
+    if not user or user.get("role") == "admin":
+        return
+    if country_search_meta(country).get("code") == "cn":
+        return
+    assigned = normalize_assigned_countries(user.get("assignedCountries") or user.get("assigned_countries"))
+    if assigned and not assigned_country_matches(assigned, country):
+        raise PermissionError("该账号未分配这个目标国家")
+
+
+def user_row_public(username: str, role: str, status: str, created_at, assigned_countries=None, built_in: bool = False) -> dict:
+    created_value = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
+    return {
+        "username": username,
+        "role": role,
+        "status": status,
+        "createdAt": created_value,
+        "assignedCountries": normalize_assigned_countries(assigned_countries),
+        "builtIn": built_in,
+    }
+
+
+def create_user(username: str, password: str, role: str | None = None, assigned_countries=None) -> dict:
     username = normalize_username(username)
     if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
         raise ValueError("管理员账户为系统内置账户，不能重复创建")
@@ -1955,25 +2026,37 @@ def create_user(username: str, password: str, role: str | None = None) -> dict:
     if get_user(username):
         raise ValueError("用户名已存在")
     role = normalize_user_role(role)
+    assigned_countries = normalize_assigned_countries(assigned_countries)
+    encoded_countries = json.dumps(assigned_countries, ensure_ascii=False)
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     password_hash = hash_password(password)
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
-                    "INSERT INTO app_users (username, password_hash, role, status, created_at) VALUES (%s, %s, %s, 'enabled', NOW())",
-                    (username, password_hash, role),
+                    """
+                    INSERT INTO app_users (username, password_hash, role, status, assigned_countries, created_at)
+                    VALUES (%s, %s, %s, 'enabled', %s::jsonb, NOW())
+                    """,
+                    (username, password_hash, role, encoded_countries),
                 )
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
             connection.execute(
-                "INSERT INTO app_users (username, password_hash, role, status, created_at) VALUES (?, ?, ?, 'enabled', ?)",
-                (username, password_hash, role, now),
+                "INSERT INTO app_users (username, password_hash, role, status, assigned_countries, created_at) VALUES (?, ?, ?, 'enabled', ?, ?)",
+                (username, password_hash, role, encoded_countries, now),
             )
-    return {"username": username, "role": role, "status": "enabled", "createdAt": now, "builtIn": False}
+    return user_row_public(username, role, "enabled", now, assigned_countries, False)
 
 
-def update_user(username: str, *, password: str | None = None, status: str | None = None, role: str | None = None) -> dict:
+def update_user(
+    username: str,
+    *,
+    password: str | None = None,
+    status: str | None = None,
+    role: str | None = None,
+    assigned_countries=None,
+) -> dict:
     username = normalize_username(username)
     if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
         raise ValueError("系统内置管理员不可修改或删除")
@@ -1993,6 +2076,10 @@ def update_user(username: str, *, password: str | None = None, status: str | Non
     if role is not None:
         updates.append("role = %s" if DATABASE_URL else "role = ?")
         params.append(normalize_user_role(role))
+    if assigned_countries is not None:
+        encoded_countries = json.dumps(normalize_assigned_countries(assigned_countries), ensure_ascii=False)
+        updates.append("assigned_countries = %s::jsonb" if DATABASE_URL else "assigned_countries = ?")
+        params.append(encoded_countries)
     if not updates:
         raise ValueError("没有可更新的字段")
     params.append(username)
@@ -9576,6 +9663,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "authenticated": bool(user),
                     "username": user.get("username", "") if user else "",
                     "role": user.get("role", "") if user else "",
+                    "assignedCountries": user.get("assignedCountries", []) if user else [],
                 },
             )
             return
@@ -9762,9 +9850,14 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if parsed.path == "/api/discover":
             try:
-                result = discover(urllib.parse.parse_qs(parsed.query))
+                params = urllib.parse.parse_qs(parsed.query)
+                ensure_user_can_access_country(self.current_user(), (params.get("country") or ["UAE"])[0])
+                result = discover(params)
                 body = json.dumps(result, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
+            except PermissionError as exc:
+                body = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
+                self.send_response(403)
             except Exception as exc:  # Keep the browser readable for a local tool.
                 body = json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False).encode("utf-8")
                 self.send_response(500)
@@ -9853,7 +9946,12 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
-                user = create_user(str(payload.get("username", "")), str(payload.get("password", "")), payload.get("role"))
+                user = create_user(
+                    str(payload.get("username", "")),
+                    str(payload.get("password", "")),
+                    payload.get("role"),
+                    payload.get("assignedCountries"),
+                )
                 self.send_json(201, {"ok": True, "user": user})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
@@ -9874,6 +9972,7 @@ class Handler(SimpleHTTPRequestHandler):
                         password=payload.get("password"),
                         status=payload.get("status"),
                         role=payload.get("role"),
+                        assigned_countries=payload.get("assignedCountries") if "assignedCountries" in payload else None,
                     )
                     self.send_json(200, {"ok": True, "user": {key: value for key, value in user.items() if key != "passwordHash"}})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
