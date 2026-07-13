@@ -2153,7 +2153,7 @@ textarea {
 
 .user-management-layout {
   display: grid;
-  grid-template-columns: minmax(250px, 0.62fr) minmax(0, 1.38fr);
+  grid-template-columns: minmax(300px, 360px) minmax(0, 1fr);
   gap: 16px;
 }
 
@@ -2293,7 +2293,7 @@ textarea {
 .user-form {
   display: grid;
   align-content: start;
-  gap: 14px;
+  gap: 12px;
 }
 
 .user-form label {
@@ -2306,7 +2306,7 @@ textarea {
 
 .user-form input,
 .user-form select {
-  min-height: 42px;
+  min-height: 40px;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: 9px;
@@ -2332,6 +2332,40 @@ textarea {
 
 .user-table-panel { min-width: 0; }
 .user-table-panel .panel-head > div { min-width: 0; }
+.user-table-panel table {
+  min-width: 960px;
+  table-layout: fixed;
+}
+
+.user-table-panel th,
+.user-table-panel td {
+  padding: 10px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  vertical-align: top;
+}
+
+.user-table-panel th:nth-child(1),
+.user-table-panel td:nth-child(1) { width: 42px; }
+.user-table-panel th:nth-child(2),
+.user-table-panel td:nth-child(2) { width: 110px; }
+.user-table-panel th:nth-child(3),
+.user-table-panel td:nth-child(3) { width: 64px; }
+.user-table-panel th:nth-child(4),
+.user-table-panel td:nth-child(4) { width: 175px; }
+.user-table-panel th:nth-child(5),
+.user-table-panel td:nth-child(5) { width: 116px; }
+.user-table-panel th:nth-child(6),
+.user-table-panel td:nth-child(6) { width: 78px; }
+.user-table-panel th:nth-child(7),
+.user-table-panel td:nth-child(7) { width: 70px; }
+.user-table-panel th:nth-child(8),
+.user-table-panel td:nth-child(8) { width: 330px; }
+.user-table-panel td:nth-child(4) {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 .user-status {
   display: inline-flex;
@@ -2350,10 +2384,10 @@ textarea {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   white-space: nowrap;
 }
-.user-actions button { min-height: 30px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #394553; font-size: 11px; }
+.user-actions button { min-height: 28px; padding: 0 7px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: #394553; font-size: 10px; }
 .user-actions .danger { border-color: #f0d2ce; color: #a33c32; background: #fff8f7; }
 
 .user-table-panel .table-wrap {
@@ -2362,10 +2396,11 @@ textarea {
 
 .user-country-checklist {
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
-  max-height: 170px;
+  max-height: 132px;
   overflow: auto;
-  padding: 8px;
+  padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #fff;
@@ -2381,15 +2416,48 @@ textarea {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 28px;
+  min-height: 24px;
   color: var(--ink);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.25;
 }
 
+.user-form .user-country-option input,
 .user-country-option input {
+  flex: 0 0 auto;
   width: 14px;
   height: 14px;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
   accent-color: var(--accent);
+}
+
+.user-region-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.34);
+}
+
+.user-region-modal {
+  width: min(560px, 100%);
+  max-height: min(680px, calc(100vh - 40px));
+  overflow: auto;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.24);
+}
+
+.user-region-modal .panel-head {
+  padding: 0 0 12px;
+  border: 0;
 }
 
 .user-activity-panel {

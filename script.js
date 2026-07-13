@@ -6051,21 +6051,27 @@ function bindForms() {
       event.currentTarget.hidden = true;
       event.currentTarget.innerHTML = "";
     }
-    const saveButton = event.target.closest("[data-save-user-countries]");
-    if (saveButton) {
-      const username = saveButton.dataset.username || "";
-      const panel = event.currentTarget;
-      saveButton.disabled = true;
-      updateUser(username, {
-        assignedCountries: selectedUserCountryValues(panel.querySelector("[data-user-country-editor]"))
-      }).then(() => {
-        panel.hidden = true;
-        panel.innerHTML = "";
-      }).catch((error) => {
-        window.alert(error.message || "区域保存失败，请稍后重试。");
-        saveButton.disabled = false;
-      });
+  });
+
+  document.addEventListener("click", (event) => {
+    const closeButton = event.target.closest("[data-close-user-region-modal]");
+    if (closeButton || event.target.matches("[data-user-region-modal]")) {
+      closeUserRegionModal();
+      return;
     }
+    const saveButton = event.target.closest("[data-save-user-countries]");
+    if (!saveButton) return;
+    const username = saveButton.dataset.username || "";
+    const modal = saveButton.closest("[data-user-region-modal]");
+    saveButton.disabled = true;
+    updateUser(username, {
+      assignedCountries: selectedUserCountryValues(modal?.querySelector("[data-user-country-editor]"))
+    }).then(() => {
+      closeUserRegionModal();
+    }).catch((error) => {
+      window.alert(error.message || "区域保存失败，请稍后重试。");
+      saveButton.disabled = false;
+    });
   });
 
   $("#openOutlookDraft")?.addEventListener("click", () => openOutlookDraft());
@@ -6673,25 +6679,33 @@ async function loadUserActivity(username) {
 }
 
 function renderUserCountryEditor(username, selected = []) {
-  const panel = $("#userActivityPanel");
-  if (!panel) return;
-  panel.hidden = false;
-  panel.innerHTML = `
-    <div class="panel-head">
-      <div>
-        <h3>${escapeHtml(username)} 负责区域</h3>
-        <span>勾选负责的国外国家；全不勾选表示全部国外国家。国内区域不受影响。</span>
+  closeUserRegionModal();
+  const modal = document.createElement("div");
+  modal.className = "user-region-modal-backdrop";
+  modal.dataset.userRegionModal = "true";
+  modal.innerHTML = `
+    <div class="user-region-modal" role="dialog" aria-modal="true" aria-label="${escapeHtml(username)} 负责区域">
+      <div class="panel-head">
+        <div>
+          <h3>${escapeHtml(username)} 负责区域</h3>
+          <span>勾选负责的国外国家；全不勾选表示全部国外国家。国内区域不受影响。</span>
+        </div>
+        <button class="ghost compact" type="button" data-close-user-region-modal>关闭</button>
       </div>
-      <button class="ghost compact" type="button" data-close-user-activity>关闭</button>
-    </div>
-    <div class="user-country-checklist user-country-checklist-wide" data-user-country-editor>
-      ${countryCheckboxListHtml(`edit-user-country-${username}`, selected)}
-    </div>
-    <div class="result-actions">
-      <button class="ghost" type="button" data-close-user-activity>取消</button>
-      <button class="primary" type="button" data-save-user-countries data-username="${escapeHtml(username)}">确认</button>
+      <div class="user-country-checklist user-country-checklist-wide" data-user-country-editor>
+        ${countryCheckboxListHtml(`edit-user-country-${username}`, selected)}
+      </div>
+      <div class="result-actions">
+        <button class="ghost" type="button" data-close-user-region-modal>取消</button>
+        <button class="primary" type="button" data-save-user-countries data-username="${escapeHtml(username)}">确认</button>
+      </div>
     </div>
   `;
+  document.body.appendChild(modal);
+}
+
+function closeUserRegionModal() {
+  document.querySelector("[data-user-region-modal]")?.remove();
 }
 
 async function loadUsers() {
