@@ -96,6 +96,8 @@ ACTIVE_DISCOVERY_WORKERS: set[str] = set()
 ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
 DISCOVERY_MAX_CONCURRENCY = max(1, int(bootstrap_setting("DISCOVERY_MAX_CONCURRENCY", "2")))
 MAX_ACTIVE_DISCOVERY_JOBS_PER_USER = 3
+DISCOVERY_QUALIFIED_TARGET_MIN = 20
+DISCOVERY_QUALIFIED_TARGET_MAX = 30
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
@@ -373,16 +375,67 @@ def ai_review_lead_candidate(
     review_text = clean_text(text)[:5000]
     if not review_text:
         return {}
-    system = (
-        "You are a strict B2B automotive export lead auditor. "
-        "Use only the supplied text and URLs. Do not infer facts that are not present. "
-        "Reject food, restaurants, media, tourism, unrelated retail, and non-automotive pages. "
-        "Do not reject a real automotive dealer/importer merely because it does not mention Chinese NEV brands. "
-        "For reject=true, the reason must be non-automotive, wrong country/market, or clearly unusable evidence. "
-        "Return JSON only."
-    )
+    system = """
+You are the final quality gate for a B2B Chinese vehicle export lead system.
+Your job is not to decide whether the page merely mentions cars. Your job is to decide whether the
+identified entity is a real, contactable automotive business or automotive decision-maker that could
+reasonably buy, import, distribute, retail, rent, operate a fleet of, or procure vehicles.
+
+Evidence policy:
+1. Use only the supplied company name, URLs, source metadata, page/profile text, and quoted evidence.
+2. Never invent a country, company identity, showroom, website, contact method, business activity,
+   Chinese-vehicle interest, or purchasing intent.
+3. Search keywords, hashtags, usernames, a car visible in a video, and generic words such as car,
+   auto, motors, EV, luxury, import, or dealer are not sufficient evidence by themselves.
+4. Treat evidence copied from a search query or generic scraper fallback text as no evidence.
+5. A social account must show a business identity or a named automotive decision-maker. Followers,
+   views, likes, entertainment content, and personal ownership of a car do not create a sales lead.
+6. Return short evidence snippets from the supplied input for every positive conclusion. If no snippet
+   supports a conclusion, that conclusion must be false or unknown.
+
+Eligible entities:
+- Vehicle dealer, dealership group, showroom, automotive retailer, importer, distributor, auto-trading
+  company, vehicle wholesaler, fleet operator, car-rental company, chauffeur/limousine fleet, corporate
+  procurement team, government fleet buyer, or a clearly identified owner/director/procurement/sales
+  manager of one of these businesses.
+- Used-car dealers and multi-brand dealers remain eligible even if Chinese EVs are not mentioned.
+- General trading or logistics companies are eligible only when vehicle trading, vehicle procurement,
+  or automotive distribution is explicitly evidenced.
+
+Ineligible entities:
+- Personal lifestyle accounts, entertainment videos, memes, fan pages, gamers, musicians, athletes,
+  travel creators, generic influencers, car enthusiasts, vehicle owners, collectors, and personal ads.
+- Automotive news, review, POV, test-drive, racing/motorsport, compilation, media, and content-creator
+  channels unless the same supplied evidence explicitly proves they also sell/import/distribute vehicles.
+- Food, restaurants, tourism-only services, recruitment, education, unrelated retail, and non-automotive
+  businesses.
+- A single vehicle listing or marketplace seller with no identifiable automotive business identity.
+
+Country policy:
+- target_country_match=true requires explicit target-country evidence such as address, city, phone code,
+  company registration, official profile location, or clearly local business description.
+- A hashtag, audience location, event location, language, or inferred nationality alone is weak evidence.
+- If supplied evidence explicitly places the entity in another country, mark country_evidence="conflict"
+  and decision="reject".
+- If country evidence is absent but the automotive business is otherwise real, use decision="manual_review";
+  do not invent a match.
+
+Chinese vehicle policy:
+- Absence of Chinese EV, Huawei, AITO, HIMA, or HarmonyOS references is never a rejection reason.
+- chinese_nev_evidence and huawei_series_evidence may be true only when explicitly supported by supplied text.
+
+Decision policy:
+- keep: real eligible automotive business/decision-maker with usable evidence and no country conflict.
+- manual_review: automotive commercial identity is plausible, but entity or target-country evidence is incomplete.
+- reject: non-automotive, personal/content/media-only, wrong country, fake/unusable identity, or no automotive
+  commercial role.
+- confidence means certainty of this classification, not lead quality. A clearly personal entertainment account
+  should normally have high confidence and decision="reject".
+
+Return one valid JSON object only. Do not add markdown or commentary.
+""".strip()
     user = {
-        "task": "Decide whether this is a real automotive lead for Chinese NEV export sales.",
+        "task": "Audit whether this candidate is eligible to enter a B2B vehicle-export sales review queue.",
         "targetCountry": country,
         "targetCityHint": city,
         "company": company,
@@ -393,14 +446,23 @@ def ai_review_lead_candidate(
         "text": review_text,
         "requiredJson": {
             "automotive": "boolean",
+            "automotive_business": "boolean; true only for an automotive commercial operator or automotive decision-maker",
+            "sales_lead_eligible": "boolean; true only when the entity could reasonably buy/import/distribute/retail/rent/procure vehicles",
+            "entity_type": "one of company, decision_maker, personal, media, content_creator, marketplace_listing, unknown",
+            "decision": "one of keep, manual_review, reject",
+            "rejection_code": "one of empty, non_automotive, personal_account, media_or_content, no_commercial_role, wrong_country, unusable_identity, insufficient_evidence",
             "target_country_match": "boolean",
+            "country_evidence": "one of explicit, inferred, none, conflict",
             "chinese_nev_evidence": "boolean, true only if supplied text explicitly mentions Chinese EV/NEV or Chinese vehicle brands",
             "huawei_series_evidence": "boolean, true only if supplied text explicitly mentions Huawei/AITO/HIMA/HarmonyOS/问界/智界/享界/尊界/鸿蒙智行",
             "reject": "boolean",
-            "confidence": "integer 0-100",
+            "confidence": "integer 0-100 measuring classification certainty, not lead quality",
             "business_type": "short string",
             "reason": "short Chinese reason",
-            "evidence": ["short quoted/near-quoted evidence snippets from supplied text"],
+            "automotive_evidence": ["short supplied snippets proving automotive activity"],
+            "commercial_evidence": ["short supplied snippets proving a business or decision-maker identity"],
+            "country_evidence_snippets": ["short supplied snippets proving target-country location"],
+            "evidence": ["up to five most important short supplied evidence snippets"],
         },
     }
     try:
@@ -415,17 +477,62 @@ def ai_review_lead_candidate(
         return {}
     if not isinstance(result, dict):
         return {}
+    def strict_bool(key: str, default: bool = False) -> bool:
+        value = result.get(key)
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            return value.strip().lower() in {"true", "yes", "1"}
+        if isinstance(value, (int, float)):
+            return value == 1
+        return default
+
+    decision = clean_text(str(result.get("decision") or "")).lower()
+    if decision not in {"keep", "manual_review", "reject"}:
+        decision = "reject" if strict_bool("reject") else "manual_review"
+    automotive = strict_bool("automotive")
+    automotive_business = strict_bool("automotive_business", automotive)
+    sales_lead_eligible = strict_bool(
+        "sales_lead_eligible",
+        automotive_business and decision != "reject",
+    )
+    country_evidence = clean_text(str(result.get("country_evidence") or "none")).lower()
+    if country_evidence not in {"explicit", "inferred", "none", "conflict"}:
+        country_evidence = "none"
+    rejection_code = clean_text(str(result.get("rejection_code") or ""))[:60]
+    entity_type = clean_text(str(result.get("entity_type") or "unknown"))[:60]
     return {
         "provider": "deepseek",
         "model": get_ai_model("fast"),
-        "automotive": bool(result.get("automotive")),
-        "targetCountryMatch": bool(result.get("target_country_match")),
-        "chineseNevEvidence": bool(result.get("chinese_nev_evidence")),
-        "huaweiSeriesEvidence": bool(result.get("huawei_series_evidence")),
-        "reject": bool(result.get("reject")),
+        "automotive": automotive,
+        "automotiveBusiness": automotive_business,
+        "salesLeadEligible": sales_lead_eligible,
+        "entityType": entity_type,
+        "decision": decision,
+        "rejectionCode": rejection_code,
+        "targetCountryMatch": strict_bool("target_country_match"),
+        "countryEvidence": country_evidence,
+        "chineseNevEvidence": strict_bool("chinese_nev_evidence"),
+        "huaweiSeriesEvidence": strict_bool("huawei_series_evidence"),
+        "reject": decision == "reject" or strict_bool("reject"),
         "confidence": max(0, min(100, int(result.get("confidence") or 0))),
         "businessType": clean_text(str(result.get("business_type") or ""))[:80],
         "reason": clean_text(str(result.get("reason") or ""))[:240],
+        "automotiveEvidence": [
+            clean_text(str(item))[:180]
+            for item in (result.get("automotive_evidence") or [])
+            if clean_text(str(item))
+        ][:5],
+        "commercialEvidence": [
+            clean_text(str(item))[:180]
+            for item in (result.get("commercial_evidence") or [])
+            if clean_text(str(item))
+        ][:5],
+        "countryEvidenceSnippets": [
+            clean_text(str(item))[:180]
+            for item in (result.get("country_evidence_snippets") or [])
+            if clean_text(str(item))
+        ][:5],
         "evidence": [
             clean_text(str(item))[:180]
             for item in (result.get("evidence") or [])
@@ -450,7 +557,7 @@ def ai_generate_search_queries(
         "task": "Generate real web search queries for finding B2B automotive sales leads. Do not invent company names.",
         "targetCountry": country,
         "countryAliases": list(target_country_aliases(country)),
-        "cities": cities[:8],
+            "cities": cities[:12],
         "targetType": target_type,
         "vehicleModel": model,
         "goal": goal,
@@ -2799,27 +2906,75 @@ COUNTRY_HINTS = {
         "Fujairah", "Umm Al Quwain", "Al Ain", "Jebel Ali", "Mussafah",
         "Deira", "Al Quoz", "Dubai Investment Park", "Jumeirah",
     ),
-    "Saudi": ("Riyadh", "Jeddah", "Dammam", "Khobar", "Mecca", "Medina"),
-    "Kazakhstan": ("Almaty", "Astana", "Aktau"),
+    "Saudi": (
+        "Riyadh", "Jeddah", "Dammam", "Khobar", "Mecca", "Medina",
+        "Dhahran", "Jubail", "Al Khobar", "Tabuk", "Taif", "Yanbu",
+        "Al Qassim", "Buraydah", "Hofuf", "Abha",
+    ),
+    "Kazakhstan": (
+        "Almaty", "Astana", "Aktau", "Shymkent", "Karaganda", "Atyrau",
+        "Pavlodar", "Kostanay", "Aktobe", "Oskemen",
+    ),
     "Russia": (
         "Moscow", "St. Petersburg", "Kazan", "Novosibirsk", "Yekaterinburg",
         "Nizhny Novgorod", "Samara", "Krasnodar", "Rostov-on-Don",
     ),
-    "Qatar": ("Doha",),
-    "Kuwait": ("Kuwait City",),
-    "Uzbekistan": ("Tashkent",),
-    "Azerbaijan": ("Baku",),
-    "Nigeria": ("Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan"),
-    "Ghana": ("Accra", "Kumasi", "Tema", "Takoradi"),
-    "Algeria": ("Algiers", "Oran", "Constantine", "Annaba"),
+    "Qatar": (
+        "Doha", "Al Rayyan", "Lusail", "Industrial Area", "Al Wakrah",
+        "Umm Salal", "Al Khor", "Mesaieed",
+    ),
+    "Kuwait": (
+        "Kuwait City", "Al Farwaniyah", "Hawally", "Salmiya", "Shuwaikh",
+        "Fahaheel", "Ahmadi", "Jahra", "Ardiya", "Sabah Al Salem",
+    ),
+    "Uzbekistan": (
+        "Tashkent", "Samarkand", "Bukhara", "Namangan", "Andijan",
+        "Fergana", "Nukus", "Qarshi",
+    ),
+    "Azerbaijan": (
+        "Baku", "Sumqayit", "Ganja", "Mingachevir", "Lankaran",
+        "Shirvan", "Nakhchivan",
+    ),
+    "Nigeria": (
+        "Lagos", "Abuja", "Port Harcourt", "Kano", "Ibadan", "Lekki",
+        "Ikeja", "Victoria Island", "Apapa", "Benin City", "Aba",
+        "Onitsha", "Enugu", "Kaduna", "Warri",
+    ),
+    "Ghana": (
+        "Accra", "Kumasi", "Tema", "Takoradi", "East Legon", "Spintex",
+        "Madina", "Ashaiman", "Tamale", "Cape Coast",
+    ),
+    "Algeria": (
+        "Algiers", "Oran", "Constantine", "Annaba", "Blida", "Setif",
+        "Batna", "Tlemcen", "Bejaia", "Hassi Messaoud",
+    ),
     "Côte d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouaké"),
     "Cote d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouaké"),
     "Ivory Coast": ("Abidjan", "Yamoussoukro", "Bouaké"),
-    "Egypt": ("Cairo", "Alexandria", "Giza", "6th of October City"),
-    "Kyrgyzstan": ("Bishkek", "Osh", "Jalal-Abad"),
-    "Ethiopia": ("Addis Ababa", "Dire Dawa", "Bahir Dar"),
-    "Oman": ("Muscat", "Salalah", "Sohar", "Nizwa"),
-    "Armenia": ("Yerevan", "Gyumri", "Vanadzor"),
+    "C么te d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouake", "Bouak茅", "San Pedro", "Daloa", "Korhogo"),
+    "Cote d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouake", "Bouak茅", "San Pedro", "Daloa", "Korhogo"),
+    "Ivory Coast": ("Abidjan", "Yamoussoukro", "Bouake", "Bouak茅", "San Pedro", "Daloa", "Korhogo"),
+    "Egypt": (
+        "Cairo", "Alexandria", "Giza", "6th of October City",
+        "New Cairo", "Nasr City", "Mansoura", "Tanta",
+        "Port Said", "Suez", "Ismailia", "Zagazig",
+    ),
+    "Kyrgyzstan": (
+        "Bishkek", "Osh", "Jalal-Abad", "Karakol", "Tokmok",
+        "Kara-Balta", "Naryn", "Batken",
+    ),
+    "Ethiopia": (
+        "Addis Ababa", "Dire Dawa", "Bahir Dar", "Adama", "Hawassa",
+        "Mekelle", "Gondar", "Jimma", "Dukem", "Bole",
+    ),
+    "Oman": (
+        "Muscat", "Salalah", "Sohar", "Nizwa", "Seeb", "Barka",
+        "Ruwi", "Muttrah", "Al Khuwair", "Sur", "Ibri", "Duqm",
+    ),
+    "Armenia": (
+        "Yerevan", "Gyumri", "Vanadzor", "Abovyan", "Vagharshapat",
+        "Armavir", "Artashat", "Hrazdan",
+    ),
     "China": (
         "Beijing", "Shanghai", "Guangzhou", "Shenzhen", "Hangzhou", "Chengdu",
         "Chongqing", "Wuhan", "Nanjing", "Suzhou", "Tianjin", "Xi'an",
@@ -3051,7 +3206,11 @@ COUNTRY_SEARCH_META = {
         "code": "eg",
         "location": "Egypt",
         "google_domain": "google.com.eg",
-        "aliases": ("Egypt", "Cairo", "Alexandria", "Giza"),
+        "aliases": (
+            "Egypt", "Cairo", "Alexandria", "Giza", "6th of October City",
+            "New Cairo", "Nasr City", "Mansoura", "Tanta",
+            "Port Said", "Suez", "Ismailia", "Zagazig",
+        ),
     },
     "Kyrgyzstan": {
         "code": "kg",
@@ -3260,6 +3419,13 @@ def country_search_meta(country: str) -> dict:
 def target_country_aliases(country: str) -> tuple[str, ...]:
     meta = country_search_meta(country)
     aliases = [str(country or "").split(" ")[0], meta["location"], *meta["aliases"]]
+    country_text = normalize_country_match_text(" ".join(str(alias) for alias in aliases))
+    for key, hints in COUNTRY_HINTS.items():
+        hint_meta = COUNTRY_SEARCH_META.get(key, {})
+        match_aliases = (key, hint_meta.get("location", ""), *(hint_meta.get("aliases") or ()))
+        if any((token := normalize_country_match_text(alias)) and token in country_text for alias in match_aliases):
+            aliases.extend(hints)
+            break
     return tuple(dict.fromkeys(alias for alias in aliases if alias))
 
 
@@ -3417,6 +3583,10 @@ LOCALIZED_DISCOVERY_TERMS = {
     ),
     "Egypt": (
         "car dealer Cairo imported cars phone WhatsApp",
+        "Egypt used car dealer auto trading company contact",
+        "Alexandria vehicle importer distributor showroom",
+        "New Cairo car showroom automotive trading WhatsApp",
+        "Mansoura Tanta car dealer motors showroom contact",
         "معرض سيارات القاهرة سيارات للبيع",
         "مستورد سيارات مصر contact",
         "Egypt car showroom dealer contact",
@@ -3461,12 +3631,12 @@ def localized_vehicle_listing_queries(country: str, cities: list[str]) -> list[s
         if not selected_terms:
             return []
         queries: list[str] = []
-        for city in cities[:10]:
+        for city in cities[:14]:
             for term in selected_terms:
                 queries.append(f"{city} {term}".strip())
         return list(dict.fromkeys(queries))
     queries: list[str] = []
-    for city in cities[:10]:
+    for city in cities[:14]:
         queries.extend([
             f"{city} автосалон автомобили в наличии официальный сайт",
             f"{city} купить авто автосалон новые автомобили",
@@ -3764,11 +3934,11 @@ def is_youtube_automotive_lead(title: str, snippet: str, url: str = "") -> bool:
 
 def youtube_query_plan(searches: list[tuple[str, str]], source_mode: str) -> tuple[list[tuple[str, str]], int]:
     if source_mode == "youtube":
-        query_limit, per_query_limit = 6, 8
+        query_limit, per_query_limit = 8, 8
     elif source_mode == "social":
-        query_limit, per_query_limit = 4, 6
+        query_limit, per_query_limit = 6, 8
     else:
-        query_limit, per_query_limit = 4, 6
+        query_limit, per_query_limit = 5, 7
     deduped: list[tuple[str, str]] = []
     seen: set[str] = set()
     for query, account_type in searches:
@@ -4561,6 +4731,8 @@ def analyze_social_business_profile(
         "decisionRole": role,
         "contactSignals": contact_signals,
         "businessConfidence": confidence,
+        "hasAutomotiveMarker": has_automotive_marker,
+        "hasCompanyMarker": has_company_marker,
         "isCommercial": bool(
             business_signals
             or intent_signals
@@ -5267,7 +5439,7 @@ def social_search_variants(
         meta = COUNTRY_SEARCH_META.get(key, {})
         aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
         if any((token := normalize_country_match_text(alias)) and token in market_text for alias in aliases):
-            markets = [*hints[:8], *markets]
+            markets = [*hints[:12], *markets]
             break
     markets = list(dict.fromkeys(place for place in markets if place))
     target_priority_terms = {
@@ -5288,10 +5460,24 @@ def social_search_variants(
             "facebook": ("facebook.com",),
             "tiktok": ("tiktok.com",),
         }.get(platform, (site,))
-        for place in markets[:8]:
-            for term in apify_first_terms[:18]:
+        if platform == "instagram":
+            primary_place = markets[0] if markets else market
+            compact_terms = [
+                f"{market} cars",
+                f"{primary_place} cars",
+                f"{market} motors",
+                f"{primary_place} auto",
+            ]
+            if normalize_country_match_text(market) == "oman":
+                compact_terms.extend(("سيارات عمان", "سيارات مسقط"))
+            queries.extend(
+                f"site:instagram.com {term}"
+                for term in dict.fromkeys(compact_terms)
+            )
+        for term in apify_first_terms[:18]:
+            for place in markets[:12]:
                 queries.append(f"{place} {term}")
-        for place in markets[:8]:
+        for place in markets[:12]:
             for variant in site_variants:
                 queries.append(f"site:{variant} {place} \"{company_terms[0]}\" contact phone email")
                 queries.append(f"site:{variant} {place} \"{company_terms[0]}\" about bio contacts")
@@ -5300,10 +5486,10 @@ def social_search_variants(
                     queries.append(f"site:{variant} {place} \"{term}\"")
         return list(dict.fromkeys(queries))
     if platform == "linkedin":
-        for place in markets[:8]:
-            for term in apify_first_terms[:18]:
+        for term in apify_first_terms[:18]:
+            for place in markets[:12]:
                 queries.append(f"{place} {term}")
-        for place in markets[:8]:
+        for place in markets[:12]:
             queries.append(f"site:linkedin.com/company {place} \"{company_terms[0]}\" contact email phone")
             queries.append(f"site:linkedin.com/company {place} \"{company_terms[0]}\" about")
             for term in broad_terms:
@@ -5351,9 +5537,9 @@ def apify_keyword_query(query: str) -> str:
 def apify_query_plan(query_variants: list[str], source_mode: str, platform: str = "") -> tuple[list[str], int]:
     if platform in {"instagram", "facebook", "tiktok", "linkedin"}:
         if source_mode in ("all", "combined", "social"):
-            query_limit, result_limit = 2, 18
+            query_limit, result_limit = 3, 24
         else:
-            query_limit, result_limit = 2, 16
+            query_limit, result_limit = 3, 24
     elif source_mode in ("all", "combined"):
         query_limit, result_limit = 3, 18
     elif source_mode == "social":
@@ -5367,6 +5553,11 @@ def apify_query_plan(query_variants: list[str], source_mode: str, platform: str 
             queries.append(cleaned)
         if len(queries) >= query_limit:
             break
+    if platform == "instagram" and queries:
+        # The maintained Instagram Search Actor accepts comma-separated keywords.
+        # A single run avoids paying the startup cost twice and works better with
+        # short local-business terms than separate long commercial phrases.
+        queries = [", ".join(queries)]
     return queries, result_limit
 
 
@@ -5556,7 +5747,7 @@ def normalize_apify_items(
         normalized.append({
             "title": title[:180],
             "url": url,
-            "snippet": snippet or f"Apify {origin} result for {query}",
+            "snippet": snippet or f"Apify {origin} public profile",
             "apiSource": "Apify",
             "origin": origin,
             "source_type": f"{source_type} · Apify",
@@ -7985,7 +8176,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         commercial_query_variants.append(
             f"{city_focus} car dealer showroom importer WhatsApp email phone contacts official website {exclude_query}{cutoff_query}"
         )
-    for city in cities[:8]:
+    for city in cities[:14]:
         commercial_query_variants.extend([
             f"{city} car dealers directory showroom motors contact contacts about website {exclude_query}{cutoff_query}",
             f"{city} auto trading LLC motors showroom WhatsApp email {exclude_query}{cutoff_query}",
@@ -8010,7 +8201,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         target_type=target_type,
         model=model,
         goal=goal,
-        limit=12,
+        limit=18,
     )
     if ai_search_queries:
         commercial_query_variants = [
@@ -8024,25 +8215,35 @@ def discover(params: dict[str, list[str]]) -> dict:
     is_china_discovery = country_meta.get("code") == "cn"
     social_source_modes = {"social", "instagram", "facebook", "tiktok", "linkedin", "youtube"}
     use_geo_sources = not is_china_discovery or source_mode in ("google", "osm")
-    include_support_sources = source_mode in social_source_modes and not is_china_discovery
+    # A single-platform task must return accounts from that platform only. Business
+    # websites may still be used below to discover linked social profiles, but map
+    # and generic web records must not become leads for an Instagram/Facebook/etc.
+    # task. Cross-source enrichment belongs to social/combined searches.
+    include_support_sources = source_mode == "social" and not is_china_discovery
     if (use_geo_sources and source_mode in ("all", "combined", "google")) or include_support_sources:
         try:
             active_cities = (cities[:3] or [market]) if include_support_sources else cities
             google_city_limit = 3 if include_support_sources else min(10, max(4, result_limit // max(1, len(cities))))
+            google_place_queries = (
+                "car dealer used cars showroom",
+                "automotive importer vehicle distributor auto trading",
+            )
+            google_query_limit = max(3, (google_city_limit + len(google_place_queries) - 1) // len(google_place_queries))
             for city in active_cities:
-                try:
-                    google_primary_results += search_google_places(
-                        country,
-                        "car dealer automotive importer vehicle distributor electric vehicle showroom",
-                        limit=google_city_limit,
-                        city=city,
-                    )
-                except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
-                    pass
+                for place_query in google_place_queries:
+                    try:
+                        google_primary_results += search_google_places(
+                            country,
+                            place_query,
+                            limit=google_query_limit,
+                            city=city,
+                        )
+                    except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+                        pass
                 try:
                     google_primary_results += search_serpapi_google_maps(
                         country,
-                        "car dealer automotive importer vehicle distributor electric vehicle showroom",
+                        "car dealer used cars showroom automotive importer",
                         limit=max(3, min(google_city_limit, 8)),
                         city=city,
                     )
@@ -8092,7 +8293,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         elif include_support_sources:
             max_web_queries = 4
         else:
-            max_web_queries = 18 if source_mode in ("all", "combined") and google_primary_results else 36 if source_mode in ("all", "combined") else 12
+            max_web_queries = 24 if source_mode in ("all", "combined") and google_primary_results else 40 if source_mode in ("all", "combined") else 16
         search_variants = search_variants[:max_web_queries]
         per_query_limit = 5 if is_china_discovery and source_mode in ("all", "combined") else 4 if include_support_sources else 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
@@ -8203,7 +8404,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     ):
         reverse_platforms.add("youtube")
     if reverse_platforms:
-        reverse_seed_limit = min(8 if source_mode in platform_queries or source_mode == "youtube" else 24, result_limit)
+        reverse_seed_limit = min(12 if source_mode in platform_queries or source_mode == "youtube" else 32, result_limit)
         website_social_results = social_accounts_from_business_websites(
             country,
             target_type,
@@ -8228,11 +8429,11 @@ def discover(params: dict[str, list[str]]) -> dict:
             account_scope,
         )
         if source_mode in ("combined", "all"):
-            query_variants = query_variants[:8]
+            query_variants = query_variants[:14]
         elif source_mode == "social":
-            query_variants = query_variants[:12]
+            query_variants = query_variants[:20]
         elif source_mode == platform:
-            query_variants = query_variants[:6]
+            query_variants = query_variants[:14]
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
         executor = ThreadPoolExecutor(max_workers=min(2, max(1, len(query_variants))))
@@ -8273,7 +8474,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             social_search_stats["apifyResults"] += len(apify_results)
             social_search_stats["apifyByPlatform"][origin] = social_search_stats["apifyByPlatform"].get(origin, 0) + len(apify_results)
             social_results.extend(apify_results)
-        if source_mode == platform and len(social_results) < 3:
+        if source_mode == platform and len(social_results) < 6:
             try:
                 local_social_results = social_accounts_from_local_source_pages(
                     country,
@@ -8281,7 +8482,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                     platform,
                     origin,
                     source_type,
-                    limit=10,
+                    limit=15,
                 )
             except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                 local_social_results = []
@@ -8406,10 +8607,40 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["social_analysis"] = youtube_analysis
                 item["youtube_discovery_candidate"] = youtube_discovery_candidate
                 raw_results.append(item)
+    if source_mode in platform_queries:
+        expected_origin = platform_queries[source_mode][1]
+        expected_domains = {
+            "instagram": ("instagram.com",),
+            "facebook": ("facebook.com", "fb.com"),
+            "tiktok": ("tiktok.com",),
+            "linkedin": ("linkedin.com",),
+        }[source_mode]
+        raw_results = [
+            item
+            for item in raw_results
+            if item.get("origin") == expected_origin
+            and any(
+                domain in safe_urlparse(item.get("url", "")).netloc.lower()
+                for domain in expected_domains
+            )
+        ]
+    pipeline_stats = {
+        "rawCollected": len(raw_results),
+        "afterCountryDedup": 0,
+        "candidatePool": 0,
+        "processed": 0,
+        "aiRejected": 0,
+        "qualifiedBeforeMerge": 0,
+        "afterEntityMerge": 0,
+        "final": 0,
+    }
     raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
+    pipeline_stats["afterCountryDedup"] = len(raw_results)
     raw_results = balance_discovery_sources(raw_results)
     raw_results = soften_dominant_discovery_sources(raw_results, source_mode, result_limit)
     raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
+    raw_results = raw_results[: max(DISCOVERY_QUALIFIED_TARGET_MAX * 2, 60)]
+    pipeline_stats["candidatePool"] = len(raw_results)
     if source_mode == "dealer":
         def dealer_source_priority(item: dict) -> tuple:
             origin = item.get("origin", "")
@@ -8429,8 +8660,9 @@ def discover(params: dict[str, list[str]]) -> dict:
     seen_sources = set()
     excluded_brand_bound_dealers = 0
     for item in raw_results:
-        if len(leads) >= result_limit:
+        if len(leads) >= DISCOVERY_QUALIFIED_TARGET_MAX:
             break
+        pipeline_stats["processed"] += 1
         item["url"] = normalize_public_url(item.get("url", ""))
         if not is_valid_http_url(item["url"]):
             continue
@@ -8505,6 +8737,19 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item.get("origin") == "YouTube"
                 and bool(item.get("youtube_discovery_candidate"))
             )
+            if item.get("origin") != "YouTube" and not (
+                social_analysis.get("isCommercial")
+                and social_analysis.get("hasAutomotiveMarker")
+            ):
+                continue
+            if item.get("origin") == "YouTube" and not (
+                allow_youtube_discovery_candidate
+                or (
+                    social_analysis.get("isCommercial")
+                    and social_analysis.get("hasAutomotiveMarker")
+                )
+            ):
+                continue
             social_search_stats["acceptedResults"] += 1
             social_search_stats["acceptedByPlatform"][item.get("origin", "")] = (
                 social_search_stats["acceptedByPlatform"].get(item.get("origin", ""), 0) + 1
@@ -8856,17 +9101,15 @@ def discover(params: dict[str, list[str]]) -> dict:
             text=combined,
         )
         if ai_review:
-            ai_confidence = int(ai_review.get("confidence") or 0)
             if (
-                ai_confidence >= 70
-                and (
-                    ai_review.get("reject")
-                    or not ai_review.get("automotive")
-                    or not ai_review.get("targetCountryMatch")
-                )
+                ai_review.get("decision") == "reject"
+                or ai_review.get("automotiveBusiness") is False
+                or ai_review.get("salesLeadEligible") is False
+                or ai_review.get("countryEvidence") == "conflict"
             ):
+                pipeline_stats["aiRejected"] += 1
                 continue
-            if ai_review.get("automotive"):
+            if ai_review.get("automotiveBusiness"):
                 has_business_evidence = True
                 if ai_review.get("businessType"):
                     business_signals = list(dict.fromkeys([
@@ -8912,8 +9155,6 @@ def discover(params: dict[str, list[str]]) -> dict:
             contact_reason = "未发现明确车商、展厅、进口商或车辆销售证据；仅可作为待人工核验线索，不应优先联系。"
         if is_competitor:
             contact_reason += " 但页面存在汽车出口同行特征，建议先核实身份，不直接发送底价。"
-        if ai_review and ai_review.get("reason"):
-            contact_reason += f" AI复核：{ai_review['reason']}"
         reason = f"{origin}显示该客户可能是 {lead_type}。来源：{domain}。"
         if contacts["email"] or contacts["phone"] or contacts["whatsapp"]:
             reason += " 已找到公开商业联系方式。"
@@ -9031,6 +9272,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "reason": reason,
             }
         )
+    pipeline_stats["qualifiedBeforeMerge"] = len(leads)
     if source_mode == "social" and not leads:
         notice = (
             f"五平台共执行 {social_search_stats['queries']} 组短词搜索，"
@@ -9039,6 +9281,15 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"其中 {social_search_stats['profileResults']} 条为账号主页，"
             f"{social_search_stats['acceptedResults']} 条通过商业账号初筛。"
             "若仍为 0，通常是搜索引擎未收录当地账号；可改用单个平台搜索或本机 Chrome 登录态采集。"
+        )
+    if source_mode in platform_queries and not leads and not notice:
+        source_label = platform_queries[source_mode][1]
+        notice = (
+            f"{source_label} 执行 {social_search_stats['queries']} 组查询，"
+            f"公开搜索返回 {social_search_stats['rawResults']} 条，"
+            f"Apify 返回 {social_search_stats['apifyResults']} 条，"
+            f"其中 {social_search_stats['profileResults']} 条可识别为账号主页，"
+            f"最终 {social_search_stats['acceptedResults']} 条通过地区与汽车业务核验。"
         )
     if excluded_brand_bound_dealers:
         notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定主机厂的单品牌 4S/授权店。"
@@ -9074,6 +9325,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             lead["sourceCoverage"]["total"] = len(existing_sources)
             merged_leads[company_key] = lead
     leads = list(merged_leads.values())
+    pipeline_stats["afterEntityMerge"] = len(leads)
 
     def lead_sales_priority(item: dict) -> tuple:
         coverage = item.get("sourceCoverage") or {}
@@ -9101,12 +9353,28 @@ def discover(params: dict[str, list[str]]) -> dict:
 
     leads.sort(key=lead_sales_priority)
     leads = limit_duplicate_customer_websites(leads)
+    leads = leads[:DISCOVERY_QUALIFIED_TARGET_MAX]
+    pipeline_stats["final"] = len(leads)
+    if len(leads) < DISCOVERY_QUALIFIED_TARGET_MIN:
+        target_notice = (
+            f"本轮目标为 {DISCOVERY_QUALIFIED_TARGET_MIN}-{DISCOVERY_QUALIFIED_TARGET_MAX} 条真实线索，"
+            f"当前仅有 {len(leads)} 条通过地区、汽车商业身份和 AI 证据审核；未使用低质量数据补足。"
+        )
+        notice = f"{notice} {target_notice}".strip()
     return {
         "ok": True,
         "count": len(leads),
         "leads": leads,
         "notice": notice,
-        "stats": {"social": social_search_stats},
+        "stats": {
+            "social": social_search_stats,
+            "pipeline": pipeline_stats,
+            "qualifiedTarget": {
+                "min": DISCOVERY_QUALIFIED_TARGET_MIN,
+                "max": DISCOVERY_QUALIFIED_TARGET_MAX,
+                "actual": len(leads),
+            },
+        },
     }
 
 
