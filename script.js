@@ -466,6 +466,7 @@ let discoveryJobsTimer = null;
 let discoveryJobPage = 1;
 const DISCOVERY_JOBS_PAGE_SIZE = 4;
 const autoImportingDiscoveryJobs = new Set();
+const hiddenDiscoveryJobIds = new Set(JSON.parse(localStorage.getItem(`${STORAGE_KEY}:hidden-discovery-jobs`) || "[]"));
 let discoverySchedules = [];
 let discoverySchedulePage = 1;
 const DISCOVERY_SCHEDULES_PAGE_SIZE = 4;
@@ -977,6 +978,28 @@ function rememberDeletedRecord(record, type) {
     deletedAt: new Date().toISOString()
   });
   deletedRecords = deletedRecords.slice(0, 10_000);
+}
+
+function rememberHiddenDiscoveryJob(jobId) {
+  if (!jobId) return;
+  hiddenDiscoveryJobIds.add(String(jobId));
+  localStorage.setItem(`${STORAGE_KEY}:hidden-discovery-jobs`, JSON.stringify([...hiddenDiscoveryJobIds].slice(-1000)));
+}
+
+function forgetDeletedRecordsForLeads(leads) {
+  const keys = new Set(
+    (Array.isArray(leads) ? leads : [])
+      .flatMap((lead) => [
+        recordIdentity(lead, "reviewLeads"),
+        recordIdentity(lead, "customers"),
+        recordIdentity(lead, "rejectedLeads")
+      ])
+      .filter(Boolean)
+  );
+  if (!keys.size) return 0;
+  const before = deletedRecords.length;
+  deletedRecords = deletedRecords.filter((record) => !keys.has(record.key));
+  return before - deletedRecords.length;
 }
 
 function mergeRecordLists(remoteList, localList, type) {
@@ -4797,7 +4820,8 @@ async function loadDiscoveryJobs(options = {}) {
   const response = await apiFetch("/api/discover/jobs", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-  discoveryJobs = Array.isArray(result.jobs) ? result.jobs : [];
+  discoveryJobs = (Array.isArray(result.jobs) ? result.jobs : [])
+    .filter((job) => !hiddenDiscoveryJobIds.has(String(job?.id || "")));
   renderDiscoveryJobs();
   renderReviewFilterOptions();
   const active = discoveryJobs.find((job) => ["queued", "running"].includes(job.status));
@@ -4926,6 +4950,7 @@ async function deleteDiscoveryJob(jobId) {
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    rememberHiddenDiscoveryJob(jobId);
     await loadDiscoveryJobs();
   } catch (error) {
     await loadDiscoveryJobs().catch(() => undefined);
@@ -4946,9 +4971,6 @@ function discoveryJobLabel(job) {
 
 function mergeDiscoveryResult(result, sourceMode = "", job = null) {
   const found = Array.isArray(result?.leads) ? result.leads : [];
-  const existing = new Set(
-    [...reviewLeads, ...customers].map((lead) => `${lead.company}|${lead.source}`.toLowerCase())
-  );
   const normalizedFound = found
     .map((lead) => normalizeLead({
       ...lead,
@@ -4957,9 +4979,14 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
       discoveryJobId: job?.id || "",
       discoveryJobLabel: discoveryJobLabel(job),
       discoveryJobImportedAt: new Date().toISOString()
-    }))
+    }));
+  forgetDeletedRecordsForLeads(normalizedFound);
+  const existing = new Set(
+    [...reviewLeads, ...customers].map((lead) => `${lead.company}|${lead.source}`.toLowerCase())
+  );
+  const normalizedFresh = normalizedFound
     .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()));
-  const fresh = limitDuplicateCustomerWebsites(normalizedFound, [...reviewLeads, ...customers]);
+  const fresh = limitDuplicateCustomerWebsites(normalizedFresh, [...reviewLeads, ...customers]);
   if (fresh.length) {
     reviewLeads = [...fresh, ...reviewLeads];
     refreshAllLeadViews();
@@ -4971,7 +4998,16 @@ function autoImportCompletedDiscoveryJobs() {
   const completed = discoveryJobs.filter((job) =>
     job?.id &&
     job.status === "completed" &&
-    !job.imported &&
+    (
+      !job.imported ||
+      (
+        job.imported &&
+        discoveryJobRawCount(job) > 0 &&
+        discoveryJobImportedCount(job) > 0 &&
+        ![...reviewLeads, ...customers, ...rejectedLeads].some((lead) => String(lead.discoveryJobId || "") === String(job.id)) &&
+        Date.now() - new Date(job.updatedAt || job.createdAt || Date.now()).getTime() < 48 * 60 * 60 * 1000
+      )
+    ) &&
     !autoImportingDiscoveryJobs.has(job.id)
   );
   completed.forEach((job) => {
