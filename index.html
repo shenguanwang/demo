@@ -44,7 +44,7 @@
     <button class="account-settings-toggle" id="accountSettingsToggle" data-section="account-settings-page" type="button" hidden>
       <span>⚙</span>设置
     </button>
-    <button class="logout-button" id="logoutButton" type="button" hidden>
+    <button class="logout-button" id="logoutButton" type="button" hidden onclick="this.disabled=true;fetch('/api/logout',{method:'POST',credentials:'same-origin'}).finally(()=>window.location.replace('/login.html'))">
       <span>退出登录</span>
       <b>↗</b>
     </button>
