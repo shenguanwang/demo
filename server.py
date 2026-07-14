@@ -101,6 +101,7 @@ DISCOVERY_QUALIFIED_TARGET_MAX = 30
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
+ASSIGNED_COUNTRY_NONE = "__none__"
 DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "480")))
 YOUTUBE_MAX_VIDEO_AGE_DAYS = 365 * 5
 DISCOVERY_SCHEDULER_STOP = threading.Event()
@@ -1969,6 +1970,8 @@ def normalize_assigned_countries(value) -> list[str]:
         parsed = value
     if not isinstance(parsed, list):
         return []
+    if any(str(item or "").strip().lower() in {ASSIGNED_COUNTRY_NONE, "none", "无", "不分配"} for item in parsed):
+        return [ASSIGNED_COUNTRY_NONE]
     countries = []
     for item in parsed:
         text = clean_text(str(item or ""))[:120]
@@ -1979,6 +1982,8 @@ def normalize_assigned_countries(value) -> list[str]:
 
 
 def assigned_country_matches(assigned: list[str], country: str) -> bool:
+    if ASSIGNED_COUNTRY_NONE in assigned:
+        return False
     if not assigned:
         return True
     country_text = normalize_country_match_text(country)
@@ -1998,11 +2003,20 @@ def assigned_country_matches(assigned: list[str], country: str) -> bool:
 def ensure_user_can_access_country(user: dict, country: str) -> None:
     if not user or user.get("role") == "admin":
         return
+    assigned = normalize_assigned_countries(user.get("assignedCountries") or user.get("assigned_countries"))
+    if ASSIGNED_COUNTRY_NONE in assigned:
+        raise PermissionError("该账号未开通自动找客户功能")
     if country_search_meta(country).get("code") == "cn":
         return
-    assigned = normalize_assigned_countries(user.get("assignedCountries") or user.get("assigned_countries"))
     if assigned and not assigned_country_matches(assigned, country):
         raise PermissionError("该账号未分配这个目标国家")
+
+
+def ensure_user_can_use_discovery_payload(user: dict, payload: dict) -> None:
+    if not isinstance(payload, dict):
+        raise ValueError("请求格式无效")
+    country = str(payload.get("country") or "UAE")
+    ensure_user_can_access_country(user, country)
 
 
 def user_row_public(username: str, role: str, status: str, created_at, assigned_countries=None, built_in: bool = False) -> dict:
@@ -2877,6 +2891,9 @@ def create_discovery_job(payload: dict, owner_username: str, *, force: bool = Fa
     cleanup_discovery_jobs()
     params = discovery_params(payload)
     normalized_payload = {key: value[0] for key, value in params.items()}
+    owner_user = get_user(owner_username)
+    if owner_user:
+        ensure_user_can_use_discovery_payload(owner_user, normalized_payload)
     with DISCOVERY_CREATE_LOCK:
         if not force:
             existing = find_matching_active_discovery_job(normalized_payload, owner_username)
@@ -10089,8 +10106,11 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                 if not isinstance(payload, dict):
                     raise ValueError("请求格式无效")
+                ensure_user_can_use_discovery_payload(self.current_user(), payload)
                 job = create_discovery_job(payload, self.current_user()["username"])
                 self.send_json(202, {"ok": True, "job": job})
+            except PermissionError as exc:
+                self.send_json(403, {"ok": False, "error": str(exc)})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
@@ -10108,8 +10128,11 @@ class Handler(SimpleHTTPRequestHandler):
                         return
                     self.send_json(200, {"ok": True, "id": schedule_id})
                     return
+                ensure_user_can_use_discovery_payload(self.current_user(), payload)
                 schedule = create_or_update_discovery_schedule(payload, self.current_user()["username"])
                 self.send_json(200, {"ok": True, "schedule": schedule})
+            except PermissionError as exc:
+                self.send_json(403, {"ok": False, "error": str(exc)})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
@@ -10147,8 +10170,11 @@ class Handler(SimpleHTTPRequestHandler):
                 if previous.get("status") not in {"failed", "completed", "canceled"}:
                     self.send_json(409, {"ok": False, "error": "任务仍在运行，无需重试"})
                     return
+                ensure_user_can_use_discovery_payload(self.current_user(), previous.get("payload") or {})
                 job = create_discovery_job(previous.get("payload") or {}, self.current_user()["username"], force=True)
                 self.send_json(202, {"ok": True, "job": job})
+            except PermissionError as exc:
+                self.send_json(403, {"ok": False, "error": str(exc)})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return

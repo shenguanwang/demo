@@ -2453,6 +2453,13 @@ textarea {
   accent-color: var(--accent);
 }
 
+.user-country-option-none {
+  grid-column: 1 / -1;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+  color: #a33c32;
+}
+
 .user-region-modal-backdrop {
   position: fixed;
   inset: 0;

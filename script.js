@@ -557,6 +557,7 @@ const leadAttachmentAccept = [
 ].join(",");
 const maxLeadAttachmentBytes = 4 * 1024 * 1024;
 const maxLeadAttachmentCount = 6;
+const ASSIGNED_COUNTRY_NONE = "__none__";
 const loadingButtonTimers = new WeakMap();
 let currentSession = null;
 let adminKpiSnapshot = null;
@@ -948,6 +949,12 @@ function bindUiSettings() {
     if (!event.target.closest("#brightnessMenu")) closeBrightnessPopover();
   });
 
+  document.addEventListener("change", (event) => {
+    const input = event.target.closest(".user-country-checklist input[type='checkbox']");
+    if (!input) return;
+    syncCountryNoneCheckbox(input.closest(".user-country-checklist"), input);
+  });
+
   document.addEventListener("keydown", (event) => {
     if (event.key === "Escape") closeBrightnessPopover();
   });
@@ -1327,9 +1334,14 @@ function userAssignedCountries() {
   return Array.isArray(currentSession?.assignedCountries) ? currentSession.assignedCountries : [];
 }
 
+function discoveryDisabledForSession() {
+  return currentSession?.role !== "admin" && userAssignedCountries().includes(ASSIGNED_COUNTRY_NONE);
+}
+
 function countryAllowedForSession(country) {
   if (currentSession?.role === "admin") return true;
   const assigned = userAssignedCountries();
+  if (assigned.includes(ASSIGNED_COUNTRY_NONE)) return false;
   if (!assigned.length) return true;
   const key = countryKey(country?.name || country || "");
   return assigned.some((item) => countryKey(item) === key);
@@ -1347,11 +1359,19 @@ function renderUserCountryOptions() {
 
 function countryCheckboxListHtml(name, selected = []) {
   const selectedKeys = new Set((Array.isArray(selected) ? selected : []).map(countryKey));
-  return countries.map((country) => {
+  const noneChecked = (Array.isArray(selected) ? selected : []).includes(ASSIGNED_COUNTRY_NONE);
+  const noneId = `${name}-none`;
+  const noneOption = `
+    <label class="user-country-option user-country-option-none" for="${escapeHtml(noneId)}">
+      <input id="${escapeHtml(noneId)}" type="checkbox" name="${escapeHtml(name)}" value="${ASSIGNED_COUNTRY_NONE}" data-country-none ${noneChecked ? "checked" : ""}>
+      <span>无</span>
+    </label>
+  `;
+  return noneOption + countries.map((country) => {
     const id = `${name}-${countryKey(country.name).replace(/[^a-z0-9]+/gi, "-")}`;
     return `
       <label class="user-country-option" for="${escapeHtml(id)}">
-        <input id="${escapeHtml(id)}" type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(country.name)}" ${selectedKeys.has(countryKey(country.name)) ? "checked" : ""}>
+        <input id="${escapeHtml(id)}" type="checkbox" name="${escapeHtml(name)}" value="${escapeHtml(country.name)}" ${!noneChecked && selectedKeys.has(countryKey(country.name)) ? "checked" : ""}>
         <span>${escapeHtml(country.name)}</span>
       </label>
     `;
@@ -1359,13 +1379,30 @@ function countryCheckboxListHtml(name, selected = []) {
 }
 
 function selectedUserCountryValues(container) {
-  return Array.from(container?.querySelectorAll("input[type='checkbox']:checked") || [])
+  const checked = Array.from(container?.querySelectorAll("input[type='checkbox']:checked") || []);
+  if (checked.some((input) => input.value === ASSIGNED_COUNTRY_NONE)) return [ASSIGNED_COUNTRY_NONE];
+  return checked
     .map((input) => input.value)
     .filter(Boolean);
 }
 
+function syncCountryNoneCheckbox(container, changedInput) {
+  if (!container || !changedInput?.checked) return;
+  const inputs = Array.from(container.querySelectorAll("input[type='checkbox']"));
+  if (changedInput.value === ASSIGNED_COUNTRY_NONE) {
+    inputs.forEach((input) => {
+      if (input !== changedInput) input.checked = false;
+    });
+  } else {
+    inputs.forEach((input) => {
+      if (input.value === ASSIGNED_COUNTRY_NONE) input.checked = false;
+    });
+  }
+}
+
 function assignedCountrySummary(values = []) {
   const assigned = Array.isArray(values) ? values : [];
+  if (assigned.includes(ASSIGNED_COUNTRY_NONE)) return "无";
   if (!assigned.length) return "全部国外国家";
   if (assigned.length <= 2) return assigned.join("、");
   return `${assigned.slice(0, 2).join("、")} 等 ${assigned.length} 个国家`;
@@ -1373,7 +1410,9 @@ function assignedCountrySummary(values = []) {
 
 function renderCountries() {
   const marketCountries = visibleForeignCountries();
-  $("#countryGrid").innerHTML = marketCountries.map((country) => `
+  $("#countryGrid").innerHTML = discoveryDisabledForSession()
+    ? `<p class="empty">该账号未开通自动找客户功能。</p>`
+    : marketCountries.map((country) => `
     <article class="country-card" data-country="${escapeHtml(country.name)}" tabindex="0" role="button">
       <div class="country-rank">
         <span class="tag">${country.rank}</span>
@@ -1388,6 +1427,10 @@ function renderCountries() {
   const select = $("#finderCountry");
   const current = select.value;
   const selectCountries = marketCountries.length ? marketCountries : countries;
+  if (discoveryDisabledForSession()) {
+    select.innerHTML = `<option value="">未开通自动找客户</option>`;
+    select.disabled = true;
+  } else {
   select.innerHTML = selectCountries.map((country) =>
     `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`
   ).join("");
@@ -1395,6 +1438,13 @@ function renderCountries() {
     select.value = current;
   } else if (selectCountries[0]) {
     select.value = selectCountries[0].name;
+  }
+    select.disabled = false;
+  }
+  const finderSubmit = $("#finderForm button[type='submit']");
+  if (finderSubmit) {
+    finderSubmit.disabled = discoveryDisabledForSession();
+    finderSubmit.title = discoveryDisabledForSession() ? "该账号未开通自动找客户功能" : "";
   }
   const domesticSelect = $("#finderDomesticRegion");
   if (domesticSelect) {
@@ -5458,6 +5508,10 @@ function bindForms() {
 
   $("#finderForm").addEventListener("submit", (event) => {
     event.preventDefault();
+    if (discoveryDisabledForSession()) {
+      window.alert("该账号未开通自动找客户功能。");
+      return;
+    }
     const activeCount = activeDiscoveryJobs().length;
     if (activeCount >= MAX_ACTIVE_DISCOVERY_JOBS) {
       window.alert(`当前已有 ${activeCount} 个获客任务正在运行或排队，最多同时运行 ${MAX_ACTIVE_DISCOVERY_JOBS} 个。请等待其中一个完成后再启动新的任务。`);
