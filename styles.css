@@ -3646,9 +3646,18 @@ textarea {
 }
 
 .review-more[open] .review-more-content {
+  max-height: min(72vh, 760px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding: 16px;
   border-top: 1px solid var(--line);
   background: #fff;
+}
+
+.review-more-content:focus-visible {
+  outline: 2px solid #b98729;
+  outline-offset: -2px;
 }
 
 .review-drawer-head {

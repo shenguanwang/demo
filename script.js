@@ -534,6 +534,8 @@ let reviewSelectedIds = new Set();
 let selectedReviewLeadId = "";
 let editingReviewLeadId = "";
 let rejectingReviewLeadId = "";
+let openReviewDetailKey = "";
+const reviewDetailScrollPositions = new Map();
 const rejectReasonOptions = [
   "不是汽车经销/进口/分销客户",
   "地区不符合目标市场",
@@ -2118,6 +2120,13 @@ function reviewModeLabel(mode = reviewStatusMode()) {
 function renderReview() {
   // Keep the review queue stable. Scores are decision support, not a reason to
   // move the card the reviewer is currently working on after manual calibration.
+  const currentOpenDetails = document.querySelector("#reviewGrid details.review-more[open]");
+  const currentOpenKey = currentOpenDetails?.dataset.reviewDetailKey || "";
+  const currentOpenContent = currentOpenDetails?.querySelector("[data-review-detail-content]");
+  if (currentOpenKey && currentOpenContent) {
+    reviewDetailScrollPositions.set(currentOpenKey, currentOpenContent.scrollTop);
+  }
+  const previousWindowScrollY = window.scrollY;
   const reviewMode = reviewStatusMode();
   if (reviewMode === "pending") purgeIrrelevantReviewLeads();
   renderReviewFilterOptions();
@@ -2185,6 +2194,7 @@ function renderReview() {
   const selectedDetailHtml = [selectedRecord].map(({ lead, index, rankIndex }) => {
     const editId = `${reviewMode}:${lead.id || index}`;
     const isEditing = editingReviewLeadId === editId;
+    const isDetailOpen = openReviewDetailKey === editId;
     return `
     <article class="review-card">
       <div class="review-title-row">
@@ -2303,7 +2313,7 @@ function renderReview() {
       ${reviewMode === "rejected" && lead.rejectReason ? `<div class="reject-reason-readonly"><strong>拒绝原因</strong><p>${escapeHtml(lead.rejectReason)}</p></div>` : ""}
       ${reviewMode === "rejected" ? `<div class="restore-rejected-actions"><button class="primary" type="button" data-review-action="restore" data-index="${index}">退回未审核</button></div>` : ""}
       ${reviewMode === "pending" && isEditing ? renderLeadEditForm(lead, index, editId) : ""}
-      <details class="review-more" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}">
+      <details class="review-more" data-review-detail-key="${escapeHtml(editId)}" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}" ${isDetailOpen ? "open" : ""}>
         <summary>
           <span>查看全部来源与核验详情</span>
           <small class="review-source-badges">
@@ -2311,7 +2321,7 @@ function renderReview() {
             <b>${(lead.socialProfiles || []).length} 个社媒账号</b>
           </small>
         </summary>
-        <div class="review-more-content" data-review-detail-content></div>
+        <div class="review-more-content" data-review-detail-content ${isDetailOpen ? 'data-loaded="true"' : ""}>${isDetailOpen ? renderReviewDetailContent(lead) : ""}</div>
       </details>
     </article>
   `;
@@ -2328,6 +2338,21 @@ function renderReview() {
       <section class="review-workbench-detail">${selectedDetailHtml}</section>
     </div>
   `;
+  if (openReviewDetailKey) {
+    const openDetails = $$("#reviewGrid details.review-more[open]").find(
+      (details) => details.dataset.reviewDetailKey === openReviewDetailKey
+    );
+    const openContent = openDetails?.querySelector("[data-review-detail-content]");
+    if (openContent) {
+      const savedScrollTop = reviewDetailScrollPositions.get(openReviewDetailKey) || 0;
+      requestAnimationFrame(() => {
+        openContent.scrollTop = savedScrollTop;
+        window.scrollTo({ top: previousWindowScrollY, behavior: "auto" });
+      });
+    } else {
+      openReviewDetailKey = "";
+    }
+  }
 }
 
 function leadEditListValue(values, fallback = "") {
@@ -2657,7 +2682,8 @@ function renderReviewDetailContent(lead) {
 function reviewDetailLead(details) {
   const id = details?.dataset?.reviewDetailId || "";
   const index = Number(details?.dataset?.reviewDetailIndex);
-  const leads = details?.dataset?.reviewDetailMode === "approved" ? customers : reviewLeads;
+  const mode = details?.dataset?.reviewDetailMode;
+  const leads = mode === "approved" ? customers : mode === "rejected" ? rejectedLeads : reviewLeads;
   return leads.find((lead) => String(lead.id || "") === id) || leads[index] || null;
 }
 
@@ -5869,6 +5895,7 @@ function bindForms() {
       selectedReviewLeadId = row.dataset.reviewLeadRow;
       editingReviewLeadId = "";
       rejectingReviewLeadId = "";
+      openReviewDetailKey = "";
       closeOpenReviewDetails();
       renderReview();
       const nextListScroll = document.querySelector("#reviewGrid .review-list-scroll");
@@ -5886,6 +5913,7 @@ function bindForms() {
     }
     const closeDetailsButton = event.target.closest("[data-close-review-details]");
     if (closeDetailsButton) {
+      openReviewDetailKey = "";
       closeDetailsButton.closest("details")?.removeAttribute("open");
       return;
     }
@@ -5977,12 +6005,23 @@ function bindForms() {
   $("#reviewGrid").addEventListener("toggle", (event) => {
     const details = event.target;
     if (!details?.matches?.("details.review-more")) return;
+    const detailKey = details.dataset.reviewDetailKey || "";
     if (!details.open) {
+      const content = details.querySelector("[data-review-detail-content]");
+      if (detailKey && content) reviewDetailScrollPositions.set(detailKey, content.scrollTop);
+      if (openReviewDetailKey === detailKey) openReviewDetailKey = "";
       clearReviewDetail(details);
       return;
     }
+    openReviewDetailKey = detailKey;
     closeOpenReviewDetails(details);
     hydrateReviewDetail(details);
+  }, true);
+
+  $("#reviewGrid").addEventListener("scroll", (event) => {
+    const content = event.target.closest?.("[data-review-detail-content]");
+    const detailKey = content?.closest("details.review-more")?.dataset.reviewDetailKey || "";
+    if (content && detailKey) reviewDetailScrollPositions.set(detailKey, content.scrollTop);
   }, true);
 
   ["#reviewStatusFilter", "#reviewDiscoveryFilter", "#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
