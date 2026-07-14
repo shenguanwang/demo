@@ -3291,14 +3291,36 @@ function crmLeadSearchText(lead) {
   ].filter(Boolean).join(" ").toLowerCase();
 }
 
+function crmPhoneHref(value) {
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/[^\d+]/g, "");
+  if (!digits || digits.replace(/\D/g, "").length < 5) return "";
+  return `tel:${digits}`;
+}
+
+function crmWhatsappHref(value) {
+  const raw = String(value || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  if (!digits || digits.length < 5) return "";
+  return `https://wa.me/${digits}`;
+}
+
+function crmWebsiteHref(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+}
+
 function crmLeadContactSummary(lead) {
   const contacts = [];
   const email = primaryEmailForLead(lead);
-  if (email) contacts.push(["邮箱", email]);
-  if (lead.phone) contacts.push(["电话", lead.phone]);
-  if (lead.whatsapp) contacts.push(["WhatsApp", lead.whatsapp]);
-  if (lead.website) contacts.push(["官网", lead.website]);
-  return contacts.slice(0, 3).map(([label, value]) => `
+  if (email) contacts.push({ label: "邮箱", value: email, href: `mailto:${encodeURIComponent(email)}` });
+  if (lead.phone) contacts.push({ label: "电话", value: lead.phone, href: crmPhoneHref(lead.phone) });
+  if (lead.whatsapp) contacts.push({ label: "WhatsApp", value: lead.whatsapp, href: crmWhatsappHref(lead.whatsapp), external: true });
+  if (lead.website) contacts.push({ label: "官网", value: lead.website, href: crmWebsiteHref(lead.website), external: true });
+  return contacts.slice(0, 4).map(({ label, value, href, external }) => href ? `
+    <a href="${escapeHtml(href)}" title="${escapeHtml(value)}"${external ? ` target="_blank" rel="noopener noreferrer"` : ""}>${escapeHtml(label)}</a>
+  ` : `
     <span title="${escapeHtml(value)}">${escapeHtml(label)}</span>
   `).join("") || `<span class="muted">缺少联系方式</span>`;
 }
