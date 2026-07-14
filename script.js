@@ -536,6 +536,8 @@ let editingReviewLeadId = "";
 let rejectingReviewLeadId = "";
 let openReviewDetailKey = "";
 const reviewDetailScrollPositions = new Map();
+let reviewSearchRenderTimer = 0;
+let reviewDetailHydrationId = 0;
 const rejectReasonOptions = [
   "不是汽车经销/进口/分销客户",
   "地区不符合目标市场",
@@ -2117,7 +2119,8 @@ function reviewModeLabel(mode = reviewStatusMode()) {
   return "待审核线索";
 }
 
-function renderReview() {
+function renderReview(options = {}) {
+  const detailOnly = Boolean(options.detailOnly);
   // Keep the review queue stable. Scores are decision support, not a reason to
   // move the card the reviewer is currently working on after manual calibration.
   const currentOpenDetails = document.querySelector("#reviewGrid details.review-more[open]");
@@ -2168,7 +2171,7 @@ function renderReview() {
     selectedReviewLeadId = `${reviewMode}:${rankedLeadRows[0].lead.id || rankedLeadRows[0].index}`;
   }
   const selectedRecord = rankedLeadRows.find(({ lead, index }) => `${reviewMode}:${lead.id || index}` === selectedReviewLeadId) || rankedLeadRows[0];
-  const reviewListHtml = rankedLeadRows.map(({ lead, index, rankIndex }) => {
+  const reviewListHtml = detailOnly ? "" : rankedLeadRows.map(({ lead, index, rankIndex }) => {
     const rowId = `${reviewMode}:${lead.id || index}`;
     const phoneCount = evidenceValues(lead.phoneSources, lead.phone).length + evidenceValues(lead.whatsappSources, lead.whatsapp).length;
     const missing = (lead.sourceCoverage?.missingFields || []).join("、") || "齐全";
@@ -2321,23 +2324,33 @@ function renderReview() {
             <b>${(lead.socialProfiles || []).length} 个社媒账号</b>
           </small>
         </summary>
-        <div class="review-more-content" data-review-detail-content ${isDetailOpen ? 'data-loaded="true"' : ""}>${isDetailOpen ? renderReviewDetailContent(lead) : ""}</div>
+        <div class="review-more-content" data-review-detail-content></div>
       </details>
     </article>
   `;
   }).join("");
-  $("#reviewGrid").innerHTML = `
-    <div class="review-workbench">
-      <aside class="review-workbench-list" aria-label="待审核线索列表">
-        <div class="review-workbench-list-head">
-          <strong>${escapeHtml(reviewModeLabel(reviewMode))}</strong>
-          <span>${rankedLeadRows.length} 条</span>
-        </div>
-        <div class="review-list-scroll">${reviewListHtml}</div>
-      </aside>
-      <section class="review-workbench-detail">${selectedDetailHtml}</section>
-    </div>
-  `;
+  const existingDetail = detailOnly ? $("#reviewGrid .review-workbench-detail") : null;
+  if (existingDetail) {
+    existingDetail.innerHTML = selectedDetailHtml;
+    $$("#reviewGrid [data-review-lead-row]").forEach((row) => {
+      const active = row.dataset.reviewLeadRow === selectedReviewLeadId;
+      row.classList.toggle("active", active);
+      row.setAttribute("aria-selected", String(active));
+    });
+  } else {
+    $("#reviewGrid").innerHTML = `
+      <div class="review-workbench">
+        <aside class="review-workbench-list" aria-label="待审核线索列表">
+          <div class="review-workbench-list-head">
+            <strong>${escapeHtml(reviewModeLabel(reviewMode))}</strong>
+            <span>${rankedLeadRows.length} 条</span>
+          </div>
+          <div class="review-list-scroll">${reviewListHtml}</div>
+        </aside>
+        <section class="review-workbench-detail">${selectedDetailHtml}</section>
+      </div>
+    `;
+  }
   if (openReviewDetailKey) {
     const openDetails = $$("#reviewGrid details.review-more[open]").find(
       (details) => details.dataset.reviewDetailKey === openReviewDetailKey
@@ -2345,10 +2358,8 @@ function renderReview() {
     const openContent = openDetails?.querySelector("[data-review-detail-content]");
     if (openContent) {
       const savedScrollTop = reviewDetailScrollPositions.get(openReviewDetailKey) || 0;
-      requestAnimationFrame(() => {
-        openContent.scrollTop = savedScrollTop;
-        window.scrollTo({ top: previousWindowScrollY, behavior: "auto" });
-      });
+      hydrateReviewDetail(openDetails, savedScrollTop);
+      requestAnimationFrame(() => window.scrollTo({ top: previousWindowScrollY, behavior: "auto" }));
     } else {
       openReviewDetailKey = "";
     }
@@ -2691,7 +2702,9 @@ function clearReviewDetail(details) {
   const content = details?.querySelector("[data-review-detail-content]");
   if (!content) return;
   content.textContent = "";
+  content.classList.remove("is-loading");
   delete content.dataset.loaded;
+  delete content.dataset.hydrating;
 }
 
 function closeOpenReviewDetails(except = null) {
@@ -2700,14 +2713,28 @@ function closeOpenReviewDetails(except = null) {
   });
 }
 
-function hydrateReviewDetail(details) {
+function hydrateReviewDetail(details, restoreScrollTop = 0) {
   const content = details?.querySelector("[data-review-detail-content]");
-  if (!content || content.dataset.loaded === "true") return;
-  const lead = reviewDetailLead(details);
-  content.innerHTML = lead
-    ? renderReviewDetailContent(lead)
-    : `<p class="empty">详情已刷新，请重新打开线索。</p>`;
-  content.dataset.loaded = "true";
+  if (!content) return;
+  if (content.dataset.loaded === "true") {
+    requestAnimationFrame(() => { content.scrollTop = restoreScrollTop; });
+    return;
+  }
+  const hydrationId = String(++reviewDetailHydrationId);
+  content.dataset.hydrating = hydrationId;
+  content.classList.add("is-loading");
+  content.innerHTML = `<div class="review-detail-loading" role="status"><span></span><b>正在加载来源与核验详情</b></div>`;
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    if (!details.open || content.dataset.hydrating !== hydrationId) return;
+    const lead = reviewDetailLead(details);
+    content.innerHTML = lead
+      ? renderReviewDetailContent(lead)
+      : `<p class="empty">详情已刷新，请重新打开线索。</p>`;
+    content.classList.remove("is-loading");
+    content.dataset.loaded = "true";
+    delete content.dataset.hydrating;
+    content.scrollTop = restoreScrollTop;
+  }));
 }
 
 function reviewLeadTimestamp(lead) {
@@ -5890,20 +5917,13 @@ function bindForms() {
   $("#reviewGrid").addEventListener("click", (event) => {
     const row = event.target.closest("[data-review-lead-row]");
     if (row && !event.target.closest("input, button, a, summary, details")) {
-      const listScroll = row.closest(".review-list-scroll");
-      const previousScrollTop = listScroll?.scrollTop || 0;
       selectedReviewLeadId = row.dataset.reviewLeadRow;
       editingReviewLeadId = "";
       rejectingReviewLeadId = "";
       openReviewDetailKey = "";
       closeOpenReviewDetails();
-      renderReview();
-      const nextListScroll = document.querySelector("#reviewGrid .review-list-scroll");
-      const selectedRow = document.querySelector(
-        `[data-review-lead-row="${CSS.escape(selectedReviewLeadId)}"]`
-      );
-      selectedRow?.focus({ preventScroll: true });
-      if (nextListScroll) nextListScroll.scrollTop = previousScrollTop;
+      renderReview({ detailOnly: true });
+      row.focus({ preventScroll: true });
       return;
     }
     const sectionButton = event.target.closest("[data-section]");
@@ -6027,7 +6047,13 @@ function bindForms() {
   ["#reviewStatusFilter", "#reviewDiscoveryFilter", "#reviewTimeFilter", "#reviewSourceFilter", "#reviewCountryFilter", "#reviewTierFilter"].forEach((selector) => {
     $(selector)?.addEventListener("change", renderReview);
   });
-  $("#reviewSearchInput")?.addEventListener("input", renderReview);
+  $("#reviewSearchInput")?.addEventListener("input", () => {
+    window.clearTimeout(reviewSearchRenderTimer);
+    reviewSearchRenderTimer = window.setTimeout(() => {
+      reviewSearchRenderTimer = 0;
+      renderReview();
+    }, 140);
+  });
 
   $("#clearReviewFilters")?.addEventListener("click", () => {
     $("#reviewStatusFilter").value = "pending";

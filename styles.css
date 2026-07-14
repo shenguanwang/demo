@@ -3026,6 +3026,8 @@ textarea {
 .review-list-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
+  content-visibility: auto;
+  contain-intrinsic-size: 104px;
   gap: 8px 10px;
   padding: 12px 13px;
   border-bottom: 1px solid #edf0f3;
@@ -3650,6 +3652,7 @@ textarea {
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
+  contain: layout paint style;
   padding: 16px;
   border-top: 1px solid var(--line);
   background: #fff;
@@ -3658,6 +3661,34 @@ textarea {
 .review-more-content:focus-visible {
   outline: 2px solid #b98729;
   outline-offset: -2px;
+}
+
+.review-more-content.is-loading {
+  min-height: 112px;
+}
+
+.review-detail-loading {
+  display: flex;
+  min-height: 80px;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.review-detail-loading span {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  border: 2px solid #d9e0e7;
+  border-top-color: #24558b;
+  border-radius: 50%;
+  animation: review-detail-spin 0.7s linear infinite;
+}
+
+@keyframes review-detail-spin {
+  to { transform: rotate(360deg); }
 }
 
 .review-drawer-head {
