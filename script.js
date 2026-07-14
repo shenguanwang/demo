@@ -3314,14 +3314,14 @@ function crmWebsiteHref(value) {
 function crmLeadContactSummary(lead) {
   const contacts = [];
   const email = primaryEmailForLead(lead);
-  if (email) contacts.push({ label: "邮箱", value: email, href: `mailto:${encodeURIComponent(email)}` });
-  if (lead.phone) contacts.push({ label: "电话", value: lead.phone, href: crmPhoneHref(lead.phone) });
-  if (lead.whatsapp) contacts.push({ label: "WhatsApp", value: lead.whatsapp, href: crmWhatsappHref(lead.whatsapp), external: true });
-  if (lead.website) contacts.push({ label: "官网", value: lead.website, href: crmWebsiteHref(lead.website), external: true });
-  return contacts.slice(0, 4).map(({ label, value, href, external }) => href ? `
-    <a href="${escapeHtml(href)}" title="${escapeHtml(value)}"${external ? ` target="_blank" rel="noopener noreferrer"` : ""}>${escapeHtml(label)}</a>
+  if (email) contacts.push({ type: "email", label: "邮箱", value: email, href: `mailto:${encodeURIComponent(email)}` });
+  if (lead.phone) contacts.push({ type: "phone", label: "电话", value: lead.phone, href: crmPhoneHref(lead.phone) });
+  if (lead.whatsapp) contacts.push({ type: "whatsapp", label: "WhatsApp", value: lead.whatsapp, href: crmWhatsappHref(lead.whatsapp), external: true });
+  if (lead.website) contacts.push({ type: "website", label: "官网", value: lead.website, href: crmWebsiteHref(lead.website), external: true });
+  return contacts.slice(0, 4).map(({ type, label, value, href, external }) => href ? `
+    <a data-contact-type="${escapeHtml(type)}" href="${escapeHtml(href)}" title="${escapeHtml(value)}"${external ? ` target="_blank" rel="noopener noreferrer"` : ""}>${escapeHtml(label)}</a>
   ` : `
-    <span title="${escapeHtml(value)}">${escapeHtml(label)}</span>
+    <span data-contact-type="${escapeHtml(type)}" title="${escapeHtml(value)}">${escapeHtml(label)}</span>
   `).join("") || `<span class="muted">缺少联系方式</span>`;
 }
 

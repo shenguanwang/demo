@@ -4445,6 +4445,51 @@ textarea {
   color: #8a641f;
 }
 
+.crm-contact-chips [data-contact-type="email"] {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.crm-contact-chips [data-contact-type="phone"] {
+  border-color: #ddd6fe;
+  background: #f5f3ff;
+  color: #6d28d9;
+}
+
+.crm-contact-chips [data-contact-type="whatsapp"] {
+  border-color: #bbf7d0;
+  background: #ecfdf3;
+  color: #128c4a;
+}
+
+.crm-contact-chips [data-contact-type="website"] {
+  border-color: #fde68a;
+  background: #fffbeb;
+  color: #9a6412;
+}
+
+.crm-contact-chips a[data-contact-type="email"]:hover {
+  border-color: #60a5fa;
+  background: #dbeafe;
+}
+
+.crm-contact-chips a[data-contact-type="phone"]:hover {
+  border-color: #a78bfa;
+  background: #ede9fe;
+}
+
+.crm-contact-chips a[data-contact-type="whatsapp"]:hover {
+  border-color: #4ade80;
+  background: #dcfce7;
+  color: #08783d;
+}
+
+.crm-contact-chips a[data-contact-type="website"]:hover {
+  border-color: #facc15;
+  background: #fef3c7;
+}
+
 .crm-contact-chips .muted {
   background: #fff7ed;
   color: #9a5a18;
