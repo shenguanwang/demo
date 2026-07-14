@@ -103,6 +103,8 @@ DISCOVERY_QUALIFIED_TARGET_MAX = 30
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
+APIFY_DISCOVERY_ENABLED = str(bootstrap_setting("APIFY_DISCOVERY_ENABLED", "false")).strip().lower() in {"1", "true", "yes", "on"}
+APIFY_RUN_TIMEOUT_SECONDS = max(10, min(60, int(bootstrap_setting("APIFY_RUN_TIMEOUT_SECONDS", "25"))))
 ASSIGNED_COUNTRY_NONE = "__none__"
 DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "480")))
 YOUTUBE_MAX_VIDEO_AGE_DAYS = 365 * 5
@@ -130,7 +132,7 @@ ADMIN_CONTROL_DEFAULTS = {
         "targetMax": 30,
         "taskTimeoutMinutes": 12,
         "fallbackEnabled": True,
-        "globalSources": ["google", "osm", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"],
+        "globalSources": ["google", "osm", "dealer", "youtube"],
         "sourceCaps": {
             "google": 30, "osm": 20, "dealer": 40, "instagram": 30,
             "facebook": 30, "tiktok": 30, "youtube": 30, "linkedin": 30,
@@ -207,8 +209,10 @@ ADMIN_SETTING_DEFINITIONS = {
     "PUBLIC_BASE_URL": {"type": "url", "label": "公开访问地址", "group": "runtime", "status": "active", "use": "回调/公开链接"},
     "DISCOVERY_MAX_CONCURRENCY": {"type": "int", "label": "获客并发数", "group": "runtime", "status": "active", "use": "后台任务并发", "min": 1, "max": 8},
     "NETWORK_DEFAULT_TIMEOUT": {"type": "int", "label": "网络超时秒数", "group": "runtime", "status": "active", "use": "外部接口请求超时", "min": 5, "max": 60},
+    "APIFY_DISCOVERY_ENABLED": {"type": "text", "label": "Apify 获客开关", "group": "social", "status": "active", "use": "true 才允许获客任务调用付费 Apify Actor"},
+    "APIFY_RUN_TIMEOUT_SECONDS": {"type": "int", "label": "Apify 单次超时秒数", "group": "social", "status": "active", "use": "限制单个 Apify Actor 空跑时间", "min": 10, "max": 60},
 }
-ADMIN_RUNTIME_KEYS = {"PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"}
+ADMIN_RUNTIME_KEYS = {"PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT", "APIFY_DISCOVERY_ENABLED", "APIFY_RUN_TIMEOUT_SECONDS"}
 ADMIN_CUSTOM_APIS_KEY = "_customApis"
 ADMIN_SETTINGS_LOCK = threading.RLock()
 ADMIN_SETTINGS_CACHE: dict | None = None
@@ -832,7 +836,7 @@ def admin_settings_payload() -> dict:
         "customApis": custom_apis,
         "controlCenter": admin_control_settings(),
         "dynamicRuntime": ["DISCOVERY_MAX_CONCURRENCY"],
-        "restartRequired": ["NETWORK_DEFAULT_TIMEOUT"],
+        "restartRequired": ["NETWORK_DEFAULT_TIMEOUT", "APIFY_DISCOVERY_ENABLED", "APIFY_RUN_TIMEOUT_SECONDS"],
     }
 
 
@@ -6529,17 +6533,21 @@ def apify_keyword_query(query: str) -> str:
 
 
 def apify_query_plan(query_variants: list[str], source_mode: str, platform: str = "") -> tuple[list[str], int]:
+    if not APIFY_DISCOVERY_ENABLED:
+        return [], 0
     if platform in {"instagram", "facebook", "tiktok", "linkedin"}:
-        if source_mode in ("all", "combined", "social"):
-            query_limit, result_limit = 3, 24
+        if source_mode in ("all", "combined"):
+            return [], 0
+        if source_mode == "social":
+            query_limit, result_limit = 1, 8
         else:
-            query_limit, result_limit = 3, 24
+            query_limit, result_limit = 1, 10
     elif source_mode in ("all", "combined"):
-        query_limit, result_limit = 3, 18
+        return [], 0
     elif source_mode == "social":
-        query_limit, result_limit = 3, 24
+        query_limit, result_limit = 1, 8
     else:
-        query_limit, result_limit = 4, 30
+        query_limit, result_limit = 1, 10
     queries = []
     for query in query_variants:
         cleaned = apify_keyword_query(query)
@@ -6762,29 +6770,35 @@ def search_apify_social(
     source_type: str,
     limit: int = 8,
 ) -> list[dict]:
+    if not APIFY_DISCOVERY_ENABLED:
+        return []
     token = get_apify_api_token()
     actor_id = apify_actor_id(platform)
-    if not token or not actor_id:
+    if not token or not actor_id or limit <= 0 or not queries:
         return []
     results: list[dict] = []
     seen: set[str] = set()
 
     def run_query(query: str) -> list[dict]:
         actor = apify_actor_url_part(actor_id)
-        params = urllib.parse.urlencode({"token": token, "timeout": "75", "memory": "512"})
+        params = urllib.parse.urlencode({"token": token, "timeout": str(APIFY_RUN_TIMEOUT_SECONDS), "memory": "512"})
         url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?{params}"
         try:
-            items = post_json_value(url, apify_search_input(platform, query, min(20, limit)), timeout=85)
+            items = post_json_value(
+                url,
+                apify_search_input(platform, query, min(10, limit)),
+                timeout=APIFY_RUN_TIMEOUT_SECONDS + 10,
+            )
         except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
             record_api_usage(f"apify:{platform}", False, detail=actor_id)
             return []
         record_api_usage(f"apify:{platform}", True, detail=actor_id)
         return normalize_apify_items(platform, items, query, origin, source_type, limit)
 
-    executor = ThreadPoolExecutor(max_workers=min(2, max(1, len(queries))))
+    executor = ThreadPoolExecutor(max_workers=1)
     futures = [executor.submit(run_query, query) for query in queries]
     try:
-        for future in as_completed(futures, timeout=95):
+        for future in as_completed(futures, timeout=APIFY_RUN_TIMEOUT_SECONDS + 15):
             if len(results) >= limit:
                 break
             try:
@@ -9120,6 +9134,8 @@ def discover(params: dict[str, list[str]]) -> dict:
     if source_mode in disabled_social_source_modes:
         source_mode = "social"
     enabled_sources = enabled_discovery_sources(country)
+    if source_mode in ("all", "combined") and not APIFY_DISCOVERY_ENABLED:
+        enabled_sources = enabled_sources - {"instagram", "facebook", "tiktok", "linkedin"}
     single_source_modes = {"google", "osm", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"}
     if source_mode in single_source_modes and source_mode not in enabled_sources:
         raise ValueError(f"系统设置已停用当前来源：{source_mode}")
@@ -10468,10 +10484,20 @@ def compact_text(value, limit: int = 2000) -> str:
 def normalize_website_lead(payload: dict, client_ip: str = "", user_agent: str = "") -> dict:
     if not isinstance(payload, dict):
         raise ValueError("Invalid website lead payload")
+    if compact_text(payload.get("websiteCheck"), 200):
+        raise ValueError("Invalid submission")
     company = compact_text(payload.get("name") or payload.get("company"), 160)
     contact = compact_text(payload.get("contact"), 180)
     country = compact_text(payload.get("country"), 180)
+    detected_country = compact_text(payload.get("detectedCountry"), 8).upper()
+    detected_language = compact_text(payload.get("detectedLanguage"), 12).lower()
+    language_source = compact_text(payload.get("languageSource"), 20).lower()
     model_line = compact_text(payload.get("modelLine") or payload.get("model-line") or payload.get("target"), 120)
+    buyer_type = compact_text(payload.get("buyerType"), 40)
+    model_version = compact_text(payload.get("modelVersion"), 160)
+    purchase_timeline = compact_text(payload.get("purchaseTimeline"), 40)
+    trade_term = compact_text(payload.get("tradeTerm"), 40).upper()
+    privacy_consent = compact_text(payload.get("privacyConsent"), 10).lower()
     quantity_text = compact_text(payload.get("quantity"), 40)
     message = compact_text(payload.get("message"), 2000)
     if not company:
@@ -10480,6 +10506,8 @@ def normalize_website_lead(payload: dict, client_ip: str = "", user_agent: str =
         raise ValueError("Email or WhatsApp is required")
     if not country:
         raise ValueError("Country or destination port is required")
+    if privacy_consent != "yes":
+        raise ValueError("Privacy consent is required")
     try:
         quantity = max(1, min(9999, int(float(quantity_text or 1))))
     except (TypeError, ValueError):
@@ -10497,8 +10525,16 @@ def normalize_website_lead(payload: dict, client_ip: str = "", user_agent: str =
         "email": email,
         "whatsapp": whatsapp,
         "country": country,
+        "detectedCountry": detected_country if re.fullmatch(r"[A-Z]{2}", detected_country) else "",
+        "detectedLanguage": detected_language if detected_language in {"en", "zh", "ar", "es", "ru", "fr"} else "",
+        "languageSource": language_source if language_source in {"manual", "country", "browser"} else "",
         "city": "",
         "modelLine": model_line,
+        "buyerType": buyer_type,
+        "modelVersion": model_version,
+        "purchaseTimeline": purchase_timeline,
+        "tradeTerm": trade_term,
+        "privacyConsent": True,
         "model": model,
         "quantity": quantity,
         "message": message,
@@ -10511,8 +10547,8 @@ def normalize_website_lead(payload: dict, client_ip: str = "", user_agent: str =
         "receivedAt": now,
         "clientIp": client_ip,
         "userAgent": compact_text(user_agent, 500),
-        "reason": f"{company} submitted a website inquiry for {model_line or model}, destination {country}, quantity {quantity}.",
-        "website": " ".join(["YIMING AUTO official website inquiry", company, country, model_line, message]).strip(),
+        "reason": f"{company} submitted a website inquiry for {model_line or model} {model_version}, destination {country}, quantity {quantity}, timeline {purchase_timeline}.",
+        "website": " ".join(["YIMING AUTO official website inquiry", company, buyer_type, country, model_line, model_version, purchase_timeline, trade_term, message]).strip(),
     }
 
 
