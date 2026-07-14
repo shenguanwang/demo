@@ -111,6 +111,8 @@ DISCOVERY_SCHEDULER_STARTED_LOCK = threading.Lock()
 DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 SQLITE_STATE_FILE = Path(os.environ.get("STATE_DATABASE_PATH") or (ROOT / "workbench-state.db"))
 STATE_LOCK = threading.RLock()
+STATE_STORE_INIT_LOCK = threading.Lock()
+STATE_STORE_INITIALIZED = False
 AUTH_USERNAME = os.environ.get("APP_USERNAME", "admin")
 AUTH_PASSWORD = os.environ.get("APP_PASSWORD", "admin123")
 HIDDEN_ADMIN_USERNAME = os.environ.get("HIDDEN_ADMIN_USERNAME", "17609281273")
@@ -1030,7 +1032,7 @@ def migrate_admin_settings_file_to_database() -> None:
             )
 
 
-def initialize_state_store() -> None:
+def _initialize_state_store_schema() -> None:
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
@@ -1269,6 +1271,17 @@ def initialize_state_store() -> None:
             """
         )
     migrate_admin_settings_file_to_database()
+
+
+def initialize_state_store() -> None:
+    global STATE_STORE_INITIALIZED
+    if STATE_STORE_INITIALIZED:
+        return
+    with STATE_STORE_INIT_LOCK:
+        if STATE_STORE_INITIALIZED:
+            return
+        _initialize_state_store_schema()
+        STATE_STORE_INITIALIZED = True
 
 
 def empty_workspace_state() -> dict:
@@ -11103,13 +11116,24 @@ class ReusableThreadingTCPServer(socketserver.ThreadingTCPServer):
     daemon_threads = True
 
 
+def resume_discovery_jobs_in_background() -> None:
+    try:
+        resumed_jobs = resume_interrupted_discovery_jobs()
+        if resumed_jobs:
+            print(f"已恢复 {resumed_jobs} 个中断的获客任务。")
+    except Exception as exc:
+        print(f"恢复中断获客任务失败：{exc}")
+
+
 if __name__ == "__main__":
     initialize_state_store()
     start_discovery_scheduler()
-    resumed_jobs = resume_interrupted_discovery_jobs()
     with ReusableThreadingTCPServer((HOST, PORT), Handler) as httpd:
         display_host = "127.0.0.1" if HOST == "0.0.0.0" else HOST
         print(f"获客工作台已启动：http://{display_host}:{PORT}/index.html")
-        if resumed_jobs:
-            print(f"已恢复 {resumed_jobs} 个中断的获客任务。")
+        threading.Thread(
+            target=resume_discovery_jobs_in_background,
+            name="discovery-resume",
+            daemon=True,
+        ).start()
         httpd.serve_forever()
