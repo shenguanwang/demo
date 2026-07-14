@@ -141,16 +141,18 @@ ADMIN_CONTROL_DEFAULTS = {
         "countrySourceOverrides": {},
     },
     "quality": {
+        "scoreModelVersion": 11,
         "strictCountryMatch": True,
         "requireAutomotiveBusiness": True,
         "rejectPersonalAccounts": True,
         "requireContactOrWebsite": False,
         "blockRejectedMemory": True,
-        "minimumAutoImportScore": 10,
+        "minimumAutoImportScore": 50,
         "minimumAiConfidence": 55,
         "scoreWeights": {
-            "automotive": 15, "country": 15, "chineseNev": 12, "huawei": 12,
-            "contact": 12, "officialWebsite": 10, "importDistribution": 10,
+            "automotive": 20, "country": 20, "chineseNev": 10, "huawei": 10,
+            "contact": 15, "officialWebsite": 10, "importDistribution": 8,
+            "businessActivity": 4, "decisionMaker": 3,
         },
     },
     "ai": {
@@ -337,7 +339,8 @@ def merge_nested_settings(defaults: dict, value: dict | None) -> dict:
 
 def admin_control_settings() -> dict:
     settings = load_admin_settings_file()
-    return merge_nested_settings(ADMIN_CONTROL_DEFAULTS, settings.get(ADMIN_CONTROL_KEY))
+    stored = settings.get(ADMIN_CONTROL_KEY)
+    return normalize_admin_control(stored, stored)
 
 
 def control_value(section: str, key: str, default=None):
@@ -869,6 +872,12 @@ def normalize_admin_control(payload: dict | None, previous: dict | None = None) 
     }
 
     quality = control["quality"]
+    previous_quality = previous.get("quality") if isinstance(previous, dict) and isinstance(previous.get("quality"), dict) else {}
+    previous_score_model = int(previous_quality.get("scoreModelVersion") or 0)
+    if previous_score_model < ADMIN_CONTROL_DEFAULTS["quality"]["scoreModelVersion"]:
+        quality["scoreWeights"] = dict(ADMIN_CONTROL_DEFAULTS["quality"]["scoreWeights"])
+        quality["minimumAutoImportScore"] = ADMIN_CONTROL_DEFAULTS["quality"]["minimumAutoImportScore"]
+    quality["scoreModelVersion"] = ADMIN_CONTROL_DEFAULTS["quality"]["scoreModelVersion"]
     for key in ("strictCountryMatch", "requireAutomotiveBusiness", "rejectPersonalAccounts", "requireContactOrWebsite", "blockRejectedMemory"):
         quality[key] = bool(quality.get(key))
     quality["minimumAutoImportScore"] = max(0, min(100, int(quality.get("minimumAutoImportScore") or 0)))
@@ -7782,11 +7791,11 @@ def research_company(params: dict[str, list[str]]) -> dict:
         "confidenceLabel": confidence_label,
         "score": website_score,
         "baseScore": website_score,
-        "scoreModelVersion": 8,
+        "scoreModelVersion": 11,
         "scoreTier": score_tier,
         "scoreDimensions": score_dimensions,
         "scoreBreakdown": website_score_breakdown,
-        "scoreBasis": "100分线索模型：汽车业务15、地区匹配15、中国新能源12、华为系12、联系方式12、官网10、进口分销10、经营活跃6、决策人4、采购意向4，另计风险扣分",
+        "scoreBasis": "100分线索模型：汽车业务20、地区匹配20、联系方式15、官网10、中国新能源10、华为系列10、进口分销8、经营活跃4、决策人3，另计风险扣分",
         "isCompetitor": is_competitor,
         "businessSignals": business_signals,
         "intentSignals": intent_signals,
@@ -8618,12 +8627,12 @@ def lead_opportunity_score(
         "汽车", "车辆", "新车", "二手车",
     )
     if any(term in lower for term in automotive_specific_terms):
-        set_dimension("automotiveFit", "明确从事汽车经销、进口、分销或车队业务", 15)
+        set_dimension("automotiveFit", "明确从事汽车经销、进口、分销或车队业务", 20)
     elif any(term in lower for term in automotive_general_terms):
-        set_dimension("automotiveFit", "发现汽车行业相关业务", 10)
+        set_dimension("automotiveFit", "发现汽车行业相关业务", 12)
 
     if target_country_match:
-        set_dimension("countryFit", "公开证据与目标国家或城市匹配", 15)
+        set_dimension("countryFit", "公开证据与目标国家或城市匹配", 20)
 
     chinese_nev_terms = (
         "chinese ev", "china ev", "chinese electric vehicle", "chinese new energy vehicle",
@@ -8634,23 +8643,23 @@ def lead_opportunity_score(
         "理想", "零跑", "红旗", "长安", "深蓝", "岚图", "阿维塔", "腾势",
     )
     if any(term in lower for term in chinese_nev_terms):
-        set_dimension("chineseNev", "经营或关注中国新能源汽车品牌", 12)
+        set_dimension("chineseNev", "经营或关注中国新能源汽车品牌", 10)
 
     huawei_terms = (
         "huawei", "harmonyos", "harmony intelligent mobility", "hima", "aito", "luxeed",
         "stelato", "maextro", "问界", "智界", "享界", "尊界", "鸿蒙智行", "华为汽车",
     )
     if any(term in lower for term in huawei_terms):
-        set_dimension("huaweiFit", "包含华为、鸿蒙智行或华为系车型信号", 12)
-        set_dimension("chineseNev", "华为系车型属于中国新能源/智能电动车线索", 12)
+        set_dimension("huaweiFit", "包含华为、鸿蒙智行或华为系车型信号", 10)
+        set_dimension("chineseNev", "华为系车型属于中国新能源/智能电动车线索", 10)
 
     contact_count = sum((bool(has_email), bool(has_phone), bool(has_whatsapp)))
     if contact_count == 3:
-        set_dimension("contactCompleteness", "邮箱、电话和 WhatsApp 齐全", 12)
+        set_dimension("contactCompleteness", "邮箱、电话和 WhatsApp 齐全", 15)
     elif contact_count == 2:
-        set_dimension("contactCompleteness", "三类核心联系方式中已核验两类", 8)
+        set_dimension("contactCompleteness", "三类核心联系方式中已核验两类", 10)
     elif contact_count == 1 or has_contact:
-        set_dimension("contactCompleteness", "已核验至少一种公开商业联系方式", 4)
+        set_dimension("contactCompleteness", "已核验至少一种公开商业联系方式", 5)
 
     if has_official_website:
         set_dimension("websiteTrust", "存在可核验的企业官网", 10)
@@ -8666,38 +8675,31 @@ def lead_opportunity_score(
         "贸易许可证", "商业登记", "授权进口商",
     )
     if any(term in lower for term in qualification_terms):
-        set_dimension("tradeQualification", "明确具备进出口、海关或贸易许可资质", 10)
+        set_dimension("tradeQualification", "明确具备进出口、海关或贸易许可资质", 8)
     elif any(term in lower for term in (
         "vehicle importer", "car importer", "automotive importer",
         "parallel import", "import and export",
     )):
-        set_dimension("tradeQualification", "公开业务显示具备车辆进口经验，资质待核验", 6)
+        set_dimension("tradeQualification", "公开业务显示具备车辆进口经验，资质待核验", 5)
 
     if any(term in lower for term in ("luxury", "premium", "supercar", "range rover", "mercedes", "bmw", "porsche", "bentley")):
-        set_dimension("businessCapacity", "经营豪华或高端汽车", 3)
+        set_dimension("businessCapacity", "经营豪华或高端汽车", 2)
     if any(term in lower for term in ("our brands", "brands we represent", "multi-brand", "wide range of brands", "brand portfolio")):
-        set_dimension("businessCapacity", "具备多品牌经营能力", 4)
+        set_dimension("businessCapacity", "具备多品牌经营能力", 3)
     if any(term in lower for term in ("branches", "locations", "group of companies", "nationwide", "regional network")):
-        set_dimension("businessCapacity", "具备多网点或区域经营能力", 5)
+        set_dimension("businessCapacity", "具备多网点或区域经营能力", 4)
     if google_reviews >= 100:
-        set_dimension("businessCapacity", "地图评价量显示经营规模较稳定", 6)
+        set_dimension("businessCapacity", "地图评价量显示经营规模较稳定", 4)
     elif google_reviews >= 20:
-        set_dimension("businessCapacity", "地图经营评价较充分", 4)
+        set_dimension("businessCapacity", "地图经营评价较充分", 3)
     elif any(term in lower for term in ("wholesale", "fleet", "corporate sales", "bulk sales")):
-        set_dimension("businessCapacity", "具备批发、车队或企业销售能力", 5)
-
-    if any(term in lower for term in BUYING_INTENT_TERMS):
-        set_dimension("purchaseIntent", "存在明确采购、询价或招商意向", 4)
-    elif any(term in lower for term in ("fleet", "procurement", "wholesale", "bulk order", "corporate sales")):
-        set_dimension("purchaseIntent", "存在车队、批发或企业采购场景", 3)
-    elif any(term in lower for term in ("new brand", "brand partnership", "new models", "expanding portfolio")):
-        set_dimension("purchaseIntent", "存在引入新品牌或扩充车型信号", 3)
+        set_dimension("businessCapacity", "具备批发、车队或企业销售能力", 4)
 
     if has_decision_maker or re.search(
         r"\b(owner|founder|director|general manager|procurement manager|purchasing manager)\b",
         lower,
     ):
-        set_dimension("decisionMaker", "发现公开决策人或采购岗位", 4)
+        set_dimension("decisionMaker", "发现公开决策人或采购岗位", 3)
 
     if re.search(r"\b(repair|workshop|spare parts|car wash|detailing|tyres?)\b", lower) and not re.search(
         r"\b(importer|distributor|dealer|dealership|showroom|vehicle sales)\b", lower
@@ -8713,13 +8715,15 @@ def lead_opportunity_score(
 
     configured_weights = admin_control_settings().get("quality", {}).get("scoreWeights") or {}
     weight_mapping = {
-        "automotiveFit": ("automotive", 15),
-        "countryFit": ("country", 15),
-        "chineseNev": ("chineseNev", 12),
-        "huaweiFit": ("huawei", 12),
-        "contactCompleteness": ("contact", 12),
+        "automotiveFit": ("automotive", 20),
+        "countryFit": ("country", 20),
+        "chineseNev": ("chineseNev", 10),
+        "huaweiFit": ("huawei", 10),
+        "contactCompleteness": ("contact", 15),
         "websiteTrust": ("officialWebsite", 10),
-        "tradeQualification": ("importDistribution", 10),
+        "tradeQualification": ("importDistribution", 8),
+        "businessCapacity": ("businessActivity", 4),
+        "decisionMaker": ("decisionMaker", 3),
     }
     for dimension, (setting_key, default_max) in weight_mapping.items():
         current = dimensions.get(dimension, 0)
@@ -8734,6 +8738,8 @@ def lead_opportunity_score(
 
     score = sum(dimensions.values())
     score = max(0, min(score, 100))
+    if not dimensions["automotiveFit"] or not dimensions["countryFit"]:
+        score = min(score, 49)
     tier = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
     return score, breakdown, dimensions, tier
 
@@ -10045,6 +10051,34 @@ def discover(params: dict[str, list[str]]) -> dict:
                         ai_review["businessType"],
                         *business_signals,
                     ]))[:6]
+        country_evidence_text = " ".join(
+            value for value in (
+                source_title,
+                source_excerpt,
+                page,
+                official_contact_excerpt,
+                source_url,
+                customer_website,
+            ) if value
+        )
+        trusted_geo_match = (
+            origin in {"Google Maps", "OpenStreetMap"} or origin.startswith("OpenStreetMap")
+        ) and not has_foreign_location_conflict(country_evidence_text, country)
+        ai_country_match = bool(
+            ai_review.get("targetCountryMatch")
+            and ai_review.get("countryEvidence") == "explicit"
+        )
+        country_match = bool(
+            trusted_geo_match
+            or ai_country_match
+            or has_target_country_signal(country_evidence_text, country)
+        )
+        if quality_policy.get("requireAutomotiveBusiness") and not has_business_evidence:
+            pipeline_stats["aiRejected"] += 1
+            continue
+        if quality_policy.get("strictCountryMatch") and not country_match:
+            pipeline_stats["aiRejected"] += 1
+            continue
         scoring_text = combined
         if ai_review and ai_review.get("chineseNevEvidence"):
             scoring_text = f"{scoring_text} Chinese new energy vehicle"
@@ -10058,14 +10092,18 @@ def discover(params: dict[str, list[str]]) -> dict:
             requested_model=model,
             lead_type=lead_type,
             is_competitor=is_competitor,
-            target_country_match=True,
+            target_country_match=country_match,
             has_email=bool(verified_email_sources),
             has_phone=bool(phone_sources),
             has_whatsapp=bool(whatsapp_sources),
             has_decision_maker=bool(contacts["contact_name"] or contacts["contact_role"]),
             allow_competitor_auto=country_meta.get("code") != "cn",
         )
-        auto_import_eligible = score >= int(quality_policy.get("minimumAutoImportScore") or 0)
+        auto_import_eligible = bool(
+            has_business_evidence
+            and country_match
+            and score >= int(quality_policy.get("minimumAutoImportScore") or 0)
+        )
         contact_reason = (
             f"该线索与“{target_label}”目标匹配，"
             f"信息可信度为{confidence_label}（{confidence}%），"
@@ -10192,11 +10230,11 @@ def discover(params: dict[str, list[str]]) -> dict:
                 "model": model,
                 "score": score,
                 "baseScore": score,
-                "scoreModelVersion": 8,
+                "scoreModelVersion": 11,
                 "scoreTier": score_tier,
                 "scoreDimensions": score_dimensions,
                 "scoreBreakdown": score_breakdown,
-                "scoreBasis": "100分线索模型：汽车业务15、地区匹配15、中国新能源12、华为系12、联系方式12、官网10、进口分销10、经营活跃6、决策人4、采购意向4，另计风险扣分",
+                "scoreBasis": "100分线索模型：汽车业务20、地区匹配20、联系方式15、官网10、中国新能源10、华为系列10、进口分销8、经营活跃4、决策人3，另计风险扣分",
                 "stage": "准备联系" if score >= 80 else "待审核",
                 "next": "生成英文开发信并人工确认",
                 "website": combined[:1000],
