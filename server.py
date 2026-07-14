@@ -56,6 +56,7 @@ PORT = int(os.environ.get("PORT") or os.environ.get("LEAD_TOOL_PORT", "8815"))
 HOST = os.environ.get("LEAD_TOOL_HOST", "127.0.0.1")
 PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 ADMIN_SETTINGS_FILE = ROOT / "admin_settings.json"
+APIFY_USAGE_SNAPSHOT_KEY = "_apifyUsageSnapshot"
 
 
 def bootstrap_setting(key: str, default: str = "") -> str:
@@ -832,6 +833,74 @@ def admin_settings_payload() -> dict:
         "controlCenter": admin_control_settings(),
         "dynamicRuntime": ["DISCOVERY_MAX_CONCURRENCY"],
         "restartRequired": ["NETWORK_DEFAULT_TIMEOUT"],
+    }
+
+
+def apify_usage_payload() -> dict:
+    token = get_apify_api_token()
+    if not token:
+        raise ValueError("Apify API Token 未配置")
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "OverseasLeadWorkbench/1.0",
+    }
+    account_response = fetch_json("https://api.apify.com/v2/users/me", timeout=20, headers=headers)
+    usage_response = fetch_json("https://api.apify.com/v2/users/me/usage/monthly", timeout=20, headers=headers)
+    limits_response = fetch_json("https://api.apify.com/v2/users/me/limits", timeout=20, headers=headers)
+    account = account_response.get("data") if isinstance(account_response.get("data"), dict) else {}
+    usage = usage_response.get("data") if isinstance(usage_response.get("data"), dict) else {}
+    limit_data = limits_response.get("data") if isinstance(limits_response.get("data"), dict) else {}
+    plan = account.get("plan") if isinstance(account.get("plan"), dict) else {}
+    limits = limit_data.get("limits") if isinstance(limit_data.get("limits"), dict) else {}
+    current = limit_data.get("current") if isinstance(limit_data.get("current"), dict) else {}
+    cycle = usage.get("usageCycle") if isinstance(usage.get("usageCycle"), dict) else {}
+    used_usd = round(float(usage.get("totalUsageCreditsUsdAfterVolumeDiscount") or current.get("monthlyUsageUsd") or 0), 6)
+    included_usd = round(float(plan.get("monthlyUsageCreditsUsd") or 0), 6)
+    max_usage_usd = round(float(limits.get("maxMonthlyUsageUsd") or 0), 6)
+    remaining_credits_usd = round(max(0.0, included_usd - used_usd), 6)
+    remaining_limit_usd = round(max(0.0, max_usage_usd - used_usd), 6) if max_usage_usd else 0.0
+    checked_at = datetime.now(timezone.utc).isoformat()
+    cycle_start = str(cycle.get("startAt") or (limit_data.get("monthlyUsageCycle") or {}).get("startAt") or "")
+    cycle_end = str(cycle.get("endAt") or (limit_data.get("monthlyUsageCycle") or {}).get("endAt") or "")
+    with ADMIN_SETTINGS_LOCK:
+        settings = load_admin_settings_file()
+        previous = settings.get(APIFY_USAGE_SNAPSHOT_KEY)
+        previous = previous if isinstance(previous, dict) else {}
+        same_cycle = bool(cycle_start and previous.get("cycleStartAt") == cycle_start)
+        has_previous_snapshot = same_cycle and bool(previous.get("checkedAt"))
+        previous_used = float(previous.get("usedUsd") or 0) if has_previous_snapshot else used_usd
+        delta_usd = round(max(0.0, used_usd - previous_used), 6)
+        history = previous.get("history") if same_cycle and isinstance(previous.get("history"), list) else []
+        if not history or float(history[-1].get("usedUsd") or -1) != used_usd:
+            history = [*history, {
+                "checkedAt": checked_at,
+                "usedUsd": used_usd,
+                "deltaUsd": delta_usd,
+                "remainingCreditsUsd": remaining_credits_usd,
+            }][-20:]
+        settings[APIFY_USAGE_SNAPSHOT_KEY] = {
+            "cycleStartAt": cycle_start,
+            "cycleEndAt": cycle_end,
+            "checkedAt": checked_at,
+            "usedUsd": used_usd,
+            "history": history,
+        }
+        save_admin_settings_file(settings)
+    return {
+        "configured": True,
+        "username": str(account.get("username") or ""),
+        "plan": str(plan.get("description") or plan.get("id") or "未知套餐"),
+        "includedCreditsUsd": included_usd,
+        "usedUsd": used_usd,
+        "deltaSinceLastCheckUsd": delta_usd,
+        "remainingCreditsUsd": remaining_credits_usd,
+        "maxMonthlyUsageUsd": max_usage_usd,
+        "remainingLimitUsd": remaining_limit_usd,
+        "cycleStartAt": cycle_start,
+        "cycleEndAt": cycle_end,
+        "checkedAt": checked_at,
+        "history": history,
+        "tokenExpiryAvailable": False,
     }
 
 
@@ -10664,6 +10733,14 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(200, {"ok": True, **admin_settings_payload()})
             except (OSError, ValueError) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/apify-usage":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                self.send_json(200, {"ok": True, **apify_usage_payload()})
+            except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/admin/operations":
             if not self.require_auth(api=True) or not self.require_admin():

@@ -2443,6 +2443,7 @@ textarea {
 
 @media (max-width: 1180px) {
   .admin-overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .apify-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .admin-source-policy-grid { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
   .admin-task-row { grid-template-columns: 64px minmax(160px, 1fr) 80px 120px; }
   .admin-task-row small { grid-column: 2 / -1; }
@@ -2450,6 +2451,8 @@ textarea {
 
 @media (max-width: 720px) {
   .admin-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .apify-usage-grid { grid-template-columns: 1fr; }
+  .apify-usage-history-row { grid-template-columns: 1fr 1fr; }
   .admin-source-policy-grid,
   .admin-toggle-grid { grid-template-columns: 1fr; }
   .admin-country-source-toolbar { align-items: stretch; flex-direction: column; gap: 8px; }
@@ -2472,6 +2475,67 @@ textarea {
 .admin-api-section {
   display: grid;
   gap: 14px;
+}
+
+.apify-usage-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.apify-usage-grid article {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fbfcfd;
+}
+
+.apify-usage-grid span,
+.apify-usage-grid small,
+.apify-usage-note,
+.apify-usage-history-head span,
+.apify-usage-history-row span,
+.apify-usage-history-row small {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.apify-usage-grid strong {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.apify-usage-history {
+  display: grid;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.apify-usage-history-head,
+.apify-usage-history-row {
+  display: grid;
+  grid-template-columns: minmax(170px, 1fr) repeat(3, minmax(100px, .65fr));
+  gap: 10px;
+  align-items: center;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+}
+
+.apify-usage-history-head {
+  grid-template-columns: minmax(170px, 1fr) minmax(0, 2fr);
+}
+
+.apify-usage-history-row strong {
+  color: #16803c;
+}
+
+.apify-usage-note {
+  margin: 0;
 }
 
 .admin-api-list,
@@ -7252,6 +7316,16 @@ td {
 :root[data-theme="dark"] .admin-settings-api-head {
   border-color: #343b46;
   background: #11151b;
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .apify-usage-grid article {
+  border-color: #343b46;
+  background: #20242b;
+}
+
+:root[data-theme="dark"] .apify-usage-grid strong,
+:root[data-theme="dark"] .apify-usage-history-row b {
   color: #f4f6f8;
 }
 

@@ -6408,6 +6408,7 @@ function bindForms() {
   $("#accountPasswordForm")?.addEventListener("submit", changeOwnPassword);
 
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
+  $("#refreshApifyUsage")?.addEventListener("click", () => loadApifyUsage());
   $("#reloadAdminOperations")?.addEventListener("click", () => loadAdminOperations());
   $("#saveAdminSettingsTop")?.addEventListener("click", () => $("#adminSettingsForm")?.requestSubmit());
   $("#restartAdminServerButton")?.addEventListener("click", async () => {
@@ -6958,6 +6959,76 @@ function adminApiInputHtml(item) {
   return `<input ${attrs.join(" ")} value="${escapeHtml(value)}">`;
 }
 
+function formatApifyUsd(value) {
+  const amount = Number(value || 0);
+  return `$${amount.toFixed(amount >= 10 ? 2 : 4)}`;
+}
+
+function formatApifyDate(value) {
+  const date = value ? new Date(value) : null;
+  return date && !Number.isNaN(date.getTime())
+    ? date.toLocaleString("zh-CN", { hour12: false })
+    : "未提供";
+}
+
+function renderApifyUsage(data = {}) {
+  const grid = $("#apifyUsageGrid");
+  const history = $("#apifyUsageHistory");
+  const status = $("#apifyUsageStatus");
+  if (!grid || !history || !status) return;
+  const hasIncludedCredits = Number(data.includedCreditsUsd || 0) > 0;
+  grid.innerHTML = `
+    <article><span>绑定账户</span><strong>${escapeHtml(data.username || "未知账户")}</strong><small>${escapeHtml(data.plan || "未知套餐")}</small></article>
+    <article><span>套餐月度额度</span><strong>${formatApifyUsd(data.includedCreditsUsd)}</strong><small>官方套餐包含额度</small></article>
+    <article><span>本期累计消耗</span><strong>${formatApifyUsd(data.usedUsd)}</strong><small>折扣后官方用量</small></article>
+    <article><span>预计剩余额度</span><strong>${formatApifyUsd(data.remainingCreditsUsd)}</strong><small>${hasIncludedCredits ? "套餐额度减去本期消耗" : "当前套餐未返回包含额度"}</small></article>
+    <article><span>较上次新增消耗</span><strong>${formatApifyUsd(data.deltaSinceLastCheckUsd)}</strong><small>两次官方快照的差额</small></article>
+    <article><span>额度到期 / 重置</span><strong>${escapeHtml(formatApifyDate(data.cycleEndAt))}</strong><small>当前月度账期结束时间</small></article>
+    <article><span>月度消费上限</span><strong>${formatApifyUsd(data.maxMonthlyUsageUsd)}</strong><small>不是现金余额</small></article>
+    <article><span>距消费上限可用</span><strong>${formatApifyUsd(data.remainingLimitUsd)}</strong><small>消费上限减去本期用量</small></article>
+  `;
+  const rows = Array.isArray(data.history) ? data.history.slice().reverse() : [];
+  history.innerHTML = rows.length ? `
+    <div class="apify-usage-history-head"><strong>官方用量快照</strong><span>只有用量发生变化时新增记录</span></div>
+    ${rows.map((item) => `
+      <div class="apify-usage-history-row">
+        <span>${escapeHtml(formatApifyDate(item.checkedAt))}</span>
+        <b>累计 ${formatApifyUsd(item.usedUsd)}</b>
+        <strong>新增 ${formatApifyUsd(item.deltaUsd)}</strong>
+        <small>剩余 ${formatApifyUsd(item.remainingCreditsUsd)}</small>
+      </div>
+    `).join("")}
+  ` : "";
+  status.textContent = `官方数据更新时间：${formatApifyDate(data.checkedAt)}`;
+}
+
+async function loadApifyUsage() {
+  const grid = $("#apifyUsageGrid");
+  const status = $("#apifyUsageStatus");
+  const button = $("#refreshApifyUsage");
+  if (!grid || !status || currentSession?.role !== "admin") return;
+  const configured = (adminSettingsSnapshot?.catalog || []).some((item) => item.key === "APIFY_API_TOKEN" && item.configured);
+  if (!configured) {
+    status.textContent = "请先绑定并保存 APIFY_API_TOKEN";
+    grid.innerHTML = `<p class="empty">Apify API Token 尚未配置。</p>`;
+    $("#apifyUsageHistory").innerHTML = "";
+    return;
+  }
+  if (button) button.disabled = true;
+  status.textContent = "正在读取 Apify 官方账户、限额和月度用量…";
+  try {
+    const response = await apiFetch("/api/admin/apify-usage", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    renderApifyUsage(result);
+  } catch (error) {
+    status.textContent = error.message || "Apify 官方用量读取失败";
+    grid.innerHTML = `<p class="empty">无法读取账户用量，请检查 Key 权限或稍后刷新。</p>`;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 const adminSourceDefinitions = [
   ["google", "Google Maps"], ["osm", "OpenStreetMap"], ["dealer", "官网 / 行业目录"],
   ["instagram", "Instagram"], ["facebook", "Facebook"], ["tiktok", "TikTok"],
@@ -7209,6 +7280,7 @@ async function loadAdminSettings() {
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderAdminSettings(result);
     setAdminSettingsStatus("设置已读取。密钥输入框留空表示保持不变。", "success");
+    loadApifyUsage();
   } catch (error) {
     setAdminSettingsStatus(error.message || "设置读取失败。", "error");
   }
@@ -7231,6 +7303,7 @@ async function saveAdminSettings(event) {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderAdminSettings(result);
+    loadApifyUsage();
     loadDiscoverySourceStatus();
     loadAdminOperations();
     if (result.restartRequiredChanged) {
