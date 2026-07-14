@@ -563,6 +563,7 @@ let currentSession = null;
 let adminKpiSnapshot = null;
 let adminKpiLoading = false;
 let adminSettingsSnapshot = null;
+let adminOperationsSnapshot = null;
 let adminApiShowAll = false;
 let crmViewFilter = "all";
 let navigationBound = false;
@@ -3363,6 +3364,7 @@ function normalizeLead(raw) {
     intentSignals: Array.isArray(raw.intentSignals) ? raw.intentSignals : [],
     contactReason: raw.contactReason || "",
     aiReview: raw.aiReview && typeof raw.aiReview === "object" ? { ...raw.aiReview } : {},
+    autoImportEligible: raw.autoImportEligible !== false,
     rejectReason: raw.rejectReason || "",
     rejectedAt: raw.rejectedAt || "",
     reviewNotes: raw.reviewNotes || "",
@@ -5224,9 +5226,11 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
   const rejectedFingerprintSet = new Set(
     rejectedLeads.flatMap((lead) => [...leadRejectionFingerprints(lead)])
   );
+  const blockRejectedMemory = adminSettingsSnapshot?.controlCenter?.quality?.blockRejectedMemory !== false;
   const normalizedFresh = normalizedFound
+    .filter((lead) => lead.autoImportEligible !== false)
     .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()))
-    .filter((lead) => !matchesRejectedLeadMemory(lead, rejectedFingerprintSet));
+    .filter((lead) => !blockRejectedMemory || !matchesRejectedLeadMemory(lead, rejectedFingerprintSet));
   const fresh = limitDuplicateCustomerWebsites(normalizedFresh, [...reviewLeads, ...customers, ...rejectedLeads]);
   if (fresh.length) {
     reviewLeads = [...fresh, ...reviewLeads];
@@ -6039,6 +6043,18 @@ function bindForms() {
   $("#accountPasswordForm")?.addEventListener("submit", changeOwnPassword);
 
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
+  $("#reloadAdminOperations")?.addEventListener("click", () => loadAdminOperations());
+  $("#saveAdminSettingsTop")?.addEventListener("click", () => $("#adminSettingsForm")?.requestSubmit());
+  $("#restartAdminServerButton")?.addEventListener("click", async () => {
+    if (!confirm("确定重启工作台服务吗？页面会短暂断开。")) return;
+    try { await restartAdminServer(); } catch (error) { setAdminSettingsStatus(error.message || "重启失败。", "error"); }
+  });
+  $("#adminSettingsTabs")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-admin-tab]");
+    if (!button) return;
+    $("#adminSettingsTabs").querySelectorAll("[data-admin-tab]").forEach((item) => item.classList.toggle("active", item === button));
+    document.querySelectorAll("[data-admin-panel]").forEach((panel) => { panel.hidden = panel.dataset.adminPanel !== button.dataset.adminTab; });
+  });
   $("#toggleAdminApis")?.addEventListener("click", () => {
     adminApiShowAll = !adminApiShowAll;
     renderAdminSettings(adminSettingsSnapshot || {});
@@ -6064,6 +6080,74 @@ function bindForms() {
     if (valueInput) valueInput.type = selector.value === "text" ? "text" : "password";
   });
   $("#adminSettingsForm")?.addEventListener("submit", saveAdminSettings);
+  $("#adminSettingsForm")?.addEventListener("click", async (event) => {
+    const sourceTest = event.target.closest("[data-test-admin-source]")?.dataset.testAdminSource;
+    if (sourceTest) {
+      if (!confirm("连接测试可能产生一次供应商 API 调用，确定继续吗？")) return;
+      try {
+        event.target.disabled = true;
+        setAdminSettingsStatus(`正在测试 ${discoverySourceLabel(sourceTest)}…`);
+        const response = await apiFetch("/api/admin/operations", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "test-source", source: sourceTest })
+        });
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+        setAdminSettingsStatus(`${result.message}，耗时 ${result.elapsedMs || 0}ms。`, result.available ? "success" : "error");
+        await loadAdminOperations();
+      } catch (error) {
+        setAdminSettingsStatus(error.message || "来源测试失败。", "error");
+      } finally {
+        event.target.disabled = false;
+      }
+      return;
+    }
+    const operation = event.target.closest("[data-admin-operation]")?.dataset.adminOperation;
+    if (!operation) return;
+    try {
+      if (operation === "download-backup") await downloadAdminBackup();
+      else if (operation === "restore-backup") $("#adminBackupFile")?.click();
+      else await runAdminOperation(operation);
+    } catch (error) {
+      setAdminSettingsStatus(error.message || "操作失败。", "error");
+    }
+  });
+  $("#adminBackupFile")?.addEventListener("change", async (event) => {
+    try { await restoreAdminBackup(event.target.files?.[0]); }
+    catch (error) { setAdminSettingsStatus(error.message || "备份恢复失败。", "error"); }
+    finally { event.target.value = ""; }
+  });
+  $("#restoreQualityDefaults")?.addEventListener("click", () => {
+    const defaults = { automotive: 15, country: 15, chineseNev: 12, huawei: 12, contact: 12, officialWebsite: 10, importDistribution: 10 };
+    Object.entries(defaults).forEach(([key, value]) => {
+      const input = document.querySelector(`[data-control-path="quality.scoreWeights.${key}"]`);
+      if (input) input.value = value;
+    });
+    setAdminSettingsStatus("评分权重已恢复默认，保存后生效。");
+  });
+  $("#adminCountrySourceEditor")?.addEventListener("change", (event) => {
+    const control = adminSettingsSnapshot?.controlCenter;
+    if (!control) return;
+    control.discovery ||= {};
+    control.discovery.countrySourceOverrides ||= {};
+    const countrySelect = $("#adminCountrySourceSelect");
+    if (event.target === countrySelect) {
+      renderAdminCountrySources(control, countrySelect.value);
+      return;
+    }
+    const country = countrySelect?.value;
+    if (!country) return;
+    if (event.target.id === "adminCountryUseGlobal") {
+      if (event.target.checked) delete control.discovery.countrySourceOverrides[country];
+      else control.discovery.countrySourceOverrides[country] = [...(control.discovery.globalSources || [])];
+      renderAdminCountrySources(control, country);
+      return;
+    }
+    if (event.target.matches("[data-country-source]")) {
+      control.discovery.countrySourceOverrides[country] = Array.from(document.querySelectorAll("[data-country-source]:checked")).map((input) => input.dataset.countrySource);
+    }
+  });
 
   $("#refreshKpiDashboard")?.addEventListener("click", () => {
     adminKpiSnapshot = null;
@@ -6489,6 +6573,92 @@ function adminApiInputHtml(item) {
   return `<input ${attrs.join(" ")} value="${escapeHtml(value)}">`;
 }
 
+const adminSourceDefinitions = [
+  ["google", "Google Maps"], ["osm", "OpenStreetMap"], ["dealer", "官网 / 行业目录"],
+  ["instagram", "Instagram"], ["facebook", "Facebook"], ["tiktok", "TikTok"],
+  ["youtube", "YouTube"], ["linkedin", "LinkedIn"]
+];
+
+const adminScoreDefinitions = [
+  ["automotive", "汽车业务"], ["country", "地区匹配"], ["chineseNev", "中国新能源"],
+  ["huawei", "华为系列"], ["contact", "联系方式"], ["officialWebsite", "官网可信"],
+  ["importDistribution", "进口分销"]
+];
+
+function valueAtPath(object, path) {
+  return String(path || "").split(".").reduce((value, key) => value?.[key], object);
+}
+
+function setValueAtPath(object, path, value) {
+  const keys = String(path || "").split(".");
+  const last = keys.pop();
+  const parent = keys.reduce((current, key) => (current[key] ||= {}), object);
+  parent[last] = value;
+}
+
+function renderAdminControlInputs(control = {}) {
+  document.querySelectorAll("[data-control-path]").forEach((input) => {
+    const value = valueAtPath(control, input.dataset.controlPath);
+    if (input.type === "checkbox") input.checked = Boolean(value);
+    else input.value = value ?? "";
+  });
+  const weightGrid = $("#adminScoreWeightGrid");
+  if (weightGrid) {
+    weightGrid.innerHTML = adminScoreDefinitions.map(([key, label]) => `
+      <label>${escapeHtml(label)}<input type="number" min="0" max="30" data-control-path="quality.scoreWeights.${escapeHtml(key)}" value="${Number(control?.quality?.scoreWeights?.[key] || 0)}"></label>
+    `).join("");
+  }
+  renderAdminSourcePolicies(control);
+  renderAdminCountrySources(control);
+}
+
+function renderAdminSourcePolicies(control = {}) {
+  const grid = $("#adminSourcePolicyGrid");
+  if (!grid) return;
+  const enabled = new Set(control?.discovery?.globalSources || []);
+  const caps = control?.discovery?.sourceCaps || {};
+  const weights = control?.discovery?.sourceWeights || {};
+  grid.innerHTML = adminSourceDefinitions.map(([key, label]) => `
+    <label class="admin-source-policy-card">
+      <span><input type="checkbox" data-global-source="${key}" ${enabled.has(key) ? "checked" : ""}>${escapeHtml(label)}</span>
+      <small>上限</small><input type="number" min="1" max="100" data-source-cap="${key}" value="${Number(caps[key] || 30)}">
+      <small>权重</small><input type="number" min="1" max="10" data-source-weight="${key}" value="${Number(weights[key] || 1)}">
+    </label>
+  `).join("");
+}
+
+function renderAdminCountrySources(control = {}, selectedCountry = "") {
+  const editor = $("#adminCountrySourceEditor");
+  if (!editor) return;
+  const country = selectedCountry || editor.querySelector("select")?.value || countries[0]?.name || "";
+  const overrides = control?.discovery?.countrySourceOverrides || {};
+  const hasOverride = Object.prototype.hasOwnProperty.call(overrides, country);
+  const selected = new Set(hasOverride ? overrides[country] : control?.discovery?.globalSources || []);
+  editor.innerHTML = `
+    <div class="admin-country-source-toolbar">
+      <label>目标国家<select id="adminCountrySourceSelect">${countries.map((item) => `<option value="${escapeHtml(item.name)}" ${item.name === country ? "selected" : ""}>${escapeHtml(item.name)}</option>`).join("")}</select></label>
+      <label class="admin-check-row"><input type="checkbox" id="adminCountryUseGlobal" ${hasOverride ? "" : "checked"}>使用全局来源</label>
+    </div>
+    <div class="admin-toggle-grid admin-country-source-options">
+      ${adminSourceDefinitions.map(([key, label]) => `<label><input type="checkbox" data-country-source="${key}" ${selected.has(key) ? "checked" : ""} ${hasOverride ? "" : "disabled"}>${escapeHtml(label)}</label>`).join("")}
+    </div>
+  `;
+}
+
+function collectAdminControlPayload(form) {
+  const control = JSON.parse(JSON.stringify(adminSettingsSnapshot?.controlCenter || {}));
+  form.querySelectorAll("[data-control-path]").forEach((input) => {
+    let value = input.type === "checkbox" ? input.checked : input.value;
+    if (input.type === "number") value = Number(value || 0);
+    setValueAtPath(control, input.dataset.controlPath, value);
+  });
+  control.discovery ||= {};
+  control.discovery.globalSources = Array.from(form.querySelectorAll("[data-global-source]:checked")).map((input) => input.dataset.globalSource);
+  control.discovery.sourceCaps = Object.fromEntries(Array.from(form.querySelectorAll("[data-source-cap]")).map((input) => [input.dataset.sourceCap, Number(input.value || 0)]));
+  control.discovery.sourceWeights = Object.fromEntries(Array.from(form.querySelectorAll("[data-source-weight]")).map((input) => [input.dataset.sourceWeight, Number(input.value || 1)]));
+  return control;
+}
+
 function renderAdminSettings(settings = {}) {
   adminSettingsSnapshot = settings;
   const catalog = Array.isArray(settings.catalog) ? settings.catalog : [];
@@ -6496,7 +6666,7 @@ function renderAdminSettings(settings = {}) {
   const runtimeGrid = $("#adminRuntimeGrid");
   if (apiList) {
     const apiItems = catalog
-      .filter((item) => item.group !== "runtime")
+      .filter((item) => item.group !== "runtime" && item.group !== "ai")
       .sort((a, b) =>
         Number(Boolean(b.configured)) - Number(Boolean(a.configured))
         || Number((b.status || "") === "active") - Number((a.status || "") === "active")
@@ -6529,6 +6699,16 @@ function renderAdminSettings(settings = {}) {
       toggle.textContent = adminApiShowAll ? "收起" : "展开全部";
     }
   }
+  const aiList = $("#adminAiApiList");
+  if (aiList) {
+    const aiItems = catalog.filter((item) => item.group === "ai");
+    aiList.innerHTML = aiItems.map((item) => `
+      <article class="admin-api-card ${escapeHtml(adminApiStatusClass(item))}">
+        <div class="admin-api-card-head"><div><strong>${escapeHtml(item.label)}</strong><span>${escapeHtml(item.key)}</span></div><b>${escapeHtml(adminApiStatusText(item))}</b></div>
+        <p>${escapeHtml(item.use || "AI复核配置")}</p>${adminApiInputHtml(item)}
+      </article>
+    `).join("");
+  }
   if (runtimeGrid) {
     runtimeGrid.innerHTML = catalog
       .filter((item) => item.group === "runtime")
@@ -6540,6 +6720,7 @@ function renderAdminSettings(settings = {}) {
       `).join("");
   }
   renderCustomApis(settings.customApis || []);
+  renderAdminControlInputs(settings.controlCenter || {});
   const summary = $("#adminSettingsSummary");
   if (summary) {
     const configured = catalog.filter((item) => item.group !== "runtime" && item.configured).length;
@@ -6629,6 +6810,7 @@ function collectAdminSettingsPayload(form) {
     notes: row.querySelector("[data-custom-api-notes]")?.value || "",
     enabled: true
   }));
+  payload.controlCenter = collectAdminControlPayload(form);
   return payload;
 }
 
@@ -6664,6 +6846,7 @@ async function saveAdminSettings(event) {
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderAdminSettings(result);
     loadDiscoverySourceStatus();
+    loadAdminOperations();
     if (result.restartRequiredChanged) {
       setAdminSettingsStatus("设置已保存。网络超时已变更，需要重启服务器后生效；获客并发数已立即生效。", "success");
       if (confirm("设置已保存，但网络超时需要重启服务器后生效。现在重启服务器吗？")) {
@@ -6687,6 +6870,139 @@ async function restartAdminServer() {
   window.setTimeout(() => {
     window.location.reload();
   }, 3500);
+}
+
+function formatBytes(value = 0) {
+  const bytes = Number(value || 0);
+  if (!bytes) return "0 B";
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(units.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  return `${(bytes / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+}
+
+function renderAdminOperations(data = {}) {
+  adminOperationsSnapshot = data;
+  const system = data.system || {};
+  const summary = data.data || {};
+  const overview = $("#adminOverviewGrid");
+  if (overview) overview.innerHTML = [
+    ["服务状态", "运行正常", `版本 ${system.version || "-"}`],
+    ["当前任务", `${summary.activeJobs || 0} 个运行中`, `共 ${summary.jobs || 0} 条记录`],
+    ["业务数据", `${summary.reviewLeads || 0} 条待审核`, `${summary.customers || 0} 个客户`],
+    ["AI复核", system.aiEnabled ? "已启用" : "未启用", `并发 ${system.workerConcurrency || 0}`],
+    ["数据库", system.database || "-", summary.databaseBytes ? formatBytes(summary.databaseBytes) : "云数据库"],
+    ["最近备份", system.lastBackupAt ? formatJobTime(system.lastBackupAt) : "尚未备份", `服务器 ${formatJobTime(system.serverTime || "")}`]
+  ].map(([label, value, note]) => `<article><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong><small>${escapeHtml(note)}</small></article>`).join("");
+
+  const sources = Array.isArray(data.sources) ? data.sources : [];
+  const sourceRows = $("#adminSourceRows");
+  if (sourceRows) sourceRows.innerHTML = sources.length ? sources.map((source) => `
+    <tr>
+      <td><strong>${escapeHtml(source.label)}</strong></td>
+      <td><span class="admin-health ${source.configured && source.enabled ? "ready" : "warning"}">${source.enabled ? (source.configured ? "可用" : "未配置") : "已停用"}</span></td>
+      <td>${source.todayCalls || 0}${source.todayFailures ? `<small>${source.todayFailures} 次失败</small>` : ""}</td>
+      <td>${source.completedTasks || 0} / ${source.taskCount || 0}</td>
+      <td>${source.discovered || 0} / ${source.imported || 0}</td>
+      <td>${escapeHtml(source.lastSuccessAt ? formatJobTime(source.lastSuccessAt) : "暂无")}</td>
+      <td title="${escapeHtml(source.lastFailure || "")}">${escapeHtml(source.lastFailure ? String(source.lastFailure).slice(0, 70) : "-")}</td>
+      <td><button class="ghost compact" type="button" data-test-admin-source="${escapeHtml(source.key)}">测试</button></td>
+    </tr>
+  `).join("") : `<tr><td colspan="8">暂无来源数据。</td></tr>`;
+  if ($("#adminSourceSummary")) $("#adminSourceSummary").textContent = `${sources.filter((item) => item.enabled && item.configured).length} 个来源可用`;
+
+  const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  const taskList = $("#adminTaskList");
+  if (taskList) taskList.innerHTML = tasks.length ? tasks.slice(0, 20).map((job) => `
+    <article class="admin-task-row">
+      <span class="admin-health ${job.status === "completed" ? "ready" : job.status === "failed" ? "error" : "warning"}">${escapeHtml({completed:"完成",failed:"失败",running:"运行中",queued:"排队",canceled:"已取消"}[job.status] || job.status)}</span>
+      <strong>${escapeHtml(job.country || "未知地区")} · ${escapeHtml(discoverySourceLabel(job.sourceMode))}</strong>
+      <span>${escapeHtml(job.ownerUsername || "admin")}</span>
+      <span>${escapeHtml(formatJobTime(job.updatedAt || job.createdAt || ""))}</span>
+      <small title="${escapeHtml(job.error || job.message || "")}">${escapeHtml((job.error || job.message || "").slice(0, 100))}</small>
+    </article>
+  `).join("") : `<p class="empty">暂无任务记录。</p>`;
+  if ($("#adminTaskSummary")) $("#adminTaskSummary").textContent = `${summary.activeJobs || 0} 个运行中，${summary.failedJobs || 0} 个失败`;
+  if ($("#adminDataSummary")) $("#adminDataSummary").textContent = `工作区 ${summary.workspaces || 0} · 待审核 ${summary.reviewLeads || 0} · 客户 ${summary.customers || 0} · 已拒绝 ${summary.rejectedLeads || 0} · 删除指纹 ${summary.deletedRecords || 0}`;
+
+  const events = Array.isArray(data.auditEvents) ? data.auditEvents : [];
+  const audit = $("#adminAuditList");
+  if (audit) audit.innerHTML = events.length ? events.map((event) => `
+    <article><strong>${escapeHtml(event.action)}</strong><span>${escapeHtml(event.username)} · ${escapeHtml(formatJobTime(event.createdAt || ""))}</span><p>${escapeHtml(event.detail || "无补充信息")}</p><small>${escapeHtml(event.ip || "")}</small></article>
+  `).join("") : `<p class="empty">暂无管理员操作记录。</p>`;
+}
+
+async function loadAdminOperations() {
+  if (currentSession?.role !== "admin") return;
+  try {
+    const response = await apiFetch("/api/admin/operations", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    renderAdminOperations(result);
+  } catch (error) {
+    setAdminSettingsStatus(error.message || "运行状态读取失败。", "error");
+  }
+}
+
+async function runAdminOperation(action) {
+  const labels = {
+    "cancel-active-jobs": "确定终止当前所有运行和排队任务吗？",
+    "clear-failed-jobs": "确定删除全部失败和已取消任务记录吗？",
+    "clean-old-jobs": "确定按设置的保留天数清理过期任务吗？",
+    deduplicate: "确定扫描所有账号并删除重复线索吗？",
+    "clear-tombstones": "确定清除已删除线索的拦截指纹吗？清除后这些线索可能再次被搜到。",
+    "clear-rejected-memory": "确定清除全部已拒绝线索记忆吗？清除后被拒绝线索可能再次进入审核。",
+    "force-logout": "确定强制所有账号重新登录吗？当前管理员也会退出。"
+  };
+  if (!confirm(labels[action] || "确定执行该操作吗？")) return;
+  setAdminSettingsStatus("正在执行管理操作…");
+  const dangerous = new Set(["deduplicate", "clear-tombstones", "clear-rejected-memory", "force-logout"]);
+  const response = await apiFetch("/api/admin/operations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, confirm: dangerous.has(action) ? action : "" })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  if (action === "force-logout") {
+    window.location.href = "/login.html";
+    return;
+  }
+  setAdminSettingsStatus("操作完成。", "success");
+  await loadAdminOperations();
+}
+
+async function downloadAdminBackup() {
+  setAdminSettingsStatus("正在生成业务备份…");
+  const response = await apiFetch("/api/admin/backup", { cache: "no-store" });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new Error(result.error || `HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") || "";
+  const filename = disposition.match(/filename="([^"]+)"/)?.[1] || `hima-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+  setAdminSettingsStatus("业务备份已生成。", "success");
+  loadAdminOperations();
+}
+
+async function restoreAdminBackup(file) {
+  if (!file || !confirm("恢复会覆盖同名账号当前的业务数据，确定继续吗？")) return;
+  const payload = JSON.parse(await file.text());
+  const response = await apiFetch("/api/admin/restore-backup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  setAdminSettingsStatus(`备份恢复完成，共恢复 ${result.workspacesRestored || 0} 个工作区。`, "success");
+  await loadAdminOperations();
 }
 
 function renderUsers(users = []) {
@@ -6897,6 +7213,7 @@ async function init() {
     if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
   });
   loadAdminSettings();
+  loadAdminOperations();
   setInterval(renderBeijingGreeting, 1_000);
   loadDiscoveryJobs().catch((error) => {
     if ($("#discoveryJobList")) {

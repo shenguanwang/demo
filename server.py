@@ -90,6 +90,7 @@ SOCIAL_CAPTURE_FILE = SOCIAL_CAPTURE_DIR / "captures.json"
 SOCIAL_CAPTURE_LOCK = threading.Lock()
 DISCOVERY_JOBS: dict[str, dict] = {}
 DISCOVERY_JOBS_LOCK = threading.RLock()
+LAST_JOB_CLEANUP_AT = 0.0
 DISCOVERY_CREATE_LOCK = threading.Lock()
 DISCOVERY_SCHEDULE_LOCK = threading.RLock()
 ACTIVE_DISCOVERY_WORKERS: set[str] = set()
@@ -118,6 +119,57 @@ AUTH_SECRET = os.environ.get("APP_AUTH_SECRET") or secrets.token_hex(32)
 AUTH_COOKIE = "hima_session"
 AUTH_MAX_AGE = 60 * 60 * 24 * 7
 PASSWORD_HASH_ITERATIONS = 210_000
+
+ADMIN_CONTROL_KEY = "_controlCenter"
+ADMIN_CONTROL_DEFAULTS = {
+    "discovery": {
+        "targetMin": 20,
+        "targetMax": 30,
+        "taskTimeoutMinutes": 12,
+        "fallbackEnabled": True,
+        "globalSources": ["google", "osm", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"],
+        "sourceCaps": {
+            "google": 30, "osm": 20, "dealer": 40, "instagram": 30,
+            "facebook": 30, "tiktok": 30, "youtube": 30, "linkedin": 30,
+        },
+        "sourceWeights": {
+            "google": 3, "osm": 1, "dealer": 3, "instagram": 2,
+            "facebook": 2, "tiktok": 2, "youtube": 2, "linkedin": 2,
+        },
+        "countrySourceOverrides": {},
+    },
+    "quality": {
+        "strictCountryMatch": True,
+        "requireAutomotiveBusiness": True,
+        "rejectPersonalAccounts": True,
+        "requireContactOrWebsite": False,
+        "blockRejectedMemory": True,
+        "minimumAutoImportScore": 10,
+        "minimumAiConfidence": 55,
+        "scoreWeights": {
+            "automotive": 15, "country": 15, "chineseNev": 12, "huawei": 12,
+            "contact": 12, "officialWebsite": 10, "importDistribution": 10,
+        },
+    },
+    "ai": {
+        "enabled": True,
+        "failurePolicy": "manual_review",
+        "dailyCallLimit": 1000,
+        "dailyCostLimitUsd": 5.0,
+        "promptVersion": "vehicle-export-v2",
+    },
+    "data": {
+        "jobRetentionDays": 30,
+        "searchRecordRetentionDays": 90,
+        "backupReminderDays": 7,
+        "lastBackupAt": "",
+    },
+    "security": {
+        "sessionHours": 168,
+        "passwordMinLength": 6,
+        "sessionInvalidBefore": 0,
+    },
+}
 
 socket.setdefaulttimeout(NETWORK_DEFAULT_TIMEOUT)
 
@@ -154,6 +206,15 @@ ADMIN_SETTING_DEFINITIONS = {
 ADMIN_RUNTIME_KEYS = {"PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT"}
 ADMIN_CUSTOM_APIS_KEY = "_customApis"
 ADMIN_SETTINGS_LOCK = threading.RLock()
+ADMIN_SETTINGS_CACHE: dict | None = None
+ADMIN_SETTINGS_CACHE_AT = 0.0
+
+
+def cached_admin_settings(value: dict) -> dict:
+    global ADMIN_SETTINGS_CACHE, ADMIN_SETTINGS_CACHE_AT
+    ADMIN_SETTINGS_CACHE = value if isinstance(value, dict) else {}
+    ADMIN_SETTINGS_CACHE_AT = time.monotonic()
+    return json.loads(json.dumps(ADMIN_SETTINGS_CACHE, ensure_ascii=False))
 
 
 class DynamicConcurrencyGate:
@@ -184,6 +245,8 @@ DISCOVERY_WORKER_GATE = DynamicConcurrencyGate(DISCOVERY_MAX_CONCURRENCY)
 
 
 def load_admin_settings_file() -> dict:
+    if ADMIN_SETTINGS_CACHE is not None and time.monotonic() - ADMIN_SETTINGS_CACHE_AT < 5:
+        return json.loads(json.dumps(ADMIN_SETTINGS_CACHE, ensure_ascii=False))
     try:
         initialize_state_store()
         if DATABASE_URL:
@@ -192,7 +255,7 @@ def load_admin_settings_file() -> dict:
                     cursor.execute("SELECT settings FROM app_settings WHERE settings_key = %s", ("admin",))
                     row = cursor.fetchone()
                     if row:
-                        return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+                        return cached_admin_settings(row[0] if isinstance(row[0], dict) else json.loads(row[0]))
         else:
             with sqlite3.connect(SQLITE_STATE_FILE) as connection:
                 row = connection.execute(
@@ -200,16 +263,16 @@ def load_admin_settings_file() -> dict:
                     ("admin",),
                 ).fetchone()
                 if row:
-                    return json.loads(row[0])
+                    return cached_admin_settings(json.loads(row[0]))
     except (OSError, RuntimeError, sqlite3.Error, json.JSONDecodeError):
         pass
     if not ADMIN_SETTINGS_FILE.exists():
-        return {}
+        return cached_admin_settings({})
     try:
         data = json.loads(ADMIN_SETTINGS_FILE.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        return cached_admin_settings({})
+    return cached_admin_settings(data if isinstance(data, dict) else {})
 
 
 def save_admin_settings_file(settings: dict) -> None:
@@ -228,6 +291,7 @@ def save_admin_settings_file(settings: dict) -> None:
                     """,
                     ("admin", encoded),
                 )
+        cached_admin_settings(settings)
         return
     with sqlite3.connect(SQLITE_STATE_FILE) as connection:
         connection.execute(
@@ -240,6 +304,7 @@ def save_admin_settings_file(settings: dict) -> None:
             """,
             ("admin", encoded, datetime.now(timezone.utc).isoformat(timespec="seconds")),
         )
+    cached_admin_settings(settings)
 
 
 def runtime_setting(key: str, default: str = "") -> str:
@@ -254,6 +319,67 @@ def runtime_setting(key: str, default: str = "") -> str:
     if value is None or value == "":
         value = os.environ.get(key, default)
     return str(value or "").strip()
+
+
+def merge_nested_settings(defaults: dict, value: dict | None) -> dict:
+    merged = json.loads(json.dumps(defaults, ensure_ascii=False))
+    if not isinstance(value, dict):
+        return merged
+    for key, item in value.items():
+        if isinstance(item, dict) and isinstance(merged.get(key), dict):
+            merged[key] = merge_nested_settings(merged[key], item)
+        else:
+            merged[key] = item
+    return merged
+
+
+def admin_control_settings() -> dict:
+    settings = load_admin_settings_file()
+    return merge_nested_settings(ADMIN_CONTROL_DEFAULTS, settings.get(ADMIN_CONTROL_KEY))
+
+
+def control_value(section: str, key: str, default=None):
+    return admin_control_settings().get(section, {}).get(key, default)
+
+
+def discovery_target_min() -> int:
+    return max(1, min(100, int(control_value("discovery", "targetMin", DISCOVERY_QUALIFIED_TARGET_MIN))))
+
+
+def discovery_target_max() -> int:
+    return max(discovery_target_min(), min(120, int(control_value("discovery", "targetMax", DISCOVERY_QUALIFIED_TARGET_MAX))))
+
+
+def discovery_task_timeout_seconds() -> int:
+    minutes = max(3, min(60, int(control_value("discovery", "taskTimeoutMinutes", 12))))
+    return minutes * 60
+
+
+def enabled_discovery_sources(country: str = "") -> set[str]:
+    discovery = admin_control_settings().get("discovery", {})
+    sources = discovery.get("globalSources") or []
+    overrides = discovery.get("countrySourceOverrides") or {}
+    country_text = clean_text(country)
+    if country_text and isinstance(overrides, dict):
+        for configured_country, configured_sources in overrides.items():
+            if assigned_country_matches([configured_country], country_text):
+                sources = configured_sources
+                break
+    return {str(source) for source in sources}
+
+
+def discovery_source_cap(source: str) -> int:
+    caps = admin_control_settings().get("discovery", {}).get("sourceCaps") or {}
+    return max(1, min(100, int(caps.get(source) or 30)))
+
+
+def session_max_age() -> int:
+    hours = max(1, min(24 * 30, int(control_value("security", "sessionHours", 168))))
+    return hours * 60 * 60
+
+
+def password_min_length() -> int:
+    return max(6, min(32, int(control_value("security", "passwordMinLength", 6))))
 
 
 def masked_secret(value: str) -> str:
@@ -315,7 +441,7 @@ def get_ai_model(kind: str = "default") -> str:
 
 def ai_lead_review_enabled() -> bool:
     provider = get_ai_provider()
-    return provider in {"deepseek", ""} and bool(get_deepseek_api_key())
+    return bool(control_value("ai", "enabled", True)) and provider in {"deepseek", ""} and bool(get_deepseek_api_key())
 
 
 def extract_json_object(value: str) -> dict:
@@ -341,18 +467,31 @@ def deepseek_chat_json(messages: list[dict], model: str = "") -> dict:
     api_key = get_deepseek_api_key()
     if not api_key:
         return {}
+    ai_policy = admin_control_settings().get("ai", {})
+    today = admin_usage_summary().get("deepseek", {})
+    call_limit = int(ai_policy.get("dailyCallLimit") or 0)
+    cost_limit = float(ai_policy.get("dailyCostLimitUsd") or 0)
+    if call_limit and int(today.get("calls") or 0) >= call_limit:
+        raise RuntimeError("DeepSeek 今日调用已达到系统设置上限")
+    if cost_limit and float(today.get("estimatedCostUsd") or 0) >= cost_limit:
+        raise RuntimeError("DeepSeek 今日估算费用已达到系统设置上限")
     payload = {
         "model": model or get_ai_model("default"),
         "messages": messages,
         "temperature": 0,
         "response_format": {"type": "json_object"},
     }
-    data = post_json_value(
-        f"{get_deepseek_base_url()}/chat/completions",
-        payload,
-        timeout=30,
-        headers={"Authorization": f"Bearer {api_key}"},
-    )
+    try:
+        data = post_json_value(
+            f"{get_deepseek_base_url()}/chat/completions",
+            payload,
+            timeout=30,
+            headers={"Authorization": f"Bearer {api_key}"},
+        )
+        record_api_usage("deepseek", True, estimated_cost_usd=0.001, detail=payload["model"])
+    except Exception:
+        record_api_usage("deepseek", False, detail=payload["model"])
+        raise
     content = (
         ((data.get("choices") or [{}])[0].get("message") or {}).get("content", "")
         if isinstance(data, dict) else ""
@@ -645,6 +784,7 @@ def admin_settings_payload() -> dict:
         "values": values,
         "catalog": catalog,
         "customApis": custom_apis,
+        "controlCenter": admin_control_settings(),
         "dynamicRuntime": ["DISCOVERY_MAX_CONCURRENCY"],
         "restartRequired": ["NETWORK_DEFAULT_TIMEOUT"],
     }
@@ -695,6 +835,66 @@ def normalize_custom_apis(payload_items: list, previous_items: list) -> list[dic
     return unique
 
 
+def normalize_admin_control(payload: dict | None, previous: dict | None = None) -> dict:
+    control = merge_nested_settings(ADMIN_CONTROL_DEFAULTS, previous)
+    incoming = payload if isinstance(payload, dict) else {}
+    for section in ("discovery", "quality", "ai", "data", "security"):
+        if isinstance(incoming.get(section), dict):
+            control[section].update(incoming[section])
+
+    discovery = control["discovery"]
+    discovery["targetMin"] = max(1, min(100, int(discovery.get("targetMin") or 20)))
+    discovery["targetMax"] = max(discovery["targetMin"], min(120, int(discovery.get("targetMax") or 30)))
+    discovery["taskTimeoutMinutes"] = max(3, min(60, int(discovery.get("taskTimeoutMinutes") or 12)))
+    discovery["fallbackEnabled"] = bool(discovery.get("fallbackEnabled", True))
+    allowed_sources = {"google", "osm", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"}
+    discovery["globalSources"] = [item for item in discovery.get("globalSources", []) if item in allowed_sources]
+    caps = discovery.get("sourceCaps") if isinstance(discovery.get("sourceCaps"), dict) else {}
+    discovery["sourceCaps"] = {
+        source: max(1, min(100, int(caps.get(source) or ADMIN_CONTROL_DEFAULTS["discovery"]["sourceCaps"][source])))
+        for source in allowed_sources
+    }
+    weights = discovery.get("sourceWeights") if isinstance(discovery.get("sourceWeights"), dict) else {}
+    discovery["sourceWeights"] = {
+        source: max(1, min(10, int(weights.get(source) if weights.get(source) is not None else ADMIN_CONTROL_DEFAULTS["discovery"]["sourceWeights"][source])))
+        for source in allowed_sources
+    }
+    overrides = discovery.get("countrySourceOverrides") if isinstance(discovery.get("countrySourceOverrides"), dict) else {}
+    discovery["countrySourceOverrides"] = {
+        clean_text(str(country))[:80]: [source for source in sources if source in allowed_sources]
+        for country, sources in overrides.items()
+        if clean_text(str(country)) and isinstance(sources, list)
+    }
+
+    quality = control["quality"]
+    for key in ("strictCountryMatch", "requireAutomotiveBusiness", "rejectPersonalAccounts", "requireContactOrWebsite", "blockRejectedMemory"):
+        quality[key] = bool(quality.get(key))
+    quality["minimumAutoImportScore"] = max(0, min(100, int(quality.get("minimumAutoImportScore") or 0)))
+    quality["minimumAiConfidence"] = max(0, min(100, int(quality.get("minimumAiConfidence") or 0)))
+    default_weights = ADMIN_CONTROL_DEFAULTS["quality"]["scoreWeights"]
+    weights = quality.get("scoreWeights") if isinstance(quality.get("scoreWeights"), dict) else {}
+    quality["scoreWeights"] = {key: max(0, min(30, int(weights.get(key, value)))) for key, value in default_weights.items()}
+
+    ai = control["ai"]
+    ai["enabled"] = bool(ai.get("enabled", True))
+    ai["failurePolicy"] = ai.get("failurePolicy") if ai.get("failurePolicy") in {"manual_review", "skip", "allow"} else "manual_review"
+    ai["dailyCallLimit"] = max(0, min(100000, int(ai.get("dailyCallLimit") or 0)))
+    ai["dailyCostLimitUsd"] = max(0.0, min(10000.0, float(ai.get("dailyCostLimitUsd") or 0)))
+    ai["promptVersion"] = clean_text(str(ai.get("promptVersion") or "vehicle-export-v2"))[:80]
+
+    data = control["data"]
+    data["jobRetentionDays"] = max(1, min(365, int(data.get("jobRetentionDays") or 30)))
+    data["searchRecordRetentionDays"] = max(7, min(1095, int(data.get("searchRecordRetentionDays") or 90)))
+    data["backupReminderDays"] = max(1, min(90, int(data.get("backupReminderDays") or 7)))
+    data["lastBackupAt"] = str(data.get("lastBackupAt") or "")[:40]
+
+    security = control["security"]
+    security["sessionHours"] = max(1, min(24 * 30, int(security.get("sessionHours") or 168)))
+    security["passwordMinLength"] = max(6, min(32, int(security.get("passwordMinLength") or 6)))
+    security["sessionInvalidBefore"] = max(0, int(security.get("sessionInvalidBefore") or 0))
+    return control
+
+
 def normalize_admin_settings(payload: dict) -> dict:
     if not isinstance(payload, dict):
         raise ValueError("设置请求格式无效")
@@ -728,6 +928,11 @@ def normalize_admin_settings(payload: dict) -> dict:
         next_settings[ADMIN_CUSTOM_APIS_KEY] = normalize_custom_apis(
             custom_apis,
             current.get(ADMIN_CUSTOM_APIS_KEY, []),
+        )
+    if "controlCenter" in payload:
+        next_settings[ADMIN_CONTROL_KEY] = normalize_admin_control(
+            payload.get("controlCenter"),
+            current.get(ADMIN_CONTROL_KEY),
         )
     return next_settings
 
@@ -884,6 +1089,31 @@ def initialize_state_store() -> None:
                 )
                 cursor.execute(
                     """
+                    CREATE TABLE IF NOT EXISTS api_usage_events (
+                        event_id TEXT PRIMARY KEY,
+                        source_name TEXT NOT NULL,
+                        success BOOLEAN NOT NULL DEFAULT TRUE,
+                        units INTEGER NOT NULL DEFAULT 1,
+                        estimated_cost_usd NUMERIC NOT NULL DEFAULT 0,
+                        detail TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
+                    CREATE TABLE IF NOT EXISTS admin_audit_events (
+                        event_id TEXT PRIMARY KEY,
+                        username TEXT NOT NULL,
+                        action TEXT NOT NULL,
+                        detail TEXT NOT NULL DEFAULT '',
+                        ip_address TEXT NOT NULL DEFAULT '',
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                    )
+                    """
+                )
+                cursor.execute(
+                    """
                     CREATE TABLE IF NOT EXISTS discovery_jobs (
                         job_id TEXT PRIMARY KEY,
                         payload JSONB NOT NULL,
@@ -974,6 +1204,31 @@ def initialize_state_store() -> None:
                 last_seen_at TEXT NOT NULL,
                 ip_address TEXT NOT NULL DEFAULT '',
                 user_agent TEXT NOT NULL DEFAULT ''
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_usage_events (
+                event_id TEXT PRIMARY KEY,
+                source_name TEXT NOT NULL,
+                success INTEGER NOT NULL DEFAULT 1,
+                units INTEGER NOT NULL DEFAULT 1,
+                estimated_cost_usd REAL NOT NULL DEFAULT 0,
+                detail TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS admin_audit_events (
+                event_id TEXT PRIMARY KEY,
+                username TEXT NOT NULL,
+                action TEXT NOT NULL,
+                detail TEXT NOT NULL DEFAULT '',
+                ip_address TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
             )
             """
         )
@@ -1605,9 +1860,79 @@ def clean_stale_youtube_leads() -> dict:
     return totals
 
 
+def record_api_usage(source: str, success: bool = True, units: int = 1, estimated_cost_usd: float = 0, detail: str = "") -> None:
+    try:
+        initialize_state_store()
+        event_id = uuid.uuid4().hex
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        values = (event_id, clean_text(source)[:60], bool(success), max(1, int(units)), max(0.0, float(estimated_cost_usd)), clean_text(detail)[:300])
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "INSERT INTO api_usage_events (event_id, source_name, success, units, estimated_cost_usd, detail, created_at) VALUES (%s, %s, %s, %s, %s, %s, NOW())",
+                        values,
+                    )
+                    cursor.execute("DELETE FROM api_usage_events WHERE created_at < NOW() - INTERVAL '180 days'")
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                connection.execute(
+                    "INSERT INTO api_usage_events (event_id, source_name, success, units, estimated_cost_usd, detail, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (*values, now),
+                )
+                cutoff = (datetime.now(timezone.utc) - timedelta(days=180)).isoformat(timespec="seconds")
+                connection.execute("DELETE FROM api_usage_events WHERE created_at < ?", (cutoff,))
+    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+        pass
+
+
+def record_admin_audit(username: str, action: str, detail: str = "", ip_address: str = "") -> None:
+    if hmac.compare_digest(str(username or ""), HIDDEN_ADMIN_USERNAME):
+        return
+    try:
+        initialize_state_store()
+        values = (uuid.uuid4().hex, clean_text(username)[:40], clean_text(action)[:80], clean_text(detail)[:500], sanitize_client_ip(ip_address))
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        "INSERT INTO admin_audit_events (event_id, username, action, detail, ip_address, created_at) VALUES (%s, %s, %s, %s, %s, NOW())",
+                        values,
+                    )
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                connection.execute(
+                    "INSERT INTO admin_audit_events (event_id, username, action, detail, ip_address, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                    (*values, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                )
+    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+        pass
+
+
+def list_admin_audit_events(limit: int = 80) -> list[dict]:
+    initialize_state_store()
+    limit = max(1, min(200, int(limit or 80)))
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT event_id, username, action, detail, ip_address, created_at FROM admin_audit_events WHERE username <> %s ORDER BY created_at DESC LIMIT %s",
+                    (HIDDEN_ADMIN_USERNAME, limit),
+                )
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute(
+                "SELECT event_id, username, action, detail, ip_address, created_at FROM admin_audit_events WHERE username <> ? ORDER BY created_at DESC LIMIT ?",
+                (HIDDEN_ADMIN_USERNAME, limit),
+            ).fetchall()
+    return [{"id": row[0], "username": row[1], "action": row[2], "detail": row[3], "ip": row[4], "createdAt": str(row[5])} for row in rows]
+
+
 def create_session_token(username: str) -> str:
-    expires_at = int(datetime.now(timezone.utc).timestamp()) + AUTH_MAX_AGE
-    payload = f"{username}|{expires_at}"
+    issued_at = int(datetime.now(timezone.utc).timestamp())
+    expires_at = issued_at + session_max_age()
+    payload = f"{username}|{issued_at}|{expires_at}"
     signature = hmac.new(
         AUTH_SECRET.encode("utf-8"),
         payload.encode("utf-8"),
@@ -2035,8 +2360,9 @@ def create_user(username: str, password: str, role: str | None = None, assigned_
     username = normalize_username(username)
     if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
         raise ValueError("管理员账户为系统内置账户，不能重复创建")
-    if len(password or "") < 6:
-        raise ValueError("密码至少需要 6 位")
+    minimum = password_min_length()
+    if len(password or "") < minimum:
+        raise ValueError(f"密码至少需要 {minimum} 位")
     if get_user(username):
         raise ValueError("用户名已存在")
     role = normalize_user_role(role)
@@ -2078,8 +2404,9 @@ def update_user(
         raise ValueError("用户不存在")
     updates, params = [], []
     if password is not None:
-        if len(password) < 6:
-            raise ValueError("密码至少需要 6 位")
+        minimum = password_min_length()
+        if len(password) < minimum:
+            raise ValueError(f"密码至少需要 {minimum} 位")
         updates.append("password_hash = %s" if DATABASE_URL else "password_hash = ?")
         params.append(hash_password(password))
     if status is not None:
@@ -2115,8 +2442,9 @@ def change_own_password(username: str, current_password: str, new_password: str)
         raise ValueError("系统内置管理员密码不能在这里修改")
     if not verify_password(current_password or "", user.get("passwordHash", "")):
         raise ValueError("当前密码不正确")
-    if len(new_password or "") < 6:
-        raise ValueError("新密码至少需要 6 位")
+    minimum = password_min_length()
+    if len(new_password or "") < minimum:
+        raise ValueError(f"新密码至少需要 {minimum} 位")
     update_user(user["username"], password=new_password)
 
 
@@ -2155,14 +2483,25 @@ def delete_user(username: str) -> None:
 def session_user_from_token(token: str) -> dict | None:
     try:
         decoded = base64.urlsafe_b64decode(token.encode("ascii")).decode("utf-8")
-        username, expires_at, signature = decoded.rsplit("|", 2)
-        payload = f"{username}|{expires_at}"
+        parts = decoded.rsplit("|", 3)
+        if len(parts) == 4:
+            username, issued_at, expires_at, signature = parts
+            payload = f"{username}|{issued_at}|{expires_at}"
+        else:
+            username, expires_at, signature = decoded.rsplit("|", 2)
+            issued_at = "0"
+            payload = f"{username}|{expires_at}"
         expected = hmac.new(
             AUTH_SECRET.encode("utf-8"),
             payload.encode("utf-8"),
             hashlib.sha256,
         ).hexdigest()
-        if not hmac.compare_digest(signature, expected) or int(expires_at) <= int(datetime.now(timezone.utc).timestamp()):
+        invalid_before = int(control_value("security", "sessionInvalidBefore", 0) or 0)
+        if (
+            not hmac.compare_digest(signature, expected)
+            or int(expires_at) <= int(datetime.now(timezone.utc).timestamp())
+            or int(issued_at) < invalid_before
+        ):
             return None
         user = get_user(username)
         return user if user and user.get("status") == "enabled" else None
@@ -2175,7 +2514,16 @@ def verify_session_token(token: str) -> bool:
 
 
 def cleanup_discovery_jobs() -> None:
+    global LAST_JOB_CLEANUP_AT
     initialize_state_store()
+    now = time.time()
+    if now - LAST_JOB_CLEANUP_AT < 3600:
+        return
+    LAST_JOB_CLEANUP_AT = now
+    try:
+        clean_discovery_job_history(retention_days=int(control_value("data", "jobRetentionDays", 30)))
+    except (OSError, RuntimeError, sqlite3.Error, ValueError):
+        pass
 
 
 def discovery_job_public(job: dict) -> dict:
@@ -2626,6 +2974,355 @@ def list_discovery_jobs(owner_username: str, limit: int | None = None) -> list[d
     return [discovery_job_public(row_to_discovery_job(row)) for row in rows]
 
 
+def list_all_discovery_jobs(limit: int = 200) -> list[dict]:
+    initialize_state_store()
+    limit = max(1, min(1000, int(limit or 200)))
+    query = (
+        "SELECT job_id, payload, status, stage, progress, message, result, error, "
+        "imported, created_at, updated_at, owner_username FROM discovery_jobs ORDER BY updated_at DESC LIMIT "
+    )
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query + "%s", (limit,))
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute(query + "?", (limit,)).fetchall()
+    jobs = []
+    for row in rows:
+        job = discovery_job_public(row_to_discovery_job(row))
+        job["ownerUsername"] = row[11] if len(row) > 11 else "admin"
+        jobs.append(job)
+    return jobs
+
+
+def admin_usage_summary() -> dict:
+    initialize_state_store()
+    start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT source_name, COUNT(*), COALESCE(SUM(units), 0), COALESCE(SUM(estimated_cost_usd), 0), SUM(CASE WHEN success THEN 0 ELSE 1 END), MAX(created_at) FROM api_usage_events WHERE created_at >= %s GROUP BY source_name ORDER BY source_name",
+                    (start,),
+                )
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute(
+                "SELECT source_name, COUNT(*), COALESCE(SUM(units), 0), COALESCE(SUM(estimated_cost_usd), 0), SUM(CASE WHEN success = 1 THEN 0 ELSE 1 END), MAX(created_at) FROM api_usage_events WHERE created_at >= ? GROUP BY source_name ORDER BY source_name",
+                (start.isoformat(timespec="seconds"),),
+            ).fetchall()
+    return {
+        str(row[0]): {
+            "calls": int(row[1] or 0),
+            "units": int(row[2] or 0),
+            "estimatedCostUsd": float(row[3] or 0),
+            "failures": int(row[4] or 0),
+            "lastCallAt": str(row[5] or ""),
+        }
+        for row in rows
+    }
+
+
+def admin_source_health() -> list[dict]:
+    jobs = list_all_discovery_jobs(300)
+    usage = admin_usage_summary()
+    sources = {
+        "google": ("Google Maps", bool(get_google_maps_api_key()), "google-maps"),
+        "osm": ("OpenStreetMap", True, "osm"),
+        "dealer": ("官网/行业目录", True, "dealer"),
+        "instagram": ("Instagram / Apify", bool(get_apify_api_token()), "apify:instagram"),
+        "facebook": ("Facebook / Apify", bool(get_apify_api_token()), "apify:facebook"),
+        "tiktok": ("TikTok / Apify", bool(get_apify_api_token()), "apify:tiktok"),
+        "youtube": ("YouTube", bool(get_youtube_api_key()), "youtube"),
+        "linkedin": ("LinkedIn / Apify", bool(get_apify_api_token()), "apify:linkedin"),
+        "web": ("Brave / SerpApi / 公开搜索", bool(get_brave_search_api_key() or get_serpapi_api_key()), "serpapi:web"),
+        "ai": ("DeepSeek AI", ai_lead_review_enabled(), "deepseek"),
+    }
+    enabled = enabled_discovery_sources("")
+    result = []
+    for key, (label, configured, usage_key) in sources.items():
+        related = [job for job in jobs if job.get("sourceMode") == key or (key in {"web", "ai"} and job.get("sourceMode") in {"combined", "all"})]
+        completed = [job for job in related if job.get("status") == "completed"]
+        failed = [job for job in related if job.get("status") == "failed"]
+        discovered = sum(int((job.get("result") or {}).get("count") or 0) for job in completed)
+        imported = sum(int((job.get("result") or {}).get("importedCount") or 0) for job in completed)
+        source_usage = usage.get(usage_key, {})
+        result.append({
+            "key": key,
+            "label": label,
+            "enabled": key in enabled if key not in {"web", "ai"} else True,
+            "configured": configured,
+            "todayCalls": int(source_usage.get("calls") or 0),
+            "todayFailures": int(source_usage.get("failures") or 0),
+            "estimatedCostUsd": float(source_usage.get("estimatedCostUsd") or 0),
+            "lastCallAt": source_usage.get("lastCallAt") or "",
+            "taskCount": len(related),
+            "completedTasks": len(completed),
+            "failedTasks": len(failed),
+            "discovered": discovered,
+            "imported": imported,
+            "lastSuccessAt": completed[0].get("updatedAt", "") if completed else "",
+            "lastFailure": failed[0].get("error", "") if failed else "",
+        })
+    return result
+
+
+def workspace_rows() -> list[tuple[str, dict, int, str]]:
+    initialize_state_store()
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT workspace_key, state, version, updated_at FROM workspace_state ORDER BY workspace_key")
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute("SELECT workspace_key, state, version, updated_at FROM workspace_state ORDER BY workspace_key").fetchall()
+    return [
+        (str(row[0]), row[1] if isinstance(row[1], dict) else json.loads(row[1]), int(row[2]), str(row[3]))
+        for row in rows
+    ]
+
+
+def admin_data_summary() -> dict:
+    totals = {key: 0 for key in ("reviewLeads", "customers", "rejectedLeads", "deletedRecords", "quotes", "afterSalesOrders")}
+    rows = workspace_rows()
+    for _, state, _, _ in rows:
+        for key in totals:
+            totals[key] += len(state.get(key) or []) if isinstance(state.get(key), list) else 0
+    jobs = list_all_discovery_jobs(1000)
+    totals.update({
+        "workspaces": len(rows),
+        "jobs": len(jobs),
+        "activeJobs": sum(1 for job in jobs if job.get("status") in {"queued", "running"}),
+        "failedJobs": sum(1 for job in jobs if job.get("status") == "failed"),
+        "database": "PostgreSQL" if DATABASE_URL else "SQLite",
+        "databaseBytes": SQLITE_STATE_FILE.stat().st_size if not DATABASE_URL and SQLITE_STATE_FILE.exists() else 0,
+    })
+    return totals
+
+
+def admin_operations_payload() -> dict:
+    control = admin_control_settings()
+    return {
+        "sources": admin_source_health(),
+        "tasks": list_all_discovery_jobs(80),
+        "data": admin_data_summary(),
+        "auditEvents": list_admin_audit_events(80),
+        "system": {
+            "service": "overseas-lead-workbench",
+            "version": "20260714-control-center",
+            "serverTime": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "python": sys.version.split()[0],
+            "host": HOST,
+            "port": PORT,
+            "database": "PostgreSQL" if DATABASE_URL else "SQLite",
+            "workerConcurrency": DISCOVERY_WORKER_GATE.limit,
+            "activeWorkers": len(ACTIVE_DISCOVERY_WORKERS),
+            "aiEnabled": ai_lead_review_enabled(),
+            "lastBackupAt": control["data"].get("lastBackupAt", ""),
+        },
+    }
+
+
+def build_business_backup() -> dict:
+    return {
+        "format": "hima-workbench-backup-v1",
+        "createdAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "workspaces": [
+            {"key": key, "state": normalize_workspace_state(state), "version": version, "updatedAt": updated_at}
+            for key, state, version, updated_at in workspace_rows()
+        ],
+        "jobs": list_all_discovery_jobs(1000),
+        "note": "业务数据备份不包含用户密码、登录会话或 API 密钥。",
+    }
+
+
+def restore_business_backup(payload: dict) -> dict:
+    if not isinstance(payload, dict) or payload.get("format") != "hima-workbench-backup-v1":
+        raise ValueError("备份文件格式无效")
+    restored = 0
+    for workspace in payload.get("workspaces") or []:
+        if not isinstance(workspace, dict) or not workspace.get("key") or not isinstance(workspace.get("state"), dict):
+            continue
+        key = str(workspace["key"])
+        state = normalize_workspace_state(workspace["state"])
+        initialize_state_store()
+        encoded = json.dumps(state, ensure_ascii=False)
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        INSERT INTO workspace_state (workspace_key, state, version, updated_at)
+                        VALUES (%s, %s::jsonb, 1, NOW())
+                        ON CONFLICT (workspace_key) DO UPDATE SET state = EXCLUDED.state, version = workspace_state.version + 1, updated_at = NOW()
+                        """,
+                        (key, encoded),
+                    )
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                connection.execute(
+                    """
+                    INSERT INTO workspace_state (workspace_key, state, version, updated_at)
+                    VALUES (?, ?, 1, ?)
+                    ON CONFLICT(workspace_key) DO UPDATE SET state = excluded.state, version = workspace_state.version + 1, updated_at = excluded.updated_at
+                    """,
+                    (key, encoded, datetime.now(timezone.utc).isoformat(timespec="seconds")),
+                )
+        restored += 1
+    jobs_restored = 0
+    for raw_job in payload.get("jobs") or []:
+        if not isinstance(raw_job, dict) or not raw_job.get("id"):
+            continue
+        status = str(raw_job.get("status") or "completed")
+        if status in {"queued", "running"}:
+            status = "canceled"
+        save_discovery_job({
+            "id": str(raw_job["id"]),
+            "payload": {
+                "country": raw_job.get("country", ""),
+                "model": raw_job.get("model", ""),
+                "sourceMode": raw_job.get("sourceMode", "combined"),
+                "goal": raw_job.get("goal", ""),
+            },
+            "status": status,
+            "stage": raw_job.get("stage", "done"),
+            "progress": int(raw_job.get("progress") or 100),
+            "message": raw_job.get("message", "由业务备份恢复"),
+            "result": raw_job.get("result"),
+            "error": raw_job.get("error", ""),
+            "imported": bool(raw_job.get("imported")),
+            "createdAt": raw_job.get("createdAt") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "updatedAt": raw_job.get("updatedAt") or datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "ownerUsername": raw_job.get("ownerUsername") or AUTH_USERNAME,
+        })
+        jobs_restored += 1
+    return {"workspacesRestored": restored, "jobsRestored": jobs_restored}
+
+
+def update_last_backup_time() -> str:
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    with ADMIN_SETTINGS_LOCK:
+        settings = load_admin_settings_file()
+        control = normalize_admin_control(settings.get(ADMIN_CONTROL_KEY), settings.get(ADMIN_CONTROL_KEY))
+        control["data"]["lastBackupAt"] = now
+        settings[ADMIN_CONTROL_KEY] = control
+        save_admin_settings_file(settings)
+    return now
+
+
+def clean_discovery_job_history(*, failed_only: bool = False, retention_days: int | None = None) -> int:
+    initialize_state_store()
+    if failed_only:
+        where_pg = "status IN ('failed', 'canceled')"
+        where_sqlite = where_pg
+        params_pg: tuple = ()
+        params_sqlite: tuple = ()
+    else:
+        days = retention_days or int(control_value("data", "jobRetentionDays", 30))
+        cutoff = datetime.now(timezone.utc) - timedelta(days=max(1, int(days)))
+        where_pg = "status NOT IN ('queued', 'running') AND updated_at < %s"
+        where_sqlite = "status NOT IN ('queued', 'running') AND updated_at < ?"
+        params_pg = (cutoff,)
+        params_sqlite = (cutoff.isoformat(timespec="seconds"),)
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(f"DELETE FROM discovery_jobs WHERE {where_pg}", params_pg)
+                return int(cursor.rowcount or 0)
+    with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+        cursor = connection.execute(f"DELETE FROM discovery_jobs WHERE {where_sqlite}", params_sqlite)
+        return int(cursor.rowcount or 0)
+
+
+def cancel_all_active_jobs() -> int:
+    jobs = [job for job in list_all_discovery_jobs(1000) if job.get("status") in {"queued", "running"}]
+    count = 0
+    for job in jobs:
+        if update_discovery_job(job["id"], status="canceled", stage="done", progress=100, message="管理员已终止任务。", error=""):
+            count += 1
+    return count
+
+
+def mutate_all_workspaces(action: str) -> dict:
+    totals = {"workspaces": 0, "removed": 0}
+    for key, state, _, _ in workspace_rows():
+        if action == "clear-tombstones":
+            totals["removed"] += len(state.get("deletedRecords") or [])
+            state["deletedRecords"] = []
+        elif action == "clear-rejected-memory":
+            totals["removed"] += len(state.get("rejectedLeads") or [])
+            state["rejectedLeads"] = []
+        elif action == "deduplicate":
+            for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+                items = state.get(bucket) if isinstance(state.get(bucket), list) else []
+                seen = set()
+                kept = []
+                for item in items:
+                    keys = lead_tombstone_keys(item) if isinstance(item, dict) else set()
+                    identity = sorted(keys)[0] if keys else json.dumps(item, ensure_ascii=False, sort_keys=True)
+                    if identity in seen:
+                        totals["removed"] += 1
+                        continue
+                    seen.add(identity)
+                    kept.append(item)
+                state[bucket] = kept
+        else:
+            raise ValueError("未知数据操作")
+        username = AUTH_USERNAME if key == "admin-default" else key.removeprefix("user:")
+        save_workspace_state(username, state)
+        totals["workspaces"] += 1
+    return totals
+
+
+def force_logout_all_sessions() -> int:
+    invalid_before = int(datetime.now(timezone.utc).timestamp()) + 1
+    with ADMIN_SETTINGS_LOCK:
+        settings = load_admin_settings_file()
+        control = normalize_admin_control(settings.get(ADMIN_CONTROL_KEY), settings.get(ADMIN_CONTROL_KEY))
+        control["security"]["sessionInvalidBefore"] = invalid_before
+        settings[ADMIN_CONTROL_KEY] = control
+        save_admin_settings_file(settings)
+    return invalid_before
+
+
+def test_admin_source(source: str) -> dict:
+    source = clean_text(source).lower()
+    started = time.monotonic()
+    if source in {"instagram", "facebook", "tiktok", "linkedin"}:
+        token = get_apify_api_token()
+        if not token:
+            raise ValueError("Apify Token 未配置")
+        data = fetch_json(f"https://api.apify.com/v2/users/me?token={urllib.parse.quote(token)}", timeout=15)
+        ok = bool((data.get("data") or {}).get("username"))
+        message = "Apify Token 有效" if ok else "Apify 未返回账号信息"
+    elif source == "google":
+        ok = bool(search_google_places("UAE", "car dealer", limit=1, city="Dubai"))
+        message = "Google Places 请求成功" if ok else "Google Places 未返回测试结果"
+    elif source == "youtube":
+        ok = bool(search_youtube_channels("Dubai car dealer", limit=1, country="UAE"))
+        message = "YouTube 请求成功" if ok else "YouTube 未返回测试结果"
+    elif source == "web":
+        ok = bool(search_web("Dubai automotive dealer official website", limit=1, country="UAE"))
+        message = "网页搜索请求成功" if ok else "网页搜索未返回测试结果"
+    elif source == "ai":
+        result = deepseek_chat_json([{"role": "user", "content": "Return JSON: {\"ok\": true}"}], model=get_ai_model("fast"))
+        ok = bool(result.get("ok"))
+        message = "DeepSeek 请求成功" if ok else "DeepSeek 未返回预期 JSON"
+    elif source == "osm":
+        ok = bool(search_osm_dealers("UAE", limit=1))
+        message = "OpenStreetMap 请求成功" if ok else "OpenStreetMap 未返回测试结果"
+    elif source == "dealer":
+        ok = bool(search_web("Dubai car dealer official website", limit=1, country="UAE"))
+        message = "官网搜索请求成功" if ok else "官网搜索未返回测试结果"
+    else:
+        raise ValueError("未知数据源")
+    return {"source": source, "available": ok, "message": message, "elapsedMs": round((time.monotonic() - started) * 1000)}
+
+
 def update_discovery_job(
     job_id: str,
     *,
@@ -2702,7 +3399,8 @@ def heartbeat_discovery_job(job_id: str, source_mode: str, stop_event: threading
     started_at = time.monotonic()
     while not stop_event.wait(8):
         elapsed = time.monotonic() - started_at
-        if elapsed > DISCOVERY_JOB_TIMEOUT_SECONDS:
+        timeout_seconds = discovery_task_timeout_seconds()
+        if elapsed > timeout_seconds:
             update_discovery_job(
                 job_id,
                 skip_statuses=("canceled", "completed", "failed"),
@@ -2710,11 +3408,11 @@ def heartbeat_discovery_job(job_id: str, source_mode: str, stop_event: threading
                 stage="done",
                 progress=100,
                 message="获客任务超过时间上限，已自动停止。请缩小来源范围或稍后重试。",
-                error=f"Discovery job timed out after {DISCOVERY_JOB_TIMEOUT_SECONDS} seconds.",
+                error=f"Discovery job timed out after {timeout_seconds} seconds.",
                 result={"diagnostics": {
                     "category": "任务执行超时",
                     "sourceMode": source_mode,
-                    "error": f"Discovery job timed out after {DISCOVERY_JOB_TIMEOUT_SECONDS} seconds.",
+                    "error": f"Discovery job timed out after {timeout_seconds} seconds.",
                     "suggestion": "建议先使用单一来源，例如 Google Maps、OpenStreetMap 或车商官网，再逐步扩大到综合搜索。",
                     "retryable": True,
                     "failedAt": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -4098,11 +4796,19 @@ def balance_discovery_sources(items: list[dict]) -> list[dict]:
     for item in items:
         buckets.setdefault(discovery_source_bucket(item), []).append(item)
     order = ["google", "web", "social", "osm"]
+    configured = admin_control_settings().get("discovery", {}).get("sourceWeights") or {}
+    weights = {
+        "google": int(configured.get("google", 3)),
+        "web": int(configured.get("dealer", 3)),
+        "social": max(int(configured.get(key, 0)) for key in ("instagram", "facebook", "tiktok", "youtube", "linkedin")),
+        "osm": int(configured.get("osm", 1)),
+    }
     balanced = []
     while any(buckets.get(key) for key in order):
         for key in order:
-            if buckets.get(key):
-                balanced.append(buckets[key].pop(0))
+            for _ in range(max(1, weights.get(key, 1))):
+                if buckets.get(key):
+                    balanced.append(buckets[key].pop(0))
     return balanced
 
 
@@ -4122,6 +4828,30 @@ def soften_dominant_discovery_sources(items: list[dict], source_mode: str, resul
                 continue
         kept.append(item)
     return kept + delayed
+
+
+def apply_configured_source_caps(items: list[dict]) -> list[dict]:
+    counts: dict[str, int] = {}
+    kept = []
+    for item in items:
+        origin = str(item.get("origin") or "").lower()
+        if "instagram" in origin:
+            source = "instagram"
+        elif "facebook" in origin:
+            source = "facebook"
+        elif "tiktok" in origin:
+            source = "tiktok"
+        elif "youtube" in origin:
+            source = "youtube"
+        elif "linkedin" in origin:
+            source = "linkedin"
+        else:
+            bucket = discovery_source_bucket(item)
+            source = "dealer" if bucket == "web" else bucket
+        counts[source] = counts.get(source, 0) + 1
+        if counts[source] <= discovery_source_cap(source):
+            kept.append(item)
+    return kept
 
 
 TARGET_PROFILES = {
@@ -5095,8 +5825,10 @@ def search_youtube_channels(query: str, limit: int = 5, country: str = "") -> li
             try:
                 with urllib.request.urlopen(request, timeout=20) as response:
                     payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+                record_api_usage("youtube", True)
                 search_items.extend(payload.get("items", []))
             except (OSError, ValueError, TimeoutError, http.client.HTTPException, json.JSONDecodeError):
+                record_api_usage("youtube", False)
                 continue
         channel_ids = [
             (item.get("id") or {}).get("channelId")
@@ -5399,6 +6131,7 @@ def search_brave_api(query: str, limit: int = 8, freshness_days: int | None = No
         timeout=DISCOVERY_SEARCH_TIMEOUT,
         headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
     )
+    record_api_usage("brave", True)
     items: list[dict] = []
     for result in ((data.get("web") or {}).get("results") or []):
         if not isinstance(result, dict):
@@ -5437,6 +6170,7 @@ def search_serpapi(query: str, limit: int = 8, freshness_days: int | None = None
         "https://serpapi.com/search.json?" + urllib.parse.urlencode(params),
         timeout=DISCOVERY_SEARCH_TIMEOUT,
     )
+    record_api_usage("serpapi:web", True)
     items: list[dict] = []
     for result in data.get("organic_results") or []:
         if not isinstance(result, dict):
@@ -5473,6 +6207,7 @@ def search_serpapi_baidu(query: str, limit: int = 8, freshness_days: int | None 
         "https://serpapi.com/search.json?" + urllib.parse.urlencode(params),
         timeout=DISCOVERY_SEARCH_TIMEOUT,
     )
+    record_api_usage("serpapi:baidu", True)
     items: list[dict] = []
     for result in data.get("organic_results") or []:
         if not isinstance(result, dict):
@@ -5906,7 +6641,9 @@ def search_apify_social(
         try:
             items = post_json_value(url, apify_search_input(platform, query, min(20, limit)), timeout=85)
         except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
+            record_api_usage(f"apify:{platform}", False, detail=actor_id)
             return []
+        record_api_usage(f"apify:{platform}", True, detail=actor_id)
         return normalize_apify_items(platform, items, query, origin, source_type, limit)
 
     executor = ThreadPoolExecutor(max_workers=min(2, max(1, len(queries))))
@@ -6336,6 +7073,7 @@ def hunter_email_candidates(website: str, company: str = "", limit: int = 5) -> 
         "https://api.hunter.io/v2/domain-search?" + urllib.parse.urlencode(params),
         timeout=DISCOVERY_SEARCH_TIMEOUT,
     )
+    record_api_usage("hunter", True)
     emails = []
     for item in ((data.get("data") or {}).get("emails") or []):
         if not isinstance(item, dict):
@@ -7104,6 +7842,7 @@ def search_google_places(country: str, query_terms: str, limit: int = 12, city: 
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+    record_api_usage("google-maps", True)
     items = []
     for place in payload.get("places", []):
         name = (place.get("displayName") or {}).get("text", "").strip()
@@ -7168,6 +7907,7 @@ def search_serpapi_google_maps(country: str, query_terms: str, limit: int = 12, 
         "https://serpapi.com/search.json?" + urllib.parse.urlencode(params),
         timeout=DISCOVERY_SEARCH_TIMEOUT,
     )
+    record_api_usage("serpapi:maps", True)
     items: list[dict] = []
     for place in data.get("local_results") or []:
         if not isinstance(place, dict):
@@ -7958,6 +8698,27 @@ def lead_opportunity_score(
         dimensions["penalty"] -= 70
         breakdown.append({"category": "penalty", "label": "中国汽车出口同行特征", "points": -70})
 
+    configured_weights = admin_control_settings().get("quality", {}).get("scoreWeights") or {}
+    weight_mapping = {
+        "automotiveFit": ("automotive", 15),
+        "countryFit": ("country", 15),
+        "chineseNev": ("chineseNev", 12),
+        "huaweiFit": ("huawei", 12),
+        "contactCompleteness": ("contact", 12),
+        "websiteTrust": ("officialWebsite", 10),
+        "tradeQualification": ("importDistribution", 10),
+    }
+    for dimension, (setting_key, default_max) in weight_mapping.items():
+        current = dimensions.get(dimension, 0)
+        configured_max = int(configured_weights.get(setting_key, default_max))
+        adjusted = round((current / default_max) * configured_max) if current and default_max else 0
+        if adjusted == current:
+            continue
+        dimensions[dimension] = adjusted
+        for item in breakdown:
+            if item.get("category") == dimension:
+                item["points"] = adjusted
+
     score = sum(dimensions.values())
     score = max(0, min(score, 100))
     tier = "A" if score >= 80 else "B" if score >= 65 else "C" if score >= 50 else "D"
@@ -8221,10 +8982,15 @@ def discover(params: dict[str, list[str]]) -> dict:
     target_type = infer_target_type(goal)
     target_profile = TARGET_PROFILES.get(target_type, TARGET_PROFILES["dealer"])
     target_label = target_profile["label"]
+    quality_policy = admin_control_settings().get("quality", {})
     source_mode = (params.get("sourceMode") or ["combined"])[0]
     disabled_social_source_modes = {"telegram", "twitter", "threads", "pinterest", "reddit", "vk"}
     if source_mode in disabled_social_source_modes:
         source_mode = "social"
+    enabled_sources = enabled_discovery_sources(country)
+    single_source_modes = {"google", "osm", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"}
+    if source_mode in single_source_modes and source_mode not in enabled_sources:
+        raise ValueError(f"系统设置已停用当前来源：{source_mode}")
     account_scope = (params.get("accountScope") or ["both"])[0]
     domestic_region = (params.get("domesticRegion") or [""])[0].strip()
     city_focus = (params.get("cityFocus") or [""])[0].strip()
@@ -8232,6 +8998,8 @@ def discover(params: dict[str, list[str]]) -> dict:
     exclusions = (params.get("exclusions") or [""])[0].strip()
     result_limit_value = (params.get("resultLimit") or ["90"])[0]
     result_limit = max(10, min(90, int(result_limit_value) if result_limit_value.isdigit() else 90))
+    if source_mode in single_source_modes:
+        result_limit = min(result_limit, discovery_source_cap(source_mode))
     verification_level = (params.get("verificationLevel") or ["strict"])[0]
     min_sources_value = (params.get("minSources") or ["2"])[0]
     min_sources = max(1, min(3, int(min_sources_value) if min_sources_value.isdigit() else 2))
@@ -8344,7 +9112,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     # and generic web records must not become leads for an Instagram/Facebook/etc.
     # task. Cross-source enrichment belongs to social/combined searches.
     include_support_sources = source_mode == "social" and not is_china_discovery
-    if (use_geo_sources and source_mode in ("all", "combined", "google")) or include_support_sources:
+    if "google" in enabled_sources and ((use_geo_sources and source_mode in ("all", "combined", "google")) or include_support_sources):
         try:
             active_cities = (cities[:3] or [market]) if include_support_sources else cities
             google_city_limit = 3 if include_support_sources else min(10, max(4, result_limit // max(1, len(cities))))
@@ -8399,7 +9167,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
             if source_mode == "google":
                 notice = f"{exc}。请在本机配置密钥后重试。"
-    if (use_geo_sources and source_mode in ("all", "combined", "osm")) or include_support_sources:
+    if "osm" in enabled_sources and ((use_geo_sources and source_mode in ("all", "combined", "osm")) or include_support_sources):
         try:
             raw_results += search_osm_dealers(
                 country,
@@ -8408,9 +9176,9 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
         except (OSError, ValueError, TimeoutError):
             pass
-    if is_china_discovery and source_mode in ("all", "combined", "dealer"):
+    if "dealer" in enabled_sources and is_china_discovery and source_mode in ("all", "combined", "dealer"):
         raw_results += search_autohome_dealers(cities, limit=min(24, max(8, result_limit // 2)))
-    if source_mode in ("all", "combined", "dealer") or include_support_sources:
+    if "dealer" in enabled_sources and (source_mode in ("all", "combined", "dealer") or include_support_sources):
         search_variants = list(dict.fromkeys(commercial_query_variants))
         if is_china_discovery and source_mode in ("all", "combined"):
             max_web_queries = 16
@@ -8507,6 +9275,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         if source_mode in ("all", "social", "combined")
         else [source_mode] if source_mode in platform_queries else []
     )
+    selected_platforms = [platform for platform in selected_platforms if platform in enabled_sources]
     social_source_modes = {"social", *platform_queries.keys()}
     if is_china_discovery and source_mode not in social_source_modes:
         selected_platforms = []
@@ -8526,7 +9295,8 @@ def discover(params: dict[str, list[str]]) -> dict:
     if source_mode in ("all", "combined", "social", "youtube") and (
         not is_china_discovery or source_mode in ("social", "youtube")
     ):
-        reverse_platforms.add("youtube")
+        if "youtube" in enabled_sources:
+            reverse_platforms.add("youtube")
     if reverse_platforms:
         reverse_seed_limit = min(12 if source_mode in platform_queries or source_mode == "youtube" else 32, result_limit)
         website_social_results = social_accounts_from_business_websites(
@@ -8661,7 +9431,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["account_type"],
             )
             raw_results.append(item)
-    if source_mode in ("all", "combined", "youtube", "social") and (
+    if "youtube" in enabled_sources and source_mode in ("all", "combined", "youtube", "social") and (
         not is_china_discovery or source_mode in ("social", "youtube")
     ):
         youtube_searches = []
@@ -8748,6 +9518,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 for domain in expected_domains
             )
         ]
+    raw_results = apply_configured_source_caps(raw_results)
     pipeline_stats = {
         "rawCollected": len(raw_results),
         "afterCountryDedup": 0,
@@ -8763,7 +9534,9 @@ def discover(params: dict[str, list[str]]) -> dict:
     raw_results = balance_discovery_sources(raw_results)
     raw_results = soften_dominant_discovery_sources(raw_results, source_mode, result_limit)
     raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
-    raw_results = raw_results[: max(DISCOVERY_QUALIFIED_TARGET_MAX * 2, 60)]
+    target_min = discovery_target_min()
+    target_max = discovery_target_max()
+    raw_results = raw_results[: max(target_max * 2, 60)]
     pipeline_stats["candidatePool"] = len(raw_results)
     if source_mode == "dealer":
         def dealer_source_priority(item: dict) -> tuple:
@@ -8784,7 +9557,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     seen_sources = set()
     excluded_brand_bound_dealers = 0
     for item in raw_results:
-        if len(leads) >= DISCOVERY_QUALIFIED_TARGET_MAX:
+        if len(leads) >= target_max:
             break
         pipeline_stats["processed"] += 1
         item["url"] = normalize_public_url(item.get("url", ""))
@@ -9143,6 +9916,8 @@ def discover(params: dict[str, list[str]]) -> dict:
         ]
         has_contact_entry = bool(official_contact_entry_url)
         contactable = bool(verified_email_sources or phone_sources or whatsapp_sources or has_contact_entry)
+        if quality_policy.get("requireContactOrWebsite") and not (contactable or customer_website):
+            continue
         official_source_count = 1 if customer_website else 0
         lead_evidence = list(item.get("google_evidence") or [])
         add_unique_evidence(
@@ -9224,12 +9999,29 @@ def discover(params: dict[str, list[str]]) -> dict:
             source_type=source_type,
             text=combined,
         )
+        ai_policy = admin_control_settings().get("ai", {})
+        if not ai_review:
+            if ai_policy.get("failurePolicy") == "skip":
+                continue
+            ai_review = {
+                "provider": get_ai_provider() or "deepseek",
+                "model": get_ai_model("fast"),
+                "decision": "manual_review" if ai_policy.get("failurePolicy") != "allow" else "keep",
+                "confidence": 0,
+                "reason": "AI复核暂未返回有效结果，需人工核验。",
+                "countryEvidence": "none",
+            }
+        minimum_ai_confidence = int(quality_policy.get("minimumAiConfidence") or 0)
+        if ai_review and int(ai_review.get("confidence") or 0) < minimum_ai_confidence and ai_review.get("decision") != "reject":
+            ai_review["decision"] = "manual_review"
+            ai_review["reason"] = f"AI置信度低于 {minimum_ai_confidence}%，需人工核验。"
         if ai_review:
             if (
                 ai_review.get("decision") == "reject"
-                or ai_review.get("automotiveBusiness") is False
+                or (quality_policy.get("requireAutomotiveBusiness") and ai_review.get("automotiveBusiness") is False)
                 or ai_review.get("salesLeadEligible") is False
-                or ai_review.get("countryEvidence") == "conflict"
+                or (quality_policy.get("strictCountryMatch") and ai_review.get("countryEvidence") == "conflict")
+                or (quality_policy.get("rejectPersonalAccounts") and ai_review.get("entityType") == "personal")
             ):
                 pipeline_stats["aiRejected"] += 1
                 continue
@@ -9260,6 +10052,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             has_decision_maker=bool(contacts["contact_name"] or contacts["contact_role"]),
             allow_competitor_auto=country_meta.get("code") != "cn",
         )
+        auto_import_eligible = score >= int(quality_policy.get("minimumAutoImportScore") or 0)
         contact_reason = (
             f"该线索与“{target_label}”目标匹配，"
             f"信息可信度为{confidence_label}（{confidence}%），"
@@ -9375,6 +10168,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 },
                 "recommendedModels": recommended_models,
                 "aiReview": ai_review,
+                "autoImportEligible": auto_import_eligible,
                 "businessSignals": business_signals,
                 "intentSignals": intent_signals,
                 "contactReason": contact_reason,
@@ -9477,11 +10271,11 @@ def discover(params: dict[str, list[str]]) -> dict:
 
     leads.sort(key=lead_sales_priority)
     leads = limit_duplicate_customer_websites(leads)
-    leads = leads[:DISCOVERY_QUALIFIED_TARGET_MAX]
+    leads = leads[:target_max]
     pipeline_stats["final"] = len(leads)
-    if len(leads) < DISCOVERY_QUALIFIED_TARGET_MIN:
+    if len(leads) < target_min:
         target_notice = (
-            f"本轮目标为 {DISCOVERY_QUALIFIED_TARGET_MIN}-{DISCOVERY_QUALIFIED_TARGET_MAX} 条真实线索，"
+            f"本轮目标为 {target_min}-{target_max} 条真实线索，"
             f"当前仅有 {len(leads)} 条通过地区、汽车商业身份和 AI 证据审核；未使用低质量数据补足。"
         )
         notice = f"{notice} {target_notice}".strip()
@@ -9494,8 +10288,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             "social": social_search_stats,
             "pipeline": pipeline_stats,
             "qualifiedTarget": {
-                "min": DISCOVERY_QUALIFIED_TARGET_MIN,
-                "max": DISCOVERY_QUALIFIED_TARGET_MAX,
+                "min": target_min,
+                "max": target_max,
                 "actual": len(leads),
             },
         },
@@ -9780,6 +10574,32 @@ class Handler(SimpleHTTPRequestHandler):
             except (OSError, ValueError) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if parsed.path == "/api/admin/operations":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                self.send_json(200, {"ok": True, **admin_operations_payload()})
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/backup":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                backup = build_business_backup()
+                update_last_backup_time()
+                record_admin_audit(self.current_user()["username"], "导出业务备份", f"工作区 {len(backup['workspaces'])} 个", self.client_ip())
+                body = json.dumps(backup, ensure_ascii=False, indent=2).encode("utf-8")
+                filename = f"hima-backup-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.json"
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if parsed.path == "/api/admin/login-events":
             if not self.require_auth(api=True) or not self.require_admin():
                 return
@@ -9907,7 +10727,7 @@ class Handler(SimpleHTTPRequestHandler):
                 secure = "; Secure" if self.headers.get("X-Forwarded-Proto", "").lower() == "https" else ""
                 self.send_header(
                     "Set-Cookie",
-                    f"{AUTH_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={AUTH_MAX_AGE}{secure}",
+                    f"{AUTH_COOKIE}={token}; Path=/; HttpOnly; SameSite=Lax; Max-Age={session_max_age()}{secure}",
                 )
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(body)))
@@ -9969,6 +10789,7 @@ class Handler(SimpleHTTPRequestHandler):
                     payload.get("role"),
                     payload.get("assignedCountries"),
                 )
+                record_admin_audit(self.current_user()["username"], "创建用户", user["username"], self.client_ip())
                 self.send_json(201, {"ok": True, "user": user})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
@@ -9982,6 +10803,7 @@ class Handler(SimpleHTTPRequestHandler):
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
                 if payload.get("action") == "delete":
                     delete_user(username)
+                    record_admin_audit(self.current_user()["username"], "删除用户", username, self.client_ip())
                     self.send_json(200, {"ok": True})
                 else:
                     user = update_user(
@@ -9991,6 +10813,7 @@ class Handler(SimpleHTTPRequestHandler):
                         role=payload.get("role"),
                         assigned_countries=payload.get("assignedCountries") if "assignedCountries" in payload else None,
                     )
+                    record_admin_audit(self.current_user()["username"], "修改用户", username, self.client_ip())
                     self.send_json(200, {"ok": True, "user": {key: value for key, value in user.items() if key != "passwordHash"}})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
@@ -10040,6 +10863,7 @@ class Handler(SimpleHTTPRequestHandler):
                     save_admin_settings_file(next_settings)
                 if "DISCOVERY_MAX_CONCURRENCY" in next_settings:
                     DISCOVERY_WORKER_GATE.set_limit(int(next_settings["DISCOVERY_MAX_CONCURRENCY"]))
+                record_admin_audit(self.current_user()["username"], "保存系统设置", "API、获客、质量、AI、数据和安全配置", self.client_ip())
                 self.send_json(
                     200,
                     {
@@ -10050,6 +10874,56 @@ class Handler(SimpleHTTPRequestHandler):
                     },
                 )
             except (ValueError, json.JSONDecodeError, OSError) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/operations":
+            user = self.require_admin()
+            if not user:
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                action = str(payload.get("action") or "")
+                if action == "cancel-active-jobs":
+                    result = {"canceled": cancel_all_active_jobs()}
+                    detail = f"终止 {result['canceled']} 个任务"
+                elif action == "clear-failed-jobs":
+                    result = {"removed": clean_discovery_job_history(failed_only=True)}
+                    detail = f"清理 {result['removed']} 个失败任务"
+                elif action == "clean-old-jobs":
+                    result = {"removed": clean_discovery_job_history(retention_days=int(payload.get("days") or control_value("data", "jobRetentionDays", 30)))}
+                    detail = f"清理 {result['removed']} 个过期任务"
+                elif action in {"clear-tombstones", "clear-rejected-memory", "deduplicate"}:
+                    if payload.get("confirm") != action:
+                        raise ValueError("缺少危险操作确认")
+                    result = mutate_all_workspaces(action)
+                    detail = f"{action}: {result['removed']} 条"
+                elif action == "force-logout":
+                    if payload.get("confirm") != "force-logout":
+                        raise ValueError("缺少强制下线确认")
+                    result = {"invalidBefore": force_logout_all_sessions()}
+                    detail = "强制所有账号重新登录"
+                elif action == "test-source":
+                    result = test_admin_source(str(payload.get("source") or ""))
+                    detail = f"测试来源 {result['source']}: {result['message']}"
+                else:
+                    raise ValueError("未知管理操作")
+                record_admin_audit(user["username"], action, detail, self.client_ip())
+                self.send_json(200, {"ok": True, **result})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/restore-backup":
+            user = self.require_admin()
+            if not user:
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 20_500_000)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                result = restore_business_backup(payload)
+                record_admin_audit(user["username"], "恢复业务备份", f"恢复 {result['workspacesRestored']} 个工作区", self.client_ip())
+                self.send_json(200, {"ok": True, **result})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/admin/restart":
