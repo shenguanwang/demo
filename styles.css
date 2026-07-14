@@ -4307,6 +4307,96 @@ textarea {
   text-align: right;
 }
 
+.crm-toolbar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.6fr) repeat(3, minmax(140px, 0.7fr));
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.crm-toolbar label {
+  display: grid;
+  gap: 6px;
+  color: #52606e;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.crm-toolbar input,
+.crm-toolbar select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: #0f1720;
+  font-size: 13px;
+}
+
+.crm-table {
+  min-width: 1120px;
+}
+
+.crm-row td {
+  background: #fff;
+}
+
+.crm-contact-line {
+  margin-top: 5px;
+  color: #5c6877;
+  font-size: 12px;
+}
+
+.crm-contact-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-top: 7px;
+}
+
+.crm-contact-chips span {
+  max-width: 120px;
+  overflow: hidden;
+  padding: 3px 7px;
+  border: 1px solid #dfe5ec;
+  border-radius: 999px;
+  background: #f7f9fb;
+  color: #53606f;
+  font-size: 10px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crm-contact-chips .muted {
+  background: #fff7ed;
+  color: #9a5a18;
+}
+
+.crm-table td:nth-child(2) strong {
+  color: #223044;
+  font-size: 13px;
+}
+
+.crm-table td:nth-child(2) span,
+.crm-table td:nth-child(2) small,
+.crm-priority-note {
+  display: block;
+  margin-top: 5px;
+  color: #687586;
+  font-size: 11px;
+}
+
+.crm-priority-note {
+  max-width: 150px;
+  line-height: 1.45;
+}
+
 .crm-follow-status {
   display: inline-flex;
   padding: 4px 7px;
@@ -5332,6 +5422,14 @@ tbody tr:last-child td {
     flex-direction: column;
   }
 
+  .crm-toolbar {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .crm-search {
+    grid-column: 1 / -1;
+  }
+
   .crm-workbench > p {
     text-align: left;
   }
@@ -5580,6 +5678,14 @@ tbody tr:last-child td {
 }
 
 @media (max-width: 520px) {
+  .crm-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .crm-search {
+    grid-column: auto;
+  }
+
   .review-filter-group,
   .review-bulk-actions {
     align-items: stretch;

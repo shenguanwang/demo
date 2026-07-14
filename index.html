@@ -6,7 +6,7 @@
   <title>华为系新能源汽车海外获客工作台</title>
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
-  <link rel="stylesheet" href="./styles.css?v=20260714-region-profile">
+  <link rel="stylesheet" href="./styles.css?v=20260714-crm-leads">
 </head>
 <body>
   <aside class="sidebar">
@@ -799,8 +799,35 @@
         </div>
         <p id="crmViewHint">显示全部客户池客户。</p>
       </div>
+      <div class="crm-toolbar" aria-label="客户池筛选和排序">
+        <label class="crm-search">搜索客户
+          <input id="crmSearchInput" type="search" placeholder="公司、国家、城市、邮箱、电话">
+        </label>
+        <label>客户等级
+          <select id="crmTierFilter">
+            <option value="all">全部等级</option>
+            <option value="A">A 级</option>
+            <option value="B">B 级</option>
+            <option value="C">C 级</option>
+            <option value="D">D 级</option>
+          </select>
+        </label>
+        <label>销售阶段
+          <select id="crmStageFilter">
+            <option value="all">全部阶段</option>
+          </select>
+        </label>
+        <label>排序
+          <select id="crmSortBy">
+            <option value="priority">优先级最高</option>
+            <option value="score">评分最高</option>
+            <option value="follow">跟进最紧急</option>
+            <option value="recent">最新进入</option>
+          </select>
+        </label>
+      </div>
       <div class="table-wrap">
-        <table>
+        <table class="crm-table">
           <thead>
             <tr>
               <th>客户</th>
@@ -1181,6 +1208,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260714-region-profile"></script>
+  <script src="./script.js?v=20260714-crm-leads"></script>
 </body>
 </html>

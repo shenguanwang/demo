@@ -570,6 +570,10 @@ let adminSettingsSnapshot = null;
 let adminOperationsSnapshot = null;
 let adminApiShowAll = false;
 let crmViewFilter = "all";
+let crmSearchQuery = "";
+let crmTierFilter = "all";
+let crmStageFilter = "all";
+let crmSortBy = "priority";
 let navigationBound = false;
 
 const productProfiles = {
@@ -3159,6 +3163,26 @@ function websiteLeadModelLabel(lead) {
   return lead.modelLine || lead.model || "未指定车型";
 }
 
+function websiteLeadCommercialDetails(lead) {
+  return [
+    lead.buyerType ? `采购方：${lead.buyerType}` : "",
+    lead.modelVersion ? `版本：${lead.modelVersion}` : "",
+    lead.purchaseTimeline ? `周期：${lead.purchaseTimeline}` : "",
+    lead.tradeTerm ? `条款：${lead.tradeTerm}` : ""
+  ].filter(Boolean).join(" · ");
+}
+
+function websiteLeadDetectedCountryLabel(lead) {
+  const code = String(lead?.detectedCountry || "").trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return "";
+  try {
+    const name = new Intl.DisplayNames(["zh-CN"], { type: "region" }).of(code);
+    return name && name !== code ? `${name} (${code})` : code;
+  } catch {
+    return code;
+  }
+}
+
 function websiteLeadToReviewLead(lead) {
   const text = [
     lead.company,
@@ -3206,9 +3230,9 @@ function renderWebsiteLeads() {
   tbody.innerHTML = websiteLeads.length ? websiteLeads.map((lead, index) => `
     <tr>
       <td><strong>${escapeHtml(lead.company || "未填写")}</strong><br><span>${escapeHtml(lead.contact || lead.email || lead.whatsapp || "无联系方式")}</span></td>
-      <td>${escapeHtml(lead.country || "-")}</td>
+      <td>${escapeHtml(lead.country || "-")}${lead.detectedCountry ? `<br><small>访客定位：${escapeHtml(websiteLeadDetectedCountryLabel(lead))} · ${escapeHtml((lead.detectedLanguage || "en").toUpperCase())}</small>` : ""}</td>
       <td>${escapeHtml(websiteLeadModelLabel(lead))}<br><span>${escapeHtml(String(lead.quantity || 1))} 台</span></td>
-      <td>${escapeHtml(lead.message || "-")}</td>
+      <td>${escapeHtml(lead.message || "-")}${websiteLeadCommercialDetails(lead) ? `<br><small>${escapeHtml(websiteLeadCommercialDetails(lead))}</small>` : ""}</td>
       <td><span class="website-lead-status ${escapeHtml(lead.status || "new")}">${escapeHtml(websiteLeadStatusLabel(lead.status))}</span><br><small>${escapeHtml(formatJobTime(lead.receivedAt || lead.createdAt))}</small></td>
       <td>
         <div class="crm-actions">
@@ -3250,6 +3274,88 @@ function deleteWebsiteLead(index) {
   refreshAllLeadViews();
 }
 
+function crmLeadSearchText(lead) {
+  return [
+    lead.company,
+    lead.country,
+    lead.city,
+    lead.type,
+    lead.model,
+    lead.email,
+    lead.phone,
+    lead.whatsapp,
+    lead.website,
+    lead.source,
+    lead.stage,
+    lead.next
+  ].filter(Boolean).join(" ").toLowerCase();
+}
+
+function crmLeadContactSummary(lead) {
+  const contacts = [];
+  const email = primaryEmailForLead(lead);
+  if (email) contacts.push(["邮箱", email]);
+  if (lead.phone) contacts.push(["电话", lead.phone]);
+  if (lead.whatsapp) contacts.push(["WhatsApp", lead.whatsapp]);
+  if (lead.website) contacts.push(["官网", lead.website]);
+  return contacts.slice(0, 3).map(([label, value]) => `
+    <span title="${escapeHtml(value)}">${escapeHtml(label)}</span>
+  `).join("") || `<span class="muted">缺少联系方式</span>`;
+}
+
+function crmLeadPriorityNote(lead) {
+  const score = Number(lead.score || 0);
+  if (score >= 80) return "优先联系，可直接生成开发信";
+  if (score >= 65) return "适合跟进，建议人工确认需求";
+  if (score >= 50) return "一般线索，先补联系方式和官网证据";
+  return "低分线索，建议重新核验后再推进";
+}
+
+function crmFollowSortValue(lead, today) {
+  if (["已成交", "已流失"].includes(lead.stage)) return 999999;
+  if (!lead.nextFollowAt) return 0;
+  const leadDate = new Date(`${lead.nextFollowAt}T00:00:00`).getTime();
+  const todayDate = new Date(`${today}T00:00:00`).getTime();
+  if (!Number.isFinite(leadDate) || !Number.isFinite(todayDate)) return 999998;
+  return Math.round((leadDate - todayDate) / 86400000);
+}
+
+function crmRecentValue(lead) {
+  const raw = lead.approvedAt || lead.researchAt || lead.createdAt || lead.updatedAt || "";
+  const time = new Date(raw).getTime();
+  return Number.isFinite(time) ? time : 0;
+}
+
+function sortCrmCustomers(rows, today) {
+  return rows.sort((a, b) => {
+    if (crmSortBy === "score") return Number(b.lead.score || 0) - Number(a.lead.score || 0);
+    if (crmSortBy === "follow") return crmFollowSortValue(a.lead, today) - crmFollowSortValue(b.lead, today);
+    if (crmSortBy === "recent") return crmRecentValue(b.lead) - crmRecentValue(a.lead);
+    const tierRank = { A: 4, B: 3, C: 2, D: 1 };
+    const aRank = (tierRank[a.lead.scoreTier] || 0) * 1000 + Number(a.lead.score || 0) - Math.max(0, crmFollowSortValue(a.lead, today));
+    const bRank = (tierRank[b.lead.scoreTier] || 0) * 1000 + Number(b.lead.score || 0) - Math.max(0, crmFollowSortValue(b.lead, today));
+    return bRank - aRank;
+  });
+}
+
+function syncCrmControls() {
+  const stageSelect = $("#crmStageFilter");
+  if (stageSelect) {
+    const current = crmStageFilter;
+    stageSelect.innerHTML = `<option value="all">全部阶段</option>${salesStages.map((stage) =>
+      `<option value="${escapeHtml(stage)}">${escapeHtml(stage)}</option>`
+    ).join("")}`;
+    stageSelect.value = [...stageSelect.options].some((option) => option.value === current) ? current : "all";
+    crmStageFilter = stageSelect.value;
+  }
+  const searchInput = $("#crmSearchInput");
+  if (searchInput && searchInput.value !== crmSearchQuery) searchInput.value = crmSearchQuery;
+  const tierSelect = $("#crmTierFilter");
+  if (tierSelect) tierSelect.value = crmTierFilter;
+  const sortSelect = $("#crmSortBy");
+  if (sortSelect) sortSelect.value = crmSortBy;
+}
+
 function renderCrm() {
   const today = new Date().toISOString().slice(0, 10);
   const activeCustomers = customers.filter((lead) => !["已成交", "已流失"].includes(lead.stage));
@@ -3266,13 +3372,20 @@ function renderCrm() {
     });
     Array.from(tabs.querySelectorAll("[data-crm-filter]")).forEach((button) => button.classList.toggle("active", button.dataset.crmFilter === crmViewFilter));
   }
-  const filteredCustomers = customers.map((lead, index) => ({ lead, index })).filter(({ lead }) => {
+  syncCrmControls();
+  const normalizedSearch = crmSearchQuery.trim().toLowerCase();
+  const filteredCustomers = sortCrmCustomers(customers.map((lead, index) => ({ lead, index })).filter(({ lead }) => {
     if (crmViewFilter === "due") return !["已成交", "已流失"].includes(lead.stage) && (!lead.nextFollowAt || lead.nextFollowAt <= today);
     if (crmViewFilter === "overdue") return !["已成交", "已流失"].includes(lead.stage) && lead.nextFollowAt && lead.nextFollowAt < today;
     if (crmViewFilter === "missing") return !["已成交", "已流失"].includes(lead.stage) && !lead.nextFollowAt;
     if (crmViewFilter === "priority") return ["A", "B"].includes(lead.scoreTier);
     return true;
-  });
+  }).filter(({ lead }) => {
+    if (crmTierFilter !== "all" && lead.scoreTier !== crmTierFilter) return false;
+    if (crmStageFilter !== "all" && lead.stage !== crmStageFilter) return false;
+    if (normalizedSearch && !crmLeadSearchText(lead).includes(normalizedSearch)) return false;
+    return true;
+  }), today);
   const viewHint = $("#crmViewHint");
   if (viewHint) viewHint.textContent = {
     all: `显示全部 ${customers.length} 位客户池客户。`,
@@ -3282,12 +3395,23 @@ function renderCrm() {
     priority: `显示评分为 A / B 的 ${priorityCustomers.length} 位高价值客户。`
   }[crmViewFilter];
   $("#crmRows").innerHTML = filteredCustomers.length ? filteredCustomers.map(({ lead, index }) => `
-    <tr>
-      <td><button class="link-button crm-customer-link" type="button" data-crm-action="review" data-index="${index}">${escapeHtml(lead.company)}</button><br><span>${escapeHtml(lead.contactName || lead.email || lead.phone || "暂无联系人")}</span></td>
-      <td>${escapeHtml(lead.country)}<br>${escapeHtml(lead.city)}</td>
+    <tr class="crm-row">
+      <td>
+        <button class="link-button crm-customer-link" type="button" data-crm-action="review" data-index="${index}">${escapeHtml(lead.company)}</button>
+        <div class="crm-contact-line">${escapeHtml(lead.contactName || primaryEmailForLead(lead) || lead.phone || "暂无联系人")}</div>
+        <div class="crm-contact-chips">${crmLeadContactSummary(lead)}</div>
+      </td>
+      <td>
+        <strong>${escapeHtml(lead.country || "未知国家")}</strong><br>
+        <span>${escapeHtml(lead.city || "未填城市")}</span>
+        <small>${escapeHtml(lead.source || "未知来源")}</small>
+      </td>
       <td>${escapeHtml(lead.type)}</td>
       <td>${escapeHtml(lead.model)}</td>
-      <td><span class="score ${scoreVisualClass(lead.score)}">${lead.score} · ${escapeHtml(lead.scoreTier || "D")}级</span></td>
+      <td>
+        <span class="score ${scoreVisualClass(lead.score)}">${lead.score} · ${escapeHtml(lead.scoreTier || "D")}级</span>
+        <small class="crm-priority-note">${escapeHtml(crmLeadPriorityNote(lead))}</small>
+      </td>
       <td>
         <select class="crm-stage" data-crm-stage="${index}">
           ${salesStages.map((stage) => `<option ${stage === lead.stage ? "selected" : ""}>${stage}</option>`).join("")}
@@ -3304,7 +3428,7 @@ function renderCrm() {
         </div>
       </td>
     </tr>
-  `).join("") : `<tr><td colspan="9">当前视图没有符合条件的客户。</td></tr>`;
+  `).join("") : `<tr><td colspan="9">当前筛选条件下没有符合条件的客户。</td></tr>`;
   $("#heroPending").textContent = reviewLeads.length;
   $("#heroCustomers").textContent = customers.length;
   $("#heroGradeA").textContent = customers.filter((lead) => lead.score >= 80).length;
@@ -6559,6 +6683,26 @@ function bindForms() {
     const button = event.target.closest("[data-crm-filter]");
     if (!button) return;
     crmViewFilter = button.dataset.crmFilter || "all";
+    renderCrm();
+  });
+
+  $("#crmSearchInput")?.addEventListener("input", (event) => {
+    crmSearchQuery = event.target.value || "";
+    renderCrm();
+  });
+
+  $("#crmTierFilter")?.addEventListener("change", (event) => {
+    crmTierFilter = event.target.value || "all";
+    renderCrm();
+  });
+
+  $("#crmStageFilter")?.addEventListener("change", (event) => {
+    crmStageFilter = event.target.value || "all";
+    renderCrm();
+  });
+
+  $("#crmSortBy")?.addEventListener("change", (event) => {
+    crmSortBy = event.target.value || "priority";
     renderCrm();
   });
 
