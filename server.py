@@ -9186,48 +9186,6 @@ def social_accounts_from_local_source_pages(
     return results
 
 
-def facebook_fallback_dealer_items(country: str, target_type: str, limit: int = 12) -> list[dict]:
-    dealer_items: list[dict] = []
-    fallback_types = list(dict.fromkeys([target_type, "dealer", "importer", "parallel"]))
-    for fallback_type in fallback_types:
-        try:
-            dealer_items.extend(
-                search_osm_dealers(country, limit=max(8, min(30, limit)), target_type=fallback_type)
-            )
-        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
-            continue
-        if len(dealer_items) >= limit:
-            break
-    fallback_items: list[dict] = []
-    seen_sources: set[str] = set()
-    for item in dealer_items:
-        title = clean_text(item.get("title") or "")
-        if not title:
-            continue
-        source_url = normalize_public_url(item.get("url") or item.get("customer_website") or "")
-        identity = (source_url or title).lower().rstrip("/")
-        if identity in seen_sources:
-            continue
-        seen_sources.add(identity)
-        customer_website = normalize_public_url(item.get("customer_website") or "")
-        snippet = clean_text(item.get("snippet") or item.get("address") or item.get("contact") or "")
-        fallback_items.append({
-            **item,
-            "origin": "Facebook",
-            "source_type": "Facebook 未返回账号，地图/官网车商补充",
-            "source_url": source_url,
-            "customer_website": customer_website,
-            "url": customer_website or source_url,
-            "snippet": f"{snippet} Facebook 公开搜索未返回主页，先作为尼日利亚车商候选线索人工补充社媒。".strip(),
-            "account_type": "车商候选客户（待补 Facebook）",
-            "social_fallback_for": "facebook",
-            "skip_fetch": not bool(customer_website),
-        })
-        if len(fallback_items) >= limit:
-            break
-    return fallback_items
-
-
 def discover(params: dict[str, list[str]]) -> dict:
     country = (params.get("country") or ["UAE"])[0]
     model = (params.get("model") or ["问界 M9"])[0]
@@ -9762,11 +9720,6 @@ def discover(params: dict[str, list[str]]) -> dict:
             "tiktok": ("tiktok.com",),
             "linkedin": ("linkedin.com",),
         }[source_mode]
-        if source_mode == "facebook" and not social_search_stats["profileByPlatform"].get(expected_origin, 0):
-            fallback_items = facebook_fallback_dealer_items(country, target_type, limit=min(result_limit, 16))
-            if fallback_items:
-                social_search_stats["fallbackDealerResults"] = len(fallback_items)
-                raw_results.extend(fallback_items)
         raw_results = [
             item
             for item in raw_results
@@ -9776,9 +9729,6 @@ def discover(params: dict[str, list[str]]) -> dict:
                     domain in safe_urlparse(item.get("url", "")).netloc.lower()
                     for domain in expected_domains
                 )
-            ) or (
-                source_mode == "facebook"
-                and item.get("social_fallback_for") == "facebook"
             )
         ]
     raw_results = apply_configured_source_caps(raw_results)
@@ -9830,7 +9780,6 @@ def discover(params: dict[str, list[str]]) -> dict:
         domain = parsed.netloc.lower().removeprefix("www.")
         path_lower = parsed.path.lower()
         title_lower = item["title"].lower()
-        is_social_fallback = bool(item.get("social_fallback_for"))
         is_google_places = item.get("origin") == "Google Maps"
         is_social_result = item.get("origin") in (
             "Facebook", "Instagram", "TikTok", "LinkedIn", "YouTube",
@@ -10287,19 +10236,9 @@ def discover(params: dict[str, list[str]]) -> dict:
                 or (quality_policy.get("strictCountryMatch") and ai_review.get("countryEvidence") == "conflict")
                 or (quality_policy.get("rejectPersonalAccounts") and ai_review.get("entityType") == "personal")
             ):
-                if is_social_fallback:
-                    ai_review["decision"] = "manual_review"
-                    ai_review["reason"] = "Facebook 未返回主页，地图/官网车商兜底线索，需人工补充 Facebook 或 WhatsApp 后再联系。"
-                    ai_review["salesLeadEligible"] = True
-                    ai_review["automotiveBusiness"] = True
-                    ai_review["targetCountryMatch"] = True
-                    ai_review["countryEvidence"] = "explicit"
-                else:
-                    pipeline_stats["aiRejected"] += 1
-                    continue
-            if is_social_fallback:
-                has_business_evidence = True
-            elif ai_review.get("automotiveBusiness"):
+                pipeline_stats["aiRejected"] += 1
+                continue
+            if ai_review.get("automotiveBusiness"):
                 has_business_evidence = True
                 if ai_review.get("businessType"):
                     business_signals = list(dict.fromkeys([
@@ -10319,7 +10258,6 @@ def discover(params: dict[str, list[str]]) -> dict:
         trusted_geo_match = (
             origin in {"Google Maps", "OpenStreetMap"}
             or origin.startswith("OpenStreetMap")
-            or is_social_fallback
         ) and not has_foreign_location_conflict(country_evidence_text, country)
         ai_country_match = bool(
             ai_review.get("targetCountryMatch")
@@ -10516,14 +10454,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"Apify 返回 {social_search_stats['apifyResults']} 条，"
             f"其中 {social_search_stats['profileResults']} 条可识别为账号主页，"
             f"最终 {social_search_stats['acceptedResults']} 条通过地区与汽车业务核验。"
-            f"地图/官网兜底补充 {social_search_stats.get('fallbackDealerResults', 0)} 条车商候选。"
             "这表示本轮源头没有返回可用账号，并不是线索已被客户池过滤；建议换 Instagram/LinkedIn，或先用综合搜索找到官网后再反查社媒。"
-        )
-    if source_mode == "facebook" and leads and social_search_stats.get("fallbackDealerResults"):
-        notice = (
-            f"Facebook 公开主页未稳定返回，已用地图/官网兜底补充 "
-            f"{social_search_stats.get('fallbackDealerResults', 0)} 条尼日利亚车商候选；"
-            "这些线索需要人工补充 Facebook、WhatsApp 或官网联系方式后再联系。"
         )
     if excluded_brand_bound_dealers:
         notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定主机厂的单品牌 4S/授权店。"
