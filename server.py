@@ -103,8 +103,8 @@ DISCOVERY_QUALIFIED_TARGET_MAX = 30
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
-APIFY_DISCOVERY_ENABLED = str(bootstrap_setting("APIFY_DISCOVERY_ENABLED", "false")).strip().lower() in {"1", "true", "yes", "on"}
 APIFY_RUN_TIMEOUT_SECONDS = max(10, min(60, int(bootstrap_setting("APIFY_RUN_TIMEOUT_SECONDS", "25"))))
+APIFY_DISCOVERY_SOURCE_MODES = {"social", "instagram", "facebook", "tiktok", "linkedin"}
 ASSIGNED_COUNTRY_NONE = "__none__"
 DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "480")))
 YOUTUBE_MAX_VIDEO_AGE_DAYS = 365 * 5
@@ -209,10 +209,9 @@ ADMIN_SETTING_DEFINITIONS = {
     "PUBLIC_BASE_URL": {"type": "url", "label": "公开访问地址", "group": "runtime", "status": "active", "use": "回调/公开链接"},
     "DISCOVERY_MAX_CONCURRENCY": {"type": "int", "label": "获客并发数", "group": "runtime", "status": "active", "use": "后台任务并发", "min": 1, "max": 8},
     "NETWORK_DEFAULT_TIMEOUT": {"type": "int", "label": "网络超时秒数", "group": "runtime", "status": "active", "use": "外部接口请求超时", "min": 5, "max": 60},
-    "APIFY_DISCOVERY_ENABLED": {"type": "text", "label": "Apify 获客开关", "group": "social", "status": "active", "use": "true 才允许获客任务调用付费 Apify Actor"},
     "APIFY_RUN_TIMEOUT_SECONDS": {"type": "int", "label": "Apify 单次超时秒数", "group": "social", "status": "active", "use": "限制单个 Apify Actor 空跑时间", "min": 10, "max": 60},
 }
-ADMIN_RUNTIME_KEYS = {"PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT", "APIFY_DISCOVERY_ENABLED", "APIFY_RUN_TIMEOUT_SECONDS"}
+ADMIN_RUNTIME_KEYS = {"PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT", "APIFY_RUN_TIMEOUT_SECONDS"}
 ADMIN_CUSTOM_APIS_KEY = "_customApis"
 ADMIN_SETTINGS_LOCK = threading.RLock()
 ADMIN_SETTINGS_CACHE: dict | None = None
@@ -836,7 +835,7 @@ def admin_settings_payload() -> dict:
         "customApis": custom_apis,
         "controlCenter": admin_control_settings(),
         "dynamicRuntime": ["DISCOVERY_MAX_CONCURRENCY"],
-        "restartRequired": ["NETWORK_DEFAULT_TIMEOUT", "APIFY_DISCOVERY_ENABLED", "APIFY_RUN_TIMEOUT_SECONDS"],
+        "restartRequired": ["NETWORK_DEFAULT_TIMEOUT", "APIFY_RUN_TIMEOUT_SECONDS"],
     }
 
 
@@ -6532,8 +6531,12 @@ def apify_keyword_query(query: str) -> str:
     return value or str(query or "").strip()
 
 
+def apify_allowed_for_source_mode(source_mode: str) -> bool:
+    return str(source_mode or "").strip().lower() in APIFY_DISCOVERY_SOURCE_MODES
+
+
 def apify_query_plan(query_variants: list[str], source_mode: str, platform: str = "") -> tuple[list[str], int]:
-    if not APIFY_DISCOVERY_ENABLED:
+    if not apify_allowed_for_source_mode(source_mode):
         return [], 0
     if platform in {"instagram", "facebook", "tiktok", "linkedin"}:
         if source_mode in ("all", "combined"):
@@ -6770,8 +6773,6 @@ def search_apify_social(
     source_type: str,
     limit: int = 8,
 ) -> list[dict]:
-    if not APIFY_DISCOVERY_ENABLED:
-        return []
     token = get_apify_api_token()
     actor_id = apify_actor_id(platform)
     if not token or not actor_id or limit <= 0 or not queries:
@@ -9134,8 +9135,6 @@ def discover(params: dict[str, list[str]]) -> dict:
     if source_mode in disabled_social_source_modes:
         source_mode = "social"
     enabled_sources = enabled_discovery_sources(country)
-    if source_mode in ("all", "combined") and not APIFY_DISCOVERY_ENABLED:
-        enabled_sources = enabled_sources - {"instagram", "facebook", "tiktok", "linkedin"}
     single_source_modes = {"google", "osm", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"}
     if source_mode in single_source_modes and source_mode not in enabled_sources:
         raise ValueError(f"系统设置已停用当前来源：{source_mode}")
