@@ -6439,6 +6439,13 @@ def social_search_variants(
             markets = [*hints[:12], *markets]
             break
     markets = list(dict.fromkeys(place for place in markets if place))
+    localized_terms: list[str] = []
+    for key, terms in LOCALIZED_DISCOVERY_TERMS.items():
+        meta = COUNTRY_SEARCH_META.get(key, {})
+        aliases = (key, meta.get("location", ""), *(meta.get("aliases") or ()))
+        if any(normalize_country_match_text(alias) and normalize_country_match_text(alias) in market_text for alias in aliases):
+            localized_terms = list(terms)
+            break
     target_priority_terms = {
         "dealer": ("car dealer", "used car dealer", "car showroom", "motors showroom", "cars for sale"),
         "parallel": ("parallel import cars", "imported cars", "car importer", "auto trading", "Chinese car importer"),
@@ -6457,6 +6464,21 @@ def social_search_variants(
             "facebook": ("facebook.com",),
             "tiktok": ("tiktok.com",),
         }.get(platform, (site,))
+        for place in markets[:8]:
+            queries.extend([
+                f"{place} cars {platform}",
+                f"{place} car dealer {platform}",
+                f"{place} auto sales {platform}",
+                f"{place} motors {platform}",
+                f"site:{site_variants[0]} {place} cars",
+                f"site:{site_variants[0]} {place} auto",
+                f"site:{site_variants[0]} {place} motors",
+            ])
+        for term in localized_terms[:6]:
+            queries.extend([
+                f"{term} {platform}",
+                f"site:{site_variants[0]} {term}",
+            ])
         if platform == "instagram":
             primary_place = markets[0] if markets else market
             compact_terms = [
@@ -6483,6 +6505,19 @@ def social_search_variants(
                     queries.append(f"site:{variant} {place} \"{term}\"")
         return list(dict.fromkeys(queries))
     if platform == "linkedin":
+        for place in markets[:8]:
+            queries.extend([
+                f"{place} automotive linkedin",
+                f"{place} car dealer linkedin",
+                f"{place} auto sales linkedin",
+                f"site:linkedin.com/company {place} cars",
+                f"site:linkedin.com/company {place} motors",
+            ])
+        for term in localized_terms[:6]:
+            queries.extend([
+                f"{term} linkedin",
+                f"site:linkedin.com/company {term}",
+            ])
         for term in apify_first_terms[:18]:
             for place in markets[:12]:
                 queries.append(f"{place} {term}")
@@ -10387,6 +10422,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             f"Apify 返回 {social_search_stats['apifyResults']} 条，"
             f"其中 {social_search_stats['profileResults']} 条可识别为账号主页，"
             f"最终 {social_search_stats['acceptedResults']} 条通过地区与汽车业务核验。"
+            "这表示本轮源头没有返回可用账号，并不是线索已被客户池过滤；建议换 Instagram/LinkedIn，或先用综合搜索找到官网后再反查社媒。"
         )
     if excluded_brand_bound_dealers:
         notice = (notice + " " if notice else "") + f"已排除 {excluded_brand_bound_dealers} 家已绑定主机厂的单品牌 4S/授权店。"
