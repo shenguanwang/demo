@@ -1263,6 +1263,49 @@ function saveState() {
   scheduleCloudStateSave();
 }
 
+const leadCountryEvidencePatterns = {
+  UAE: /(?:\+971\b|\.ae(?:\b|\/)|\b(?:united arab emirates|uae|dubai|abu dhabi|sharjah|ajman|jebel ali|al ain)\b)/i,
+  "Saudi Arabia": /(?:\+966\b|\.sa(?:\b|\/)|\b(?:saudi arabia|riyadh|jeddah|dammam|khobar)\b)/i,
+  Kazakhstan: /(?:\+7\s*(?:6|7)\d|\.kz(?:\b|\/)|\b(?:kazakhstan|almaty|astana|aktau|shymkent)\b)/i,
+  Russia: /(?:\.ru(?:\b|\/)|\b(?:russia|moscow|st\.? petersburg|kazan|novosibirsk)\b)/i,
+  Qatar: /(?:\+974\b|\.qa(?:\b|\/)|\b(?:qatar|doha|lusail|al rayyan)\b)/i,
+  Kuwait: /(?:\+965\b|\.kw(?:\b|\/)|\b(?:kuwait|salmiya|shuwaikh|hawally)\b)/i,
+  Uzbekistan: /(?:\+998\b|\.uz(?:\b|\/)|\b(?:uzbekistan|tashkent|samarkand|bukhara)\b)/i,
+  Azerbaijan: /(?:\+994\b|\.az(?:\b|\/)|\b(?:azerbaijan|baku|ganja|sumqayit)\b)/i,
+  Nigeria: /(?:\+234\b|\.ng(?:\b|\/)|\b(?:nigeria|lagos|abuja|port harcourt)\b)/i,
+  Ghana: /(?:\+233\b|\.gh(?:\b|\/)|\b(?:ghana|accra|kumasi|tema)\b)/i,
+  Algeria: /(?:\+213\b|\.dz(?:\b|\/)|\b(?:algeria|algerie|algiers|oran|constantine)\b)/i,
+  "Côte d'Ivoire": /(?:\+225\b|\.ci(?:\b|\/)|\b(?:c[oô]te d['’]ivoire|ivory coast|abidjan|yamoussoukro)\b)/i,
+  Egypt: /(?:\+20\b|\.eg(?:\b|\/)|\b(?:egypt|cairo|alexandria|giza)\b)/i,
+  Kyrgyzstan: /(?:\+996\b|\.kg(?:\b|\/)|\b(?:kyrgyzstan|bishkek|osh)\b)/i,
+  Ethiopia: /(?:\+251\b|\.et(?:\b|\/)|\b(?:ethiopia|addis ababa|dire dawa)\b)/i,
+  Oman: /(?:\+968\b|\.om(?:\b|\/)|\b(?:oman|muscat|salalah|sohar)\b)/i,
+  Armenia: /(?:\+374\b|\.am(?:\b|\/)|\b(?:armenia|yerevan|gyumri)\b)/i,
+  China: /(?:\+86\b|\.cn(?:\b|\/)|\b(?:china|beijing|shanghai|guangzhou|shenzhen)\b|中国|北京|上海|广州|深圳)/i
+};
+
+function hasLeadCountryEvidence(raw = {}) {
+  const key = countryKey(raw.country || "");
+  const pattern = leadCountryEvidencePatterns[key];
+  if (!pattern) return false;
+  const evidence = Array.isArray(raw.evidenceSources) ? raw.evidenceSources : [];
+  const aiSnippets = Array.isArray(raw.aiReview?.countryEvidenceSnippets)
+    ? raw.aiReview.countryEvidenceSnippets
+    : [];
+  const value = [
+    raw.customerWebsite,
+    raw.sourceUrl,
+    raw.source,
+    raw.sourceExcerpt,
+    raw.email,
+    raw.phone,
+    raw.whatsapp,
+    ...aiSnippets,
+    ...evidence.flatMap((item) => [item?.url, item?.title, item?.excerpt])
+  ].filter(Boolean).join(" ");
+  return pattern.test(value);
+}
+
 function evaluateLeadScore(text, options = {}) {
   const value = String(text || "").toLowerCase();
   const contactCount = [options.email, options.phone, options.whatsapp].filter(Boolean).length;
@@ -3260,6 +3303,7 @@ function normalizeLead(raw) {
       countryMatch: Boolean(
         raw.aiReview?.targetCountryMatch
         || Number(raw.scoreDimensions?.countryFit || 0) > 0
+        || hasLeadCountryEvidence(raw)
       )
     }
   );
