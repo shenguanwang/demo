@@ -6458,6 +6458,21 @@ def social_search_variants(
     }.get(target_type, company_terms)
     broad_terms = list(dict.fromkeys([*target_priority_terms, *SOCIAL_HIGH_INTENT_TERMS]))
     apify_first_terms = list(dict.fromkeys([*target_priority_terms, *SOCIAL_HIGH_INTENT_TERMS[:18]]))
+    facebook_terms = (
+        "car dealer",
+        "used cars",
+        "used car dealer",
+        "pre owned cars",
+        "imported cars",
+        "tokunbo cars",
+        "car sales",
+        "auto sales",
+        "auto dealer",
+        "motors",
+        "car showroom",
+        "buy and sell cars",
+        "cars marketplace",
+    )
     if platform in {"instagram", "facebook", "tiktok"}:
         site_variants = {
             "instagram": ("instagram.com",),
@@ -6479,6 +6494,20 @@ def social_search_variants(
                 f"{term} {platform}",
                 f"site:{site_variants[0]} {term}",
             ])
+        if platform == "facebook":
+            for place in markets[:10]:
+                for term in facebook_terms:
+                    queries.extend([
+                        f"{place} {term} facebook",
+                        f"site:facebook.com {place} \"{term}\"",
+                    ])
+                queries.extend([
+                    f"site:facebook.com/pages {place} cars",
+                    f"site:facebook.com/groups {place} cars",
+                    f"site:facebook.com/marketplace {place} cars",
+                    f"site:facebook.com {place} \"auto dealer\"",
+                    f"site:facebook.com {place} \"used cars for sale\"",
+                ])
         if platform == "instagram":
             primary_place = markets[0] if markets else market
             compact_terms = [
@@ -9509,7 +9538,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         elif source_mode == "social":
             query_variants = query_variants[:20]
         elif source_mode == platform:
-            query_variants = query_variants[:14]
+            query_variants = query_variants[:24 if platform == "facebook" else 14]
         social_search_stats["queries"] += len(query_variants)
         social_results: list[dict] = []
         executor = ThreadPoolExecutor(max_workers=min(2, max(1, len(query_variants))))
