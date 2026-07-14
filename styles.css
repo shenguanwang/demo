@@ -3315,6 +3315,34 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.review-key-info .region-evidence {
+  grid-column: 1 / -1;
+}
+
+.region-verification-status {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  margin-right: 8px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #fff4d8;
+  color: #8a5f1c;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.region-verification-status.verified {
+  background: #e8f6ee;
+  color: #187846;
+}
+
+.region-verification-status.conflict {
+  background: #fff0ee;
+  color: #b33b30;
+}
+
 .review-key-info dt {
   color: var(--muted);
   font-size: 12px;
@@ -3373,6 +3401,70 @@ textarea {
 
 .review-recommendation .review-ai-result {
   color: #16803c;
+}
+
+.lead-customer-profile {
+  margin: 12px 0;
+  padding: 12px 2px;
+  border-top: 1px solid #e4e9ee;
+  border-bottom: 1px solid #e4e9ee;
+}
+
+.customer-profile-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+}
+
+.customer-profile-head strong {
+  color: #17212b;
+  font-size: 13px;
+}
+
+.customer-profile-head span {
+  color: #16803c;
+  font-size: 10px;
+}
+
+.customer-profile-summary {
+  margin: 0 0 10px;
+  color: #4b5563;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.lead-customer-profile dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 0 20px;
+  margin: 0;
+}
+
+.lead-customer-profile dl > div {
+  display: grid;
+  grid-template-columns: 72px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px solid #eef1f4;
+}
+
+.lead-customer-profile .profile-wide {
+  grid-column: 1 / -1;
+}
+
+.lead-customer-profile dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.lead-customer-profile dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: #27323e;
+  font-size: 11px;
 }
 
 .review-row-number {
@@ -6857,6 +6949,24 @@ td {
 
 :root[data-theme="dark"] .review-recommendation .review-ai-result {
   color: #58d68d;
+}
+
+:root[data-theme="dark"] .lead-customer-profile {
+  border-color: #343b46;
+}
+
+:root[data-theme="dark"] .customer-profile-head strong,
+:root[data-theme="dark"] .lead-customer-profile dd {
+  color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .customer-profile-summary,
+:root[data-theme="dark"] .lead-customer-profile dt {
+  color: #aeb6c2;
+}
+
+:root[data-theme="dark"] .lead-customer-profile dl > div {
+  border-color: #343b46;
 }
 
 :root[data-theme="dark"] .review-card .primary {

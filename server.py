@@ -569,6 +569,12 @@ Chinese vehicle policy:
 - Absence of Chinese EV, Huawei, AITO, HIMA, or HarmonyOS references is never a rejection reason.
 - chinese_nev_evidence and huawei_series_evidence may be true only when explicitly supported by supplied text.
 
+Customer profile policy:
+- Build the customer profile only from supplied public evidence. Never invent purchasing volume, budget, brands,
+  decision authority, or import capability.
+- Use empty strings or "待核实" when evidence is insufficient.
+- likely_needs and risk_notes must be short, practical Chinese phrases.
+
 Decision policy:
 - keep: real eligible automotive business/decision-maker with usable evidence and no country conflict.
 - manual_review: automotive commercial identity is plausible, but entity or target-country evidence is incomplete.
@@ -607,6 +613,17 @@ Return one valid JSON object only. Do not add markdown or commentary.
             "automotive_evidence": ["short supplied snippets proving automotive activity"],
             "commercial_evidence": ["short supplied snippets proving a business or decision-maker identity"],
             "country_evidence_snippets": ["short supplied snippets proving target-country location"],
+            "verified_country": "country explicitly supported by supplied evidence, or empty string",
+            "verified_city": "city explicitly supported by supplied evidence, or empty string",
+            "customer_profile": {
+                "buyer_type": "short Chinese customer type",
+                "business_positioning": "short Chinese market and business positioning",
+                "likely_needs": ["up to four evidence-based likely needs in Chinese"],
+                "purchase_capacity": "one of 高, 中, 低, 待核实",
+                "contact_strategy": "short practical Chinese contact strategy",
+                "risk_notes": ["up to three evidence gaps or risks in Chinese"],
+                "summary": "one concise Chinese customer portrait summary",
+            },
             "evidence": ["up to five most important short supplied evidence snippets"],
         },
     }
@@ -646,6 +663,10 @@ Return one valid JSON object only. Do not add markdown or commentary.
         country_evidence = "none"
     rejection_code = clean_text(str(result.get("rejection_code") or ""))[:60]
     entity_type = clean_text(str(result.get("entity_type") or "unknown"))[:60]
+    raw_profile = result.get("customer_profile") if isinstance(result.get("customer_profile"), dict) else {}
+    purchase_capacity = clean_text(str(raw_profile.get("purchase_capacity") or "待核实"))
+    if purchase_capacity not in {"高", "中", "低", "待核实"}:
+        purchase_capacity = "待核实"
     return {
         "provider": "deepseek",
         "model": get_ai_model("fast"),
@@ -657,6 +678,8 @@ Return one valid JSON object only. Do not add markdown or commentary.
         "rejectionCode": rejection_code,
         "targetCountryMatch": strict_bool("target_country_match"),
         "countryEvidence": country_evidence,
+        "verifiedCountry": clean_text(str(result.get("verified_country") or ""))[:80],
+        "verifiedCity": clean_text(str(result.get("verified_city") or ""))[:80],
         "chineseNevEvidence": strict_bool("chinese_nev_evidence"),
         "huaweiSeriesEvidence": strict_bool("huawei_series_evidence"),
         "reject": decision == "reject" or strict_bool("reject"),
@@ -678,6 +701,23 @@ Return one valid JSON object only. Do not add markdown or commentary.
             for item in (result.get("country_evidence_snippets") or [])
             if clean_text(str(item))
         ][:5],
+        "customerProfile": {
+            "buyerType": clean_text(str(raw_profile.get("buyer_type") or ""))[:80],
+            "businessPositioning": clean_text(str(raw_profile.get("business_positioning") or ""))[:160],
+            "likelyNeeds": [
+                clean_text(str(item))[:120]
+                for item in (raw_profile.get("likely_needs") or [])
+                if clean_text(str(item))
+            ][:4],
+            "purchaseCapacity": purchase_capacity,
+            "contactStrategy": clean_text(str(raw_profile.get("contact_strategy") or ""))[:180],
+            "riskNotes": [
+                clean_text(str(item))[:120]
+                for item in (raw_profile.get("risk_notes") or [])
+                if clean_text(str(item))
+            ][:3],
+            "summary": clean_text(str(raw_profile.get("summary") or ""))[:240],
+        },
         "evidence": [
             clean_text(str(item))[:180]
             for item in (result.get("evidence") or [])

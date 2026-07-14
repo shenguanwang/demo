@@ -1455,6 +1455,104 @@ function assignedCountrySummary(values = []) {
   return `${assigned.slice(0, 2).join("、")} 等 ${assigned.length} 个国家`;
 }
 
+function leadRegionVerification(lead) {
+  const ai = lead.aiReview && typeof lead.aiReview === "object" ? lead.aiReview : {};
+  const target = [lead.country, lead.city].filter(Boolean).join(" · ") || "未指定";
+  const countryEvidence = String(ai.countryEvidence || "none").toLowerCase();
+  const conflict = countryEvidence === "conflict";
+  const mapVerified = /google maps|openstreetmap/i.test(`${lead.origin || ""} ${lead.sourceType || ""}`) && Boolean(lead.country);
+  const evidenceVerified = hasLeadCountryEvidence(lead);
+  const aiVerified = ai.targetCountryMatch === true && countryEvidence === "explicit";
+  const verified = !conflict && (aiVerified || mapVerified || evidenceVerified);
+  const snippets = Array.isArray(ai.countryEvidenceSnippets) ? ai.countryEvidenceSnippets.filter(Boolean) : [];
+  const pattern = leadCountryEvidencePatterns[countryKey(lead.country || "")];
+  const sourceEvidence = (lead.evidenceSources || []).find((item) => pattern?.test([
+    item?.title,
+    item?.excerpt,
+    item?.url
+  ].filter(Boolean).join(" ")));
+  const verifiedLocation = verified
+    ? [ai.verifiedCountry || lead.country, ai.verifiedCity || lead.city].filter(Boolean).join(" · ")
+    : conflict ? "与目标区域冲突" : "尚未获得明确地区证据";
+  const evidence = snippets[0]
+    || (mapVerified ? `${lead.origin || "地图来源"}企业地点数据` : "")
+    || sourceEvidence?.excerpt
+    || sourceEvidence?.title
+    || (evidenceVerified ? "公开网址、电话区号或页面地址与目标区域匹配" : "等待官网、地图地址、当地电话或AI明确证据");
+  return {
+    target,
+    verifiedLocation,
+    evidence,
+    status: conflict ? "conflict" : verified ? "verified" : "pending",
+    statusLabel: conflict ? "地区冲突" : verified ? "已核实" : "待核实"
+  };
+}
+
+function leadCustomerProfile(lead) {
+  const ai = lead.aiReview && typeof lead.aiReview === "object" ? lead.aiReview : {};
+  const profile = ai.customerProfile && typeof ai.customerProfile === "object" ? ai.customerProfile : {};
+  const text = [
+    lead.type,
+    lead.accountType,
+    ...(lead.businessSignals || []),
+    ...(lead.intentSignals || []),
+    lead.sourceExcerpt,
+    ai.businessType,
+    ai.reason
+  ].filter(Boolean).join(" ").toLowerCase();
+  const buyerType = profile.buyerType || ai.businessType || lead.type || lead.accountType || "汽车行业客户";
+  const positioning = profile.businessPositioning
+    || (/luxury|premium|supercar|豪华|高端/.test(text) ? "高端及豪华汽车销售" : "汽车经销、进口或车队业务");
+  const inferredNeeds = [];
+  if (/import|distribut|dealer|进口|分销|经销/.test(text)) inferredNeeds.push("中国新能源车型进口与经销合作");
+  if (/fleet|rental|车队|租赁/.test(text)) inferredNeeds.push("批量采购、车队交付与售后支持");
+  if (/luxury|premium|supercar|豪华|高端/.test(text)) inferredNeeds.push("高端智能新能源车型及差异化配置");
+  if ((lead.recommendedModels || []).length) inferredNeeds.push(`车型方向：${lead.recommendedModels.slice(0, 3).join("、")}`);
+  const likelyNeeds = Array.isArray(profile.likelyNeeds) && profile.likelyNeeds.length
+    ? profile.likelyNeeds.slice(0, 4)
+    : inferredNeeds.slice(0, 4);
+  const businessCapacity = Number(lead.scoreDimensions?.businessCapacity || 0);
+  const purchaseCapacity = profile.purchaseCapacity
+    || (businessCapacity >= 4 ? "中高" : businessCapacity >= 2 ? "中" : "待核实");
+  const contactStrategy = profile.contactStrategy
+    || (lead.contactName || lead.contactRole
+      ? `优先联系${[lead.contactName, lead.contactRole].filter(Boolean).join(" · ")}，发送车型与经销合作资料`
+      : lead.email || lead.phone || lead.whatsapp
+        ? "先通过现有公开联系方式确认采购负责人，再发送车型与报价资料"
+        : "先从官网或公司主页补充采购负责人和有效联系方式");
+  const region = leadRegionVerification(lead);
+  const riskNotes = Array.isArray(profile.riskNotes) && profile.riskNotes.length
+    ? profile.riskNotes.slice(0, 3)
+    : [
+        ...(lead.sourceCoverage?.missingFields || []).slice(0, 2).map((field) => `缺少${field}`),
+        ...(region.status === "verified" ? [] : [region.statusLabel])
+      ];
+  const summary = profile.summary
+    || `${buyerType}，业务定位为${positioning}；当前采购规模与明确采购周期仍需联系后确认。`;
+  return { buyerType, positioning, likelyNeeds, purchaseCapacity, contactStrategy, riskNotes, summary };
+}
+
+function customerProfileHtml(lead) {
+  const profile = leadCustomerProfile(lead);
+  return `
+    <section class="lead-customer-profile">
+      <div class="customer-profile-head">
+        <strong>AI 客户画像</strong>
+        <span>基于公开线索与AI复核生成</span>
+      </div>
+      <p class="customer-profile-summary">${escapeHtml(profile.summary)}</p>
+      <dl>
+        <div><dt>客户类型</dt><dd>${escapeHtml(profile.buyerType)}</dd></div>
+        <div><dt>业务定位</dt><dd>${escapeHtml(profile.positioning)}</dd></div>
+        <div><dt>采购能力</dt><dd>${escapeHtml(profile.purchaseCapacity)}</dd></div>
+        <div><dt>潜在需求</dt><dd>${escapeHtml(profile.likelyNeeds.join("；") || "待核实")}</dd></div>
+        <div class="profile-wide"><dt>联系策略</dt><dd>${escapeHtml(profile.contactStrategy)}</dd></div>
+        <div class="profile-wide"><dt>待核实项</dt><dd>${escapeHtml(profile.riskNotes.join("；") || "暂无明显缺口")}</dd></div>
+      </dl>
+    </section>
+  `;
+}
+
 function renderCountries() {
   const marketCountries = visibleForeignCountries();
   $("#countryGrid").innerHTML = discoveryDisabledForSession()
@@ -2198,6 +2296,7 @@ function renderReview(options = {}) {
     const editId = `${reviewMode}:${lead.id || index}`;
     const isEditing = editingReviewLeadId === editId;
     const isDetailOpen = openReviewDetailKey === editId;
+    const regionVerification = leadRegionVerification(lead);
     return `
     <article class="review-card">
       <div class="review-title-row">
@@ -2230,6 +2329,18 @@ function renderReview(options = {}) {
       </div>
       <dl class="review-key-info">
         <div>
+          <dt>目标区域</dt>
+          <dd>${escapeHtml(regionVerification.target)}</dd>
+        </div>
+        <div>
+          <dt>区域核实</dt>
+          <dd><span class="region-verification-status ${regionVerification.status}">${escapeHtml(regionVerification.statusLabel)}</span>${escapeHtml(regionVerification.verifiedLocation)}</dd>
+        </div>
+        <div class="region-evidence">
+          <dt>区域依据</dt>
+          <dd>${escapeHtml(regionVerification.evidence)}</dd>
+        </div>
+        <div>
           <dt>客户官网</dt>
           <dd>${safeHttpUrl(lead.customerWebsite) ? `<a href="${escapeHtml(safeHttpUrl(lead.customerWebsite))}" target="_blank" rel="noopener noreferrer">${escapeHtml(lead.customerWebsite)}</a>` : escapeHtml(lead.customerWebsite || "未发现")}</dd>
         </div>
@@ -2259,6 +2370,7 @@ function renderReview(options = {}) {
         </div>
       </dl>
       ${reviewRecommendationHtml(lead)}
+      ${customerProfileHtml(lead)}
       ${(lead.reviewNotes || (lead.attachments || []).length) ? `
         <section class="lead-review-notes">
           ${lead.reviewNotes ? `<p><strong>人工备注</strong>${escapeHtml(lead.reviewNotes)}</p>` : ""}
@@ -2289,10 +2401,6 @@ function renderReview(options = {}) {
           ${Number(lead.scoreDimensions?.penalty || 0) < 0
             ? `<span class="penalty">风险扣分 <strong>${escapeHtml(lead.scoreDimensions.penalty)}</strong></span>`
             : ""}
-        </div>
-        <div>${(lead.scoreBreakdown || []).length
-          ? lead.scoreBreakdown.map((item) => `<b class="${Number(item.points) < 0 ? "negative" : ""}">${escapeHtml(item.label)} ${Number(item.points) > 0 ? "+" : ""}${escapeHtml(item.points)}</b>`).join("")
-          : `<b>${escapeHtml(lead.scoreBasis || "等待官网核验")}</b>`}
         </div>
         ${reviewMode === "pending" ? `<div class="score-calibration">
           <span>人工校准</span>
