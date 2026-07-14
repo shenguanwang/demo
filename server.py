@@ -854,6 +854,7 @@ def apify_usage_payload() -> dict:
     limits = limit_data.get("limits") if isinstance(limit_data.get("limits"), dict) else {}
     current = limit_data.get("current") if isinstance(limit_data.get("current"), dict) else {}
     cycle = usage.get("usageCycle") if isinstance(usage.get("usageCycle"), dict) else {}
+    account_id = str(account.get("id") or account.get("username") or "")
     used_usd = round(float(usage.get("totalUsageCreditsUsdAfterVolumeDiscount") or current.get("monthlyUsageUsd") or 0), 6)
     included_usd = round(float(plan.get("monthlyUsageCreditsUsd") or 0), 6)
     max_usage_usd = round(float(limits.get("maxMonthlyUsageUsd") or 0), 6)
@@ -866,7 +867,8 @@ def apify_usage_payload() -> dict:
         settings = load_admin_settings_file()
         previous = settings.get(APIFY_USAGE_SNAPSHOT_KEY)
         previous = previous if isinstance(previous, dict) else {}
-        same_cycle = bool(cycle_start and previous.get("cycleStartAt") == cycle_start)
+        same_account = bool(account_id and previous.get("accountId") == account_id)
+        same_cycle = bool(same_account and cycle_start and previous.get("cycleStartAt") == cycle_start)
         has_previous_snapshot = same_cycle and bool(previous.get("checkedAt"))
         previous_used = float(previous.get("usedUsd") or 0) if has_previous_snapshot else used_usd
         delta_usd = round(max(0.0, used_usd - previous_used), 6)
@@ -879,6 +881,8 @@ def apify_usage_payload() -> dict:
                 "remainingCreditsUsd": remaining_credits_usd,
             }][-20:]
         settings[APIFY_USAGE_SNAPSHOT_KEY] = {
+            "accountId": account_id,
+            "username": str(account.get("username") or ""),
             "cycleStartAt": cycle_start,
             "cycleEndAt": cycle_end,
             "checkedAt": checked_at,
