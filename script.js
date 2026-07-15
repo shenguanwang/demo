@@ -2339,12 +2339,10 @@ function renderReview(options = {}) {
             <h3>${escapeHtml(lead.company)}</h3>
             ${reviewAiResultHtml(lead)}
           </div>
-          <p>${escapeHtml(lead.researchSummary || "当前只有原始发现来源，请先执行全网补全。")}</p>
+          <p>${escapeHtml(lead.researchSummary || "当前仅有原始发现来源，等待系统自动核验。")}</p>
         </div>
         <div class="review-title-side">
-          ${reviewMode === "pending" ? `<button class="research-button" type="button" data-research-index="${index}">
-            ${lead.researching ? "正在检索…" : lead.researchAt ? "重新全网核验" : "全网补全信息"}
-          </button>` : `<span class="review-approved-status">${reviewMode === "approved" ? "已进入客户池" : "已拒绝，保留为历史记录"}</span>`}
+          ${reviewMode === "pending" ? "" : `<span class="review-approved-status">${reviewMode === "approved" ? "已进入客户池" : "已拒绝，保留为历史记录"}</span>`}
         </div>
       </div>
       <div class="review-decision">
@@ -2798,7 +2796,7 @@ function renderReviewDetailContent(lead) {
           `).join("") : `
             <div class="social-empty">
               <strong>暂未识别到公开社媒账号</strong>
-              <p>点击“全网补全信息”后，系统会检索公司官方账号和公开个人决策人账号。</p>
+              <p>这里展示系统已经采集到的公司官方账号和公开个人决策人账号。</p>
             </div>
           `}
         </div>
@@ -2820,7 +2818,7 @@ function renderReviewDetailContent(lead) {
               <small class="source-reliability">${escapeHtml(source.reliabilityReason || "公开来源，建议人工核验")}</small>
               ${safeHttpUrl(source.url) ? `<a href="${escapeHtml(safeHttpUrl(source.url))}" target="_blank" rel="noopener noreferrer">打开来源原文 ↗</a>` : ""}
             </article>
-          `).join("") : `<p class="empty">尚未建立证据链，请点击“全网补全信息”。</p>`}
+          `).join("") : `<p class="empty">尚未建立公开证据链。</p>`}
         </div>
       </div>
       <div class="source-original">
@@ -6723,7 +6721,6 @@ function bindForms() {
     downloadQuoteDocument(lastQuote);
   });
 
-  $("#researchAllLeads").addEventListener("click", researchAllLeads);
 
   $("#crmRows").addEventListener("change", (event) => {
     if (event.target.matches("[data-crm-stage]")) {
