@@ -6486,6 +6486,16 @@ def social_search_variants(
         if platform == "facebook":
             # The Facebook Actor works best with one country-level commercial query.
             queries.append(f"{market} car dealer used cars auto dealership")
+        elif platform == "instagram":
+            # Profile search is strongest with short location + business terms.
+            # Put a country and the main cities first so the Apify plan can use
+            # broad regional coverage without paying for the long web queries.
+            instagram_places = list(dict.fromkeys([market, *markets[:4]]))
+            for place in instagram_places:
+                queries.extend([
+                    f"{place} car dealer",
+                    f"{place} used cars",
+                ])
         for place in markets[:8]:
             queries.extend([
                 f"{place} cars {platform}",
@@ -6626,8 +6636,10 @@ def apify_query_plan(query_variants: list[str], source_mode: str, platform: str 
                 "Car showroom",
                 "Vehicle importer",
             ], 30
-        if source_mode == "social":
-            query_limit, result_limit = 1, 8
+        if platform == "instagram" and source_mode == "instagram":
+            query_limit, result_limit = 8, 30
+        elif source_mode == "social":
+            query_limit, result_limit = (4, 20) if platform == "instagram" else (1, 8)
         else:
             query_limit, result_limit = 1, 10
     elif source_mode in ("all", "combined"):
@@ -6676,10 +6688,13 @@ def apify_search_input(
         "proxy": {"useApifyProxy": True},
     }
     if platform == "instagram":
+        keyword_count = max(1, len([part for part in query.split(",") if part.strip()]))
         payload = {
             "search": query,
             "searchType": "user",
-            "searchLimit": limit,
+            # searchLimit is per keyword. Keep the entire Actor run close to
+            # the requested result cap instead of multiplying spend by terms.
+            "searchLimit": max(1, (limit + keyword_count - 1) // keyword_count),
             "enhanceUserSearchWithFacebookPage": False,
             "liveSearch": False,
         }
@@ -6757,11 +6772,32 @@ def joined_apify_values(item: dict, keys: tuple[str, ...]) -> str:
     return clean_text(" ".join(values))
 
 
+def apify_external_links(item: dict) -> list[str]:
+    links: list[str] = []
+    for key in ("externalUrl", "externalWebsite", "website", "websiteUrl"):
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            links.append(value.strip())
+    external_urls = item.get("externalUrls")
+    if isinstance(external_urls, list):
+        for entry in external_urls:
+            if isinstance(entry, str) and entry.strip():
+                links.append(entry.strip())
+            elif isinstance(entry, dict):
+                value = first_text_value(entry, ("url", "link", "href"))
+                if value:
+                    links.append(value)
+    return list(dict.fromkeys(links))
+
+
 def apify_item_url(platform: str, item: dict) -> str:
-    url = first_text_value(item, (
-        "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "facebookUrl", "channelUrl", "webUrl", "link", "externalUrl", "inputUrl",
+    profile_url_keys = (
+        "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "facebookUrl", "channelUrl", "webUrl", "link", "inputUrl",
         "videoUrl", "linkedinUrl", "linkedin_url", "companyUrl",
-    ))
+    )
+    if platform != "instagram":
+        profile_url_keys = (*profile_url_keys, "externalUrl")
+    url = first_text_value(item, profile_url_keys)
     if not url:
         url = nested_text_value(item, (
             ("authorMeta", "profileUrl"),
@@ -6838,11 +6874,18 @@ def normalize_apify_items(
             company_title = raw_title.split("|", 1)[0].strip()
             if company_title:
                 title = company_title
+        audience_metric = first_text_value(item, (
+            "followersCount", "subscribers", "subscriberCount", "likesCount", "views", "viewCount", "employeeCount", "companySize",
+        ))
         snippet_parts = [
             raw_title if raw_title != title else "",
             first_text_value(item, ("description", "biography", "bio", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName", "industry", "specialties")),
             joined_apify_values(item, ("info", "categories")),
-            joined_apify_values(item, ("address", "phone", "email")),
+            joined_apify_values(item, ("address", "businessAddress", "phone", "email")),
+            joined_apify_values(item, (
+                "searchTerm", "cityName", "addressStreet", "businessEmail", "businessPhoneNumber", "contactPhoneNumber",
+            )),
+            " ".join(apify_external_links(item)),
             nested_text_value(item, (
                 ("authorMeta", "signature"),
                 ("author", "signature"),
@@ -6850,7 +6893,7 @@ def normalize_apify_items(
                 ("company", "industry"),
                 ("about_me", "text"),
             )),
-            first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount", "views", "viewCount", "employeeCount", "companySize")),
+            f"audience {audience_metric}" if audience_metric else "",
             nested_text_value(item, (
                 ("authorMeta", "fans"),
                 ("authorMeta", "heart"),
@@ -6859,15 +6902,19 @@ def normalize_apify_items(
             )),
         ]
         snippet = clean_text(" ".join(part for part in snippet_parts if part))
-        customer_website = normalize_public_url(first_text_value(item, (
+        website_candidates = [first_text_value(item, (
             "website", "websiteUrl", "companyWebsite", "externalWebsite", "homepage",
         )) or nested_text_value(item, (
             ("authorMeta", "bioLink"),
             ("author", "bioLink"),
             ("company", "website"),
-        )))
-        if not is_business_website_url(customer_website):
-            customer_website = ""
+        )), *apify_external_links(item)]
+        customer_website = ""
+        for candidate in website_candidates:
+            normalized_candidate = normalize_public_url(candidate)
+            if is_business_website_url(normalized_candidate):
+                customer_website = normalized_candidate
+                break
         normalized.append({
             "title": title[:180],
             "url": url,
@@ -6879,7 +6926,10 @@ def normalize_apify_items(
             "customer_website": customer_website,
             "structured_business_profile": bool(
                 joined_apify_values(item, ("info", "categories", "address"))
-                or first_text_value(item, ("phone", "email", "website"))
+                or first_text_value(item, (
+                    "phone", "email", "website", "businessCategoryName", "businessEmail", "businessPhoneNumber",
+                ))
+                or item.get("isBusinessAccount") is True
             ),
             "skip_fetch": True,
             "apifyPlatform": platform,
@@ -6906,7 +6956,18 @@ def search_apify_social(
 
     def run_query(query: str | list[str]) -> list[dict]:
         actor = apify_actor_url_part(actor_id)
-        params = urllib.parse.urlencode({"token": token, "timeout": str(APIFY_RUN_TIMEOUT_SECONDS), "memory": "512"})
+        request_params = {"token": token, "timeout": str(APIFY_RUN_TIMEOUT_SECONDS), "memory": "512"}
+        if platform == "instagram":
+            # Recent posts make profile-search responses very large and can
+            # contain malformed records. The dataset endpoint supports field
+            # projection, so retain only evidence used by lead qualification.
+            request_params["fields"] = ",".join((
+                "url", "username", "fullName", "biography", "externalUrl", "externalUrls",
+                "isBusinessAccount", "businessCategoryName", "businessAddress", "followersCount",
+                "postsCount", "searchTerm", "searchSource", "private", "verified", "cityName",
+                "addressStreet", "businessEmail", "businessPhoneNumber",
+            ))
+        params = urllib.parse.urlencode(request_params)
         url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?{params}"
         try:
             items = post_json_value(
