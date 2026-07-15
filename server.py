@@ -127,6 +127,7 @@ PASSWORD_HASH_ITERATIONS = 210_000
 
 ADMIN_CONTROL_KEY = "_controlCenter"
 ADMIN_CONTROL_DEFAULTS = {
+    "schemaVersion": 2,
     "discovery": {
         "adminOnly": False,
         "targetMin": 20,
@@ -1072,6 +1073,7 @@ def normalize_custom_apis(payload_items: list, previous_items: list) -> list[dic
 
 
 def normalize_admin_control(payload: dict | None, previous: dict | None = None) -> dict:
+    previous_version = int(previous.get("schemaVersion") or 1) if isinstance(previous, dict) else 1
     control = merge_nested_settings(ADMIN_CONTROL_DEFAULTS, previous)
     incoming = payload if isinstance(payload, dict) else {}
     for section in ("discovery", "quality", "ai", "data", "security"):
@@ -1086,6 +1088,9 @@ def normalize_admin_control(payload: dict | None, previous: dict | None = None) 
     discovery["fallbackEnabled"] = bool(discovery.get("fallbackEnabled", True))
     allowed_sources = {"google", "osm", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"}
     discovery["globalSources"] = [item for item in discovery.get("globalSources", []) if item in allowed_sources]
+    if previous_version < 2 and "linkedin" not in discovery["globalSources"]:
+        discovery["globalSources"].append("linkedin")
+    control["schemaVersion"] = 2
     caps = discovery.get("sourceCaps") if isinstance(discovery.get("sourceCaps"), dict) else {}
     discovery["sourceCaps"] = {
         source: max(1, min(100, int(caps.get(source) or ADMIN_CONTROL_DEFAULTS["discovery"]["sourceCaps"][source])))
