@@ -1647,6 +1647,11 @@ function reviewRecommendationHtml(lead) {
   `;
 }
 
+function scoreDimensionHtml(label, value, maximum) {
+  const score = Number(value || 0);
+  return `<span class="${score > 0 ? "has-score" : ""}">${escapeHtml(label)} <strong>${escapeHtml(score)}/${escapeHtml(maximum)}</strong></span>`;
+}
+
 function selectedDomesticRegion(value = "") {
   return domesticRegions.find((item) => item.value === value) || domesticRegions[0];
 }
@@ -2410,22 +2415,22 @@ function renderReview(options = {}) {
         <span>评分依据${lead.manualScoreAdjustment ? ` · 人工校准 ${lead.manualScoreAdjustment > 0 ? "+" : ""}${escapeHtml(lead.manualScoreAdjustment)}` : ""}</span>
         <div class="score-dimensions">
           ${Number(lead.scoreModelVersion || 0) >= 8 ? `
-            <span>汽车业务 <strong>${escapeHtml(lead.scoreDimensions?.automotiveFit || 0)}/20</strong></span>
-            <span>地区匹配 <strong>${escapeHtml(lead.scoreDimensions?.countryFit || 0)}/20</strong></span>
-            <span>联系方式 <strong>${escapeHtml(lead.scoreDimensions?.contactCompleteness || 0)}/15</strong></span>
-            <span>官网可信 <strong>${escapeHtml(lead.scoreDimensions?.websiteTrust || 0)}/10</strong></span>
-            <span>中国新能源 <strong>${escapeHtml(lead.scoreDimensions?.chineseNev || 0)}/10</strong></span>
-            <span>华为系列 <strong>${escapeHtml(lead.scoreDimensions?.huaweiFit || 0)}/10</strong></span>
-            <span>进口分销 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/8</strong></span>
-            <span>经营活跃 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/4</strong></span>
-            <span>决策人 <strong>${escapeHtml(lead.scoreDimensions?.decisionMaker || 0)}/3</strong></span>
+            ${scoreDimensionHtml("汽车业务", lead.scoreDimensions?.automotiveFit, 20)}
+            ${scoreDimensionHtml("地区匹配", lead.scoreDimensions?.countryFit, 20)}
+            ${scoreDimensionHtml("联系方式", lead.scoreDimensions?.contactCompleteness, 15)}
+            ${scoreDimensionHtml("官网可信", lead.scoreDimensions?.websiteTrust, 10)}
+            ${scoreDimensionHtml("中国新能源", lead.scoreDimensions?.chineseNev, 10)}
+            ${scoreDimensionHtml("华为系列", lead.scoreDimensions?.huaweiFit, 10)}
+            ${scoreDimensionHtml("进口分销", lead.scoreDimensions?.tradeQualification, 8)}
+            ${scoreDimensionHtml("经营活跃", lead.scoreDimensions?.businessCapacity, 4)}
+            ${scoreDimensionHtml("决策人", lead.scoreDimensions?.decisionMaker, 3)}
           ` : `
-            <span>进出口资质 <strong>${escapeHtml(lead.scoreDimensions?.tradeQualification || 0)}/10</strong></span>
-            <span>客户匹配 <strong>${escapeHtml(lead.scoreDimensions?.customerFit || 0)}/27</strong></span>
-            <span>采购意向 <strong>${escapeHtml(lead.scoreDimensions?.purchaseIntent || 0)}/20</strong></span>
-            <span>经营能力 <strong>${escapeHtml(lead.scoreDimensions?.businessCapacity || 0)}/14</strong></span>
-            <span>车型匹配 <strong>${escapeHtml(lead.scoreDimensions?.modelFit || 0)}/12</strong></span>
-            <span>可触达性 <strong>${escapeHtml(lead.scoreDimensions?.contactability || 0)}/7</strong></span>
+            ${scoreDimensionHtml("进出口资质", lead.scoreDimensions?.tradeQualification, 10)}
+            ${scoreDimensionHtml("客户匹配", lead.scoreDimensions?.customerFit, 27)}
+            ${scoreDimensionHtml("采购意向", lead.scoreDimensions?.purchaseIntent, 20)}
+            ${scoreDimensionHtml("经营能力", lead.scoreDimensions?.businessCapacity, 14)}
+            ${scoreDimensionHtml("车型匹配", lead.scoreDimensions?.modelFit, 12)}
+            ${scoreDimensionHtml("可触达性", lead.scoreDimensions?.contactability, 7)}
           `}
           ${Number(lead.scoreDimensions?.penalty || 0) < 0
             ? `<span class="penalty">风险扣分 <strong>${escapeHtml(lead.scoreDimensions.penalty)}</strong></span>`
