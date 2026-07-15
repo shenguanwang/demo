@@ -912,6 +912,201 @@ def apify_usage_payload() -> dict:
     }
 
 
+def combined_usage_entry(usage: dict, *source_names: str) -> dict:
+    selected = [
+        item
+        for source, item in usage.items()
+        if any(source == name or source.startswith(f"{name}:") for name in source_names)
+    ]
+    return {
+        "calls": sum(int(item.get("calls") or 0) for item in selected),
+        "units": sum(int(item.get("units") or 0) for item in selected),
+        "failures": sum(int(item.get("failures") or 0) for item in selected),
+        "estimatedCostUsd": round(sum(float(item.get("estimatedCostUsd") or 0) for item in selected), 6),
+        "lastCallAt": max((str(item.get("lastCallAt") or "") for item in selected), default=""),
+    }
+
+
+def serpapi_official_usage() -> dict:
+    api_key = get_serpapi_api_key()
+    if not api_key:
+        raise ValueError("SERPAPI_API_KEY 未配置")
+    payload = fetch_json(
+        "https://serpapi.com/account.json?" + urllib.parse.urlencode({"api_key": api_key}),
+        timeout=20,
+    )
+    return {
+        "status": str(payload.get("account_status") or ""),
+        "plan": str(payload.get("plan_name") or payload.get("plan_id") or ""),
+        "used": int(payload.get("this_month_usage") or 0),
+        "limit": int(payload.get("searches_per_month") or 0),
+        "remaining": int(payload.get("total_searches_left") or payload.get("plan_searches_left") or 0),
+        "renewalAt": str(payload.get("plan_renewal_date") or ""),
+        "hourUsed": int(payload.get("this_hour_searches") or 0),
+        "hourLimit": int(payload.get("account_rate_limit_per_hour") or 0),
+    }
+
+
+def hunter_official_usage() -> dict:
+    api_key = get_hunter_api_key()
+    if not api_key:
+        raise ValueError("HUNTER_API_KEY 未配置")
+    payload = fetch_json(
+        "https://api.hunter.io/v2/account?" + urllib.parse.urlencode({"api_key": api_key}),
+        timeout=20,
+    )
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    requests = data.get("requests") if isinstance(data.get("requests"), dict) else {}
+    categories = []
+    for key, value in requests.items():
+        if not isinstance(value, dict):
+            continue
+        categories.append({
+            "key": str(key),
+            "used": int(value.get("used") or 0),
+            "available": int(value.get("available") or 0),
+        })
+    return {
+        "email": str(data.get("email") or ""),
+        "plan": str(data.get("plan_name") or data.get("plan") or ""),
+        "resetAt": str(data.get("reset_date") or ""),
+        "categories": categories,
+    }
+
+
+def deepseek_official_usage() -> dict:
+    api_key = get_deepseek_api_key()
+    if not api_key:
+        raise ValueError("DEEPSEEK_API_KEY 未配置")
+    payload = fetch_json(
+        "https://api.deepseek.com/user/balance",
+        timeout=20,
+        headers={"Authorization": f"Bearer {api_key}"},
+    )
+    balances = []
+    for item in payload.get("balance_infos") or []:
+        if not isinstance(item, dict):
+            continue
+        balances.append({
+            "currency": str(item.get("currency") or ""),
+            "total": str(item.get("total_balance") or "0"),
+            "granted": str(item.get("granted_balance") or "0"),
+            "toppedUp": str(item.get("topped_up_balance") or "0"),
+        })
+    return {"available": bool(payload.get("is_available")), "balances": balances}
+
+
+def pacific_utc_offset_hours(moment: datetime) -> int:
+    year = moment.year
+    march_first = datetime(year, 3, 1, tzinfo=timezone.utc)
+    first_sunday_march = 1 + ((6 - march_first.weekday()) % 7)
+    second_sunday_march = first_sunday_march + 7
+    dst_start = datetime(year, 3, second_sunday_march, 10, tzinfo=timezone.utc)
+    november_first = datetime(year, 11, 1, tzinfo=timezone.utc)
+    first_sunday_november = 1 + ((6 - november_first.weekday()) % 7)
+    dst_end = datetime(year, 11, first_sunday_november, 9, tzinfo=timezone.utc)
+    return -7 if dst_start <= moment < dst_end else -8
+
+
+def next_pacific_midnight_utc(moment: datetime) -> datetime:
+    current_offset = pacific_utc_offset_hours(moment)
+    pacific_now = moment.astimezone(timezone(timedelta(hours=current_offset)))
+    next_date = pacific_now.date() + timedelta(days=1)
+    utc_guess = datetime(next_date.year, next_date.month, next_date.day, 8, tzinfo=timezone.utc)
+    reset_offset = pacific_utc_offset_hours(utc_guess)
+    return datetime(
+        next_date.year,
+        next_date.month,
+        next_date.day,
+        tzinfo=timezone(timedelta(hours=reset_offset)),
+    ).astimezone(timezone.utc)
+
+
+def api_consumption_payload() -> dict:
+    usage = admin_usage_summary()
+    catalog = {item["key"]: item for item in admin_settings_payload().get("catalog", [])}
+    official_fetchers = {
+        "serpapi": (bool(get_serpapi_api_key()), serpapi_official_usage),
+        "hunter": (bool(get_hunter_api_key()), hunter_official_usage),
+        "deepseek": (bool(get_deepseek_api_key()), deepseek_official_usage),
+    }
+    official: dict[str, dict] = {}
+
+    def fetch_provider(provider: str, fetcher) -> tuple[str, dict]:
+        try:
+            return provider, {"ok": True, "data": fetcher()}
+        except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError) as exc:
+            return provider, {"ok": False, "error": clean_text(str(exc))[:240]}
+
+    enabled_fetchers = [(key, fetcher) for key, (configured, fetcher) in official_fetchers.items() if configured]
+    if enabled_fetchers:
+        with ThreadPoolExecutor(max_workers=len(enabled_fetchers)) as executor:
+            futures = [executor.submit(fetch_provider, key, fetcher) for key, fetcher in enabled_fetchers]
+            for future in as_completed(futures):
+                key, value = future.result()
+                official[key] = value
+    for key, (configured, _) in official_fetchers.items():
+        if not configured:
+            official[key] = {"ok": False, "error": "API Key 未配置"}
+
+    now = datetime.now(timezone.utc)
+    youtube_reset = next_pacific_midnight_utc(now)
+    providers = [
+        {
+            "key": "youtube",
+            "label": "YouTube Data API",
+            "configured": bool(catalog.get("YOUTUBE_API_KEY", {}).get("configured")),
+            "tracked": combined_usage_entry(usage, "youtube"),
+            "officialMode": "cloud-console",
+            "officialNote": "API Key 无权读取项目总配额；官方总量需通过 Google Cloud Quotas/Monitoring 查看。",
+            "limit": 100,
+            "limitLabel": "search.list 官方日上限",
+            "resetAt": youtube_reset.isoformat(),
+        },
+        {
+            "key": "google-maps",
+            "label": "Google Maps Platform",
+            "configured": bool(catalog.get("GOOGLE_MAPS_API_KEY", {}).get("configured")),
+            "tracked": combined_usage_entry(usage, "google-maps"),
+            "officialMode": "cloud-monitoring",
+            "officialNote": "API Key 无权读取项目总用量或账单；官方数据需使用 Google Cloud Monitoring。",
+        },
+        {
+            "key": "serpapi",
+            "label": "SerpApi",
+            "configured": bool(catalog.get("SERPAPI_API_KEY", {}).get("configured")),
+            "tracked": combined_usage_entry(usage, "serpapi"),
+            "officialMode": "account-api",
+            "official": official.get("serpapi", {}),
+        },
+        {
+            "key": "hunter",
+            "label": "Hunter",
+            "configured": bool(catalog.get("HUNTER_API_KEY", {}).get("configured")),
+            "tracked": combined_usage_entry(usage, "hunter"),
+            "officialMode": "account-api",
+            "official": official.get("hunter", {}),
+        },
+        {
+            "key": "deepseek",
+            "label": "DeepSeek",
+            "configured": bool(catalog.get("DEEPSEEK_API_KEY", {}).get("configured")),
+            "tracked": combined_usage_entry(usage, "deepseek"),
+            "officialMode": "balance-api",
+            "official": official.get("deepseek", {}),
+        },
+        {
+            "key": "brave",
+            "label": "Brave Search API",
+            "configured": bool(catalog.get("BRAVE_SEARCH_API_KEY", {}).get("configured")),
+            "tracked": combined_usage_entry(usage, "brave"),
+            "officialMode": "dashboard-only",
+            "officialNote": "Brave 官方未提供账户余额接口；这里只显示本工作台真实调用记录。",
+        },
+    ]
+    return {"checkedAt": now.isoformat(), "providers": providers}
+
+
 def normalize_custom_apis(payload_items: list, previous_items: list) -> list[dict]:
     previous_by_id = {
         str(item.get("id")): item for item in previous_items
@@ -3141,7 +3336,13 @@ def list_all_discovery_jobs(limit: int = 200) -> list[dict]:
 
 def admin_usage_summary() -> dict:
     initialize_state_store()
-    start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    china_time = timezone(timedelta(hours=8))
+    start = datetime.now(timezone.utc).astimezone(china_time).replace(
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0,
+    ).astimezone(timezone.utc)
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
@@ -11130,6 +11331,14 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(200, {"ok": True, **apify_usage_payload()})
             except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/api-consumption":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                self.send_json(200, {"ok": True, **api_consumption_payload()})
+            except (OSError, ValueError, RuntimeError, TimeoutError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/admin/operations":
             if not self.require_auth(api=True) or not self.require_admin():

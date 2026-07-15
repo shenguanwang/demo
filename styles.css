@@ -2444,6 +2444,7 @@ textarea {
 @media (max-width: 1180px) {
   .admin-overview-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .apify-usage-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .api-consumption-grid { grid-template-columns: 1fr; }
   .admin-source-policy-grid { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
   .admin-task-row { grid-template-columns: 64px minmax(160px, 1fr) 80px 120px; }
   .admin-task-row small { grid-column: 2 / -1; }
@@ -2452,6 +2453,7 @@ textarea {
 @media (max-width: 720px) {
   .admin-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .apify-usage-grid { grid-template-columns: 1fr; }
+  .api-consumption-metrics { grid-template-columns: 1fr 1fr; }
   .apify-usage-history-row { grid-template-columns: 1fr 1fr; }
   .admin-source-policy-grid,
   .admin-toggle-grid { grid-template-columns: 1fr; }
@@ -2475,6 +2477,76 @@ textarea {
 .admin-api-section {
   display: grid;
   gap: 14px;
+}
+
+.api-consumption-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.api-consumption-card {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfd;
+}
+
+.api-consumption-card.unconfigured {
+  opacity: .7;
+}
+
+.api-consumption-card > header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.api-data-badge {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: #eef1f5;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.api-data-badge.official {
+  background: #e8f7ef;
+  color: #147a42;
+}
+
+.api-consumption-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.api-consumption-metrics div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.api-consumption-metrics span,
+.api-consumption-metrics small,
+.api-consumption-card > p {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.api-consumption-metrics b {
+  overflow-wrap: anywhere;
+  font-size: 15px;
+}
+
+.api-consumption-card > p {
+  margin: 0;
+  line-height: 1.55;
 }
 
 .apify-usage-grid {
@@ -7481,6 +7553,16 @@ td {
 :root[data-theme="dark"] .apify-usage-grid article {
   border-color: #343b46;
   background: #20242b;
+}
+
+:root[data-theme="dark"] .api-consumption-card {
+  border-color: #343b46;
+  background: #20242b;
+}
+
+:root[data-theme="dark"] .api-consumption-metrics b,
+:root[data-theme="dark"] .api-consumption-card > header strong {
+  color: #f4f6f8;
 }
 
 :root[data-theme="dark"] .apify-usage-grid strong,

@@ -654,6 +654,16 @@
             <div><h3>API 配置中心</h3><span id="adminSettingsSummary">正在读取配置…</span></div>
             <button class="ghost compact" id="reloadAdminSettings" type="button">重新读取</button>
           </div>
+          <div class="panel admin-api-section api-consumption-panel">
+            <div class="panel-head">
+              <div><h3>API 真实用量总览</h3><span id="apiConsumptionStatus">正在读取官方额度和工作台调用记录…</span></div>
+              <button class="ghost compact" id="refreshApiConsumption" type="button">刷新全部用量</button>
+            </div>
+            <div class="api-consumption-grid" id="apiConsumptionGrid">
+              <p class="empty">尚未读取 API 用量。</p>
+            </div>
+            <p class="apify-usage-note">“官方账户数据”来自供应商账户接口；“工作台实测”只统计本系统实际发出的请求。Google API Key 本身不能读取整个云项目的账单或总用量。</p>
+          </div>
           <div class="panel admin-api-section apify-usage-panel">
             <div class="panel-head">
               <div><h3>Apify 额度与消耗</h3><span id="apifyUsageStatus">绑定并保存 APIFY_API_TOKEN 后读取官方账单数据</span></div>

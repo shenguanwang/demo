@@ -6462,6 +6462,7 @@ function bindForms() {
 
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
   $("#refreshApifyUsage")?.addEventListener("click", () => loadApifyUsage());
+  $("#refreshApiConsumption")?.addEventListener("click", () => loadApiConsumption());
   $("#reloadAdminOperations")?.addEventListener("click", () => loadAdminOperations());
   $("#saveAdminSettingsTop")?.addEventListener("click", () => $("#adminSettingsForm")?.requestSubmit());
   $("#restartAdminServerButton")?.addEventListener("click", async () => {
@@ -7023,6 +7024,91 @@ function formatApifyDate(value) {
     : "未提供";
 }
 
+function formatApiCount(value) {
+  return new Intl.NumberFormat("zh-CN").format(Number(value || 0));
+}
+
+function apiOfficialMetrics(provider = {}) {
+  const result = provider.official || {};
+  const data = result.data || {};
+  if (!result.ok) return [];
+  if (provider.key === "serpapi") return [
+    ["本月官方用量", formatApiCount(data.used), `${data.plan || "当前套餐"}`],
+    ["官方剩余搜索", formatApiCount(data.remaining), data.limit ? `月额度 ${formatApiCount(data.limit)}` : "官方账户返回"],
+    ["下次续期", formatApifyDate(data.renewalAt), data.hourLimit ? `本小时 ${formatApiCount(data.hourUsed)} / ${formatApiCount(data.hourLimit)}` : "官方账户返回"]
+  ];
+  if (provider.key === "hunter") {
+    const categories = Array.isArray(data.categories) ? data.categories : [];
+    return categories.slice(0, 3).map((item) => [
+      item.key || "API credits",
+      `${formatApiCount(item.used)} 已用`,
+      `${formatApiCount(item.available)} 可用`
+    ]);
+  }
+  if (provider.key === "deepseek") {
+    return (data.balances || []).map((item) => [
+      `${item.currency || "余额"} 可用余额`,
+      `${item.total || "0"} ${item.currency || ""}`.trim(),
+      `赠送 ${item.granted || "0"} · 充值 ${item.toppedUp || "0"}`
+    ]);
+  }
+  return [];
+}
+
+function renderApiConsumption(data = {}) {
+  const grid = $("#apiConsumptionGrid");
+  const status = $("#apiConsumptionStatus");
+  if (!grid || !status) return;
+  const providers = Array.isArray(data.providers) ? data.providers : [];
+  grid.innerHTML = providers.map((provider) => {
+    const tracked = provider.tracked || {};
+    const officialMetrics = apiOfficialMetrics(provider);
+    const officialError = provider.official && !provider.official.ok ? provider.official.error : "";
+    const metrics = [
+      ["工作台今日调用", formatApiCount(tracked.calls), `${formatApiCount(tracked.failures)} 次失败`],
+      ...(provider.limit ? [[provider.limitLabel || "官方上限", formatApiCount(provider.limit), provider.resetAt ? `重置 ${formatApifyDate(provider.resetAt)}` : ""]] : []),
+      ...officialMetrics
+    ];
+    const officialReady = officialMetrics.length > 0;
+    const statusLabel = !provider.configured
+      ? "未配置"
+      : officialReady
+        ? "官方账户数据"
+        : "工作台实测";
+    const note = provider.officialNote || officialError || (officialReady ? "已连接供应商官方账户接口" : "仅统计本工作台请求");
+    return `
+      <article class="api-consumption-card ${provider.configured ? "configured" : "unconfigured"}">
+        <header><strong>${escapeHtml(provider.label || provider.key)}</strong><span class="api-data-badge ${officialReady ? "official" : "tracked"}">${escapeHtml(statusLabel)}</span></header>
+        <div class="api-consumption-metrics">
+          ${metrics.map(([label, value, detail]) => `<div><span>${escapeHtml(label)}</span><b>${escapeHtml(value)}</b><small>${escapeHtml(detail || "")}</small></div>`).join("")}
+        </div>
+        <p>${escapeHtml(note)}</p>
+      </article>
+    `;
+  }).join("") || `<p class="empty">没有可显示的 API 用量。</p>`;
+  status.textContent = `数据更新时间：${formatApifyDate(data.checkedAt)}`;
+}
+
+async function loadApiConsumption() {
+  const grid = $("#apiConsumptionGrid");
+  const status = $("#apiConsumptionStatus");
+  const button = $("#refreshApiConsumption");
+  if (!grid || !status || currentSession?.role !== "admin") return;
+  if (button) button.disabled = true;
+  status.textContent = "正在读取供应商官方账户数据和工作台调用记录…";
+  try {
+    const response = await apiFetch("/api/admin/api-consumption", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    renderApiConsumption(result);
+  } catch (error) {
+    status.textContent = error.message || "API 用量读取失败";
+    grid.innerHTML = `<p class="empty">无法读取 API 用量，请检查网络或 API Key 权限。</p>`;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function renderApifyUsage(data = {}) {
   const grid = $("#apifyUsageGrid");
   const history = $("#apifyUsageHistory");
@@ -7333,6 +7419,7 @@ async function loadAdminSettings() {
     renderAdminSettings(result);
     setAdminSettingsStatus("设置已读取。密钥输入框留空表示保持不变。", "success");
     loadApifyUsage();
+    loadApiConsumption();
   } catch (error) {
     setAdminSettingsStatus(error.message || "设置读取失败。", "error");
   }
@@ -7356,6 +7443,7 @@ async function saveAdminSettings(event) {
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderAdminSettings(result);
     loadApifyUsage();
+    loadApiConsumption();
     loadDiscoverySourceStatus();
     loadAdminOperations();
     if (result.restartRequiredChanged) {
