@@ -117,6 +117,86 @@ const countries = [
     cities: "Yerevan / Gyumri",
     reason: "高加索小型进口车市场，可作为区域代理和平行进口补充市场。",
     targets: "汽车贸易公司、平行进口商、区域代理"
+  },
+  {
+    name: "Bahrain 巴林",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Manama / Riffa / Muharraq",
+    reason: "海湾小型高购买力市场，可与阿联酋、沙特客户网络联动开发。",
+    targets: "豪华车展厅、多品牌进口商、商务车队"
+  },
+  {
+    name: "Jordan 约旦",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Amman / Zarqa / Irbid",
+    reason: "左舵进口车市场，可寻找覆盖本国及周边市场的经销商和贸易商。",
+    targets: "汽车进口商、多品牌经销商、区域贸易商"
+  },
+  {
+    name: "Georgia 格鲁吉亚",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Tbilisi / Batumi / Rustavi",
+    reason: "高加索汽车贸易和转口活跃，适合开发平行进口及区域分销客户。",
+    targets: "平行进口商、汽车贸易公司、区域批发商"
+  },
+  {
+    name: "Vietnam 越南",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Ho Chi Minh City / Hanoi / Da Nang",
+    reason: "东南亚新能源车增长快且采用左舵，但需面对本土品牌和价格竞争。",
+    targets: "新能源车经销商、高端展厅、企业车队"
+  },
+  {
+    name: "Philippines 菲律宾",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Metro Manila / Cebu / Davao",
+    reason: "左舵英语市场，新能源政策逐步推进，适合先开发进口商和车商集团。",
+    targets: "汽车进口商、经销商集团、企业车队"
+  },
+  {
+    name: "Mexico 墨西哥",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Mexico City / Monterrey / Guadalajara",
+    reason: "拉美大型汽车市场，中国新能源车增长快，适合寻找全国及区域经销网络。",
+    targets: "汽车进口商、经销商集团、新能源车展厅"
+  },
+  {
+    name: "Brazil 巴西",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "São Paulo / Rio de Janeiro / Brasília",
+    reason: "拉美最大汽车市场之一，插混和中国品牌接受度提升，但需提前核算税费与认证。",
+    targets: "大型经销集团、汽车进口商、企业车队"
+  },
+  {
+    name: "Chile 智利",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Santiago / Valparaíso / Concepción",
+    reason: "进口车型市场开放度较高，可从多品牌经销商和新能源车渠道切入。",
+    targets: "汽车进口商、多品牌经销商、车队采购"
+  },
+  {
+    name: "Colombia 哥伦比亚",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Bogotá / Medellín / Cali",
+    reason: "新能源政策和城市电动化持续推进，适合开发进口商、经销集团和商务车队。",
+    targets: "汽车进口商、经销商集团、商务车队"
+  },
+  {
+    name: "Morocco 摩洛哥",
+    rank: "其他可开发",
+    marketGroup: "other",
+    cities: "Casablanca / Rabat / Tangier",
+    reason: "北非汽车产业和港口条件较好，可作为北非及法语市场的补充入口。",
+    targets: "汽车进口商、经销商集团、区域贸易公司"
   }
 ];
 
@@ -1289,6 +1369,16 @@ const leadCountryEvidencePatterns = {
   Ethiopia: /(?:\+251\b|\.et(?:\b|\/)|\b(?:ethiopia|addis ababa|dire dawa)\b)/i,
   Oman: /(?:\+968\b|\.om(?:\b|\/)|\b(?:oman|muscat|salalah|sohar)\b)/i,
   Armenia: /(?:\+374\b|\.am(?:\b|\/)|\b(?:armenia|yerevan|gyumri)\b)/i,
+  Bahrain: /(?:\+973\b|\.bh(?:\b|\/)|\b(?:bahrain|manama|riffa|muharraq)\b)/i,
+  Jordan: /(?:\+962\b|\.jo(?:\b|\/)|\b(?:jordan|amman|zarqa|irbid)\b)/i,
+  Georgia: /(?:\+995\b|\.ge(?:\b|\/)|\b(?:georgia|tbilisi|batumi|rustavi)\b)/i,
+  Vietnam: /(?:\+84\b|\.vn(?:\b|\/)|\b(?:vietnam|viet nam|hanoi|ho chi minh|da nang)\b)/i,
+  Philippines: /(?:\+63\b|\.ph(?:\b|\/)|\b(?:philippines|manila|cebu|davao)\b)/i,
+  Mexico: /(?:\+52\b|\.mx(?:\b|\/)|\b(?:mexico|monterrey|guadalajara)\b)/i,
+  Brazil: /(?:\+55\b|\.br(?:\b|\/)|\b(?:brazil|brasil|s[aã]o paulo|rio de janeiro|bras[ií]lia)\b)/i,
+  Chile: /(?:\+56\b|\.cl(?:\b|\/)|\b(?:chile|santiago|valpara[ií]so|concepci[oó]n)\b)/i,
+  Colombia: /(?:\+57\b|\.co(?:\b|\/)|\b(?:colombia|bogot[aá]|medell[ií]n|cali)\b)/i,
+  Morocco: /(?:\+212\b|\.ma(?:\b|\/)|\b(?:morocco|maroc|casablanca|rabat|tangier)\b)/i,
   China: /(?:\+86\b|\.cn(?:\b|\/)|\b(?:china|beijing|shanghai|guangzhou|shenzhen)\b|中国|北京|上海|广州|深圳)/i
 };
 
@@ -1568,9 +1658,7 @@ function customerProfileHtml(lead) {
 
 function renderCountries() {
   const marketCountries = visibleForeignCountries();
-  $("#countryGrid").innerHTML = discoveryDisabledForSession()
-    ? `<p class="empty">${escapeHtml(discoveryDisabledReason())}。</p>`
-    : marketCountries.map((country) => `
+  const countryCardHtml = (country) => `
     <article class="country-card" data-country="${escapeHtml(country.name)}" tabindex="0" role="button">
       <div class="country-rank">
         <span class="tag">${country.rank}</span>
@@ -1581,7 +1669,23 @@ function renderCountries() {
       <p><strong>重点客户：</strong>${country.targets}</p>
       <span class="country-action">选择这个市场 →</span>
     </article>
-  `).join("");
+  `;
+  const primaryCountries = marketCountries.filter((country) => country.marketGroup !== "other");
+  const otherCountries = marketCountries.filter((country) => country.marketGroup === "other");
+  $("#countryGrid").innerHTML = discoveryDisabledForSession()
+    ? `<p class="empty">${escapeHtml(discoveryDisabledReason())}。</p>`
+    : [
+      ...primaryCountries.map(countryCardHtml),
+      ...(otherCountries.length ? [`
+        <div class="country-region-heading">
+          <div>
+            <span class="eyebrow">扩展市场</span>
+            <h3>其他可开发区域</h3>
+          </div>
+          <p>优先选择左舵、适合中国出口车型的东南亚、拉美、海湾及北非市场。</p>
+        </div>
+      `, ...otherCountries.map(countryCardHtml)] : [])
+    ].join("");
   const select = $("#finderCountry");
   const current = select.value;
   const selectCountries = marketCountries.length ? marketCountries : countries;
@@ -1589,9 +1693,13 @@ function renderCountries() {
     select.innerHTML = `<option value="">${escapeHtml(discoveryDisabledReason())}</option>`;
     select.disabled = true;
   } else {
-  select.innerHTML = selectCountries.map((country) =>
-    `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`
-  ).join("");
+  const selectPrimaryCountries = selectCountries.filter((country) => country.marketGroup !== "other");
+  const selectOtherCountries = selectCountries.filter((country) => country.marketGroup === "other");
+  const optionHtml = (country) => `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`;
+  select.innerHTML = `
+    <optgroup label="重点目标国家">${selectPrimaryCountries.map(optionHtml).join("")}</optgroup>
+    ${selectOtherCountries.length ? `<optgroup label="其他可开发区域">${selectOtherCountries.map(optionHtml).join("")}</optgroup>` : ""}
+  `;
   if (selectCountries.some((country) => country.name === current)) {
     select.value = current;
   } else if (selectCountries[0]) {
@@ -3997,7 +4105,17 @@ function countrySearchCities(country, options = {}) {
     Qatar: ["Doha"],
     Kuwait: ["Kuwait City", "Shuwaikh", "Hawalli"],
     Uzbekistan: ["Tashkent"],
-    Azerbaijan: ["Baku"]
+    Azerbaijan: ["Baku"],
+    Bahrain: ["Manama", "Riffa", "Muharraq"],
+    Jordan: ["Amman", "Zarqa", "Irbid"],
+    Georgia: ["Tbilisi", "Batumi", "Rustavi"],
+    Vietnam: ["Ho Chi Minh City", "Hanoi", "Da Nang"],
+    Philippines: ["Metro Manila", "Cebu", "Davao"],
+    Mexico: ["Mexico City", "Monterrey", "Guadalajara"],
+    Brazil: ["São Paulo", "Rio de Janeiro", "Brasília"],
+    Chile: ["Santiago", "Valparaíso", "Concepción"],
+    Colombia: ["Bogotá", "Medellín", "Cali"],
+    Morocco: ["Casablanca", "Rabat", "Tangier"]
   }[key] || [key];
   const fromConfig = configured.split("/").map((city) => city.trim()).filter(Boolean);
   return uniqueKeywords([...fromConfig, ...fallback]).slice(0, 4);
