@@ -6577,7 +6577,7 @@ def social_search_variants(
 
 
 APIFY_SOCIAL_ACTORS = {
-    "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "memo23/facebook-search-scraper"),
+    "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "apify/facebook-search-scraper"),
     "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-search-scraper"),
     "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
     "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", "harvestapi/linkedin-company-search"),
@@ -6591,7 +6591,10 @@ def apify_actor_url_part(actor_id: str) -> str:
 def apify_actor_id(platform: str) -> str:
     env_key, default_actor = APIFY_SOCIAL_ACTORS.get(platform, ("", ""))
     actor_id = runtime_setting(env_key, default_actor) if env_key else ""
-    if platform == "facebook" and actor_id == "apify/facebook-search-scraper":
+    if platform == "facebook" and actor_id == "memo23/facebook-search-scraper":
+        # The legacy search-only Actor returns little beyond names and URLs.
+        # Migrate it to Apify's maintained Actor so location and contact evidence
+        # can be verified before a lead is admitted to review.
         return default_actor
     return actor_id
 
@@ -6615,6 +6618,14 @@ def apify_query_plan(query_variants: list[str], source_mode: str, platform: str 
     if platform in {"instagram", "facebook", "tiktok", "linkedin"}:
         if source_mode in ("all", "combined"):
             return [], 0
+        if platform == "facebook" and source_mode == "facebook":
+            return [
+                "Car dealer",
+                "Used car dealer",
+                "Auto dealer",
+                "Car showroom",
+                "Vehicle importer",
+            ], 30
         if source_mode == "social":
             query_limit, result_limit = 1, 8
         else:
@@ -6640,8 +6651,19 @@ def apify_query_plan(query_variants: list[str], source_mode: str, platform: str 
     return queries, result_limit
 
 
-def apify_search_input(platform: str, query: str, limit: int) -> dict:
-    query = apify_keyword_query(query)
+def apify_search_input(
+    platform: str,
+    query: str | list[str],
+    limit: int,
+    location: str | list[str] = "",
+) -> dict:
+    query_values = query if isinstance(query, list) else [query]
+    queries = []
+    for value in query_values:
+        cleaned = apify_keyword_query(value)
+        if cleaned:
+            queries.append(cleaned)
+    query = queries[0] if queries else ""
     payload = {
         "query": query,
         "search": query,
@@ -6662,13 +6684,12 @@ def apify_search_input(platform: str, query: str, limit: int) -> dict:
             "liveSearch": False,
         }
     elif platform == "facebook":
-        payload.update({
-            "categories": [query],
-            "locations": [],
+        locations = location if isinstance(location, list) else [location]
+        payload = {
+            "categories": queries,
+            "locations": list(dict.fromkeys(value for value in locations if value)),
             "resultsLimit": limit,
-            "searchType": "pages",
-            "maxPages": limit,
-        })
+        }
     elif platform == "tiktok":
         payload.update({
             "searchSection": "",
@@ -6721,9 +6742,24 @@ def nested_text_value(item: dict, paths: tuple[tuple[str, ...], ...]) -> str:
     return ""
 
 
+def joined_apify_values(item: dict, keys: tuple[str, ...]) -> str:
+    values: list[str] = []
+    for key in keys:
+        value = item.get(key)
+        if isinstance(value, str) and value.strip():
+            values.append(value)
+        elif isinstance(value, list):
+            values.extend(str(entry) for entry in value if isinstance(entry, (str, int, float)))
+        elif isinstance(value, dict):
+            nested = first_text_value(value, ("text", "name", "title", "description", "address"))
+            if nested:
+                values.append(nested)
+    return clean_text(" ".join(values))
+
+
 def apify_item_url(platform: str, item: dict) -> str:
     url = first_text_value(item, (
-        "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "channelUrl", "webUrl", "link", "externalUrl", "inputUrl",
+        "url", "profileUrl", "profileURL", "profile_url", "pageUrl", "facebookUrl", "channelUrl", "webUrl", "link", "externalUrl", "inputUrl",
         "videoUrl", "linkedinUrl", "linkedin_url", "companyUrl",
     ))
     if not url:
@@ -6787,7 +6823,7 @@ def normalize_apify_items(
         url = apify_item_url(platform, item)
         if not url or not is_valid_http_url(url):
             continue
-        title = first_text_value(item, (
+        raw_title = first_text_value(item, (
             "name", "title", "fullName", "username", "userName", "channelName", "pageName", "displayName",
             "authorName", "authorUserName", "screenName", "companyName",
         )) or nested_text_value(item, (
@@ -6797,13 +6833,22 @@ def normalize_apify_items(
             ("author", "uniqueId"),
             ("company", "name"),
         )) or safe_urlparse(url).path.strip("/").replace("/", " ")
+        title = raw_title
+        if platform == "facebook" and "|" in raw_title:
+            company_title = raw_title.split("|", 1)[0].strip()
+            if company_title:
+                title = company_title
         snippet_parts = [
+            raw_title if raw_title != title else "",
             first_text_value(item, ("description", "biography", "bio", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName", "industry", "specialties")),
+            joined_apify_values(item, ("info", "categories")),
+            joined_apify_values(item, ("address", "phone", "email")),
             nested_text_value(item, (
                 ("authorMeta", "signature"),
                 ("author", "signature"),
                 ("company", "description"),
                 ("company", "industry"),
+                ("about_me", "text"),
             )),
             first_text_value(item, ("followersCount", "subscribers", "subscriberCount", "likesCount", "views", "viewCount", "employeeCount", "companySize")),
             nested_text_value(item, (
@@ -6832,6 +6877,10 @@ def normalize_apify_items(
             "source_type": f"{source_type} · Apify",
             "source_url": url,
             "customer_website": customer_website,
+            "structured_business_profile": bool(
+                joined_apify_values(item, ("info", "categories", "address"))
+                or first_text_value(item, ("phone", "email", "website"))
+            ),
             "skip_fetch": True,
             "apifyPlatform": platform,
         })
@@ -6846,6 +6895,7 @@ def search_apify_social(
     origin: str,
     source_type: str,
     limit: int = 8,
+    location: str | list[str] = "",
 ) -> list[dict]:
     token = get_apify_api_token()
     actor_id = apify_actor_id(platform)
@@ -6854,24 +6904,26 @@ def search_apify_social(
     results: list[dict] = []
     seen: set[str] = set()
 
-    def run_query(query: str) -> list[dict]:
+    def run_query(query: str | list[str]) -> list[dict]:
         actor = apify_actor_url_part(actor_id)
         params = urllib.parse.urlencode({"token": token, "timeout": str(APIFY_RUN_TIMEOUT_SECONDS), "memory": "512"})
         url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?{params}"
         try:
             items = post_json_value(
                 url,
-                apify_search_input(platform, query, min(10, limit)),
+                apify_search_input(platform, query, limit, location),
                 timeout=APIFY_RUN_TIMEOUT_SECONDS + 10,
             )
         except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
             record_api_usage(f"apify:{platform}", False, detail=actor_id)
             return []
         record_api_usage(f"apify:{platform}", True, detail=actor_id)
-        return normalize_apify_items(platform, items, query, origin, source_type, limit)
+        query_label = ", ".join(query) if isinstance(query, list) else query
+        return normalize_apify_items(platform, items, query_label, origin, source_type, limit)
 
     executor = ThreadPoolExecutor(max_workers=1)
-    futures = [executor.submit(run_query, query) for query in queries]
+    actor_queries: list[str | list[str]] = [queries] if platform == "facebook" else queries
+    futures = [executor.submit(run_query, query) for query in actor_queries]
     try:
         for future in as_completed(futures, timeout=APIFY_RUN_TIMEOUT_SECONDS + 15):
             if len(results) >= limit:
@@ -8864,7 +8916,7 @@ def lead_opportunity_score(
         set_dimension("contactCompleteness", "已核验至少一种公开商业联系方式", 5)
 
     if has_official_website:
-        set_dimension("websiteTrust", "存在可核验的企业官网", 10)
+        set_dimension("websiteTrust", "存在可核验的企业官网或结构化商业主页", 10)
 
     qualification_terms = (
         "import license", "import licence", "export license", "export licence",
@@ -9582,6 +9634,10 @@ def discover(params: dict[str, list[str]]) -> dict:
                     origin,
                     source_type,
                     limit=apify_result_limit,
+                    location=list(dict.fromkeys([
+                        country_meta.get("location") or market,
+                        *cities[:4],
+                    ])),
                 )
             except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                 apify_results = []
@@ -10291,7 +10347,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             scoring_text = f"{scoring_text} Huawei AITO HIMA HarmonyOS"
         score, score_breakdown, score_dimensions, score_tier = lead_opportunity_score(
             scoring_text,
-            bool(customer_website),
+            bool(customer_website or item.get("structured_business_profile")),
             contactable,
             int(item.get("google_reviews") or 0),
             requested_model=model,
