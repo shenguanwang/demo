@@ -133,7 +133,7 @@ ADMIN_CONTROL_DEFAULTS = {
         "targetMax": 30,
         "taskTimeoutMinutes": 25,
         "fallbackEnabled": True,
-        "globalSources": ["google", "osm", "dealer", "youtube"],
+        "globalSources": ["google", "osm", "dealer", "youtube", "facebook", "instagram", "tiktok"],
         "sourceCaps": {
             "google": 30, "osm": 20, "dealer": 40, "instagram": 30,
             "facebook": 30, "tiktok": 30, "youtube": 30, "linkedin": 30,
@@ -6532,6 +6532,15 @@ def social_search_variants(
                     f"{place} car dealer",
                     f"{place} used cars",
                 ])
+        elif platform == "tiktok":
+            # TikTok user search favors short local-business phrases. Lead
+            # with country and major-city terms before the longer web queries.
+            tiktok_places = list(dict.fromkeys([market, *markets[:4]]))
+            for place in tiktok_places:
+                queries.extend([
+                    f"{place} car dealer",
+                    f"{place} used cars",
+                ])
         for place in markets[:8]:
             queries.extend([
                 f"{place} cars {platform}",
@@ -6674,8 +6683,10 @@ def apify_query_plan(query_variants: list[str], source_mode: str, platform: str 
             ], 30
         if platform == "instagram" and source_mode == "instagram":
             query_limit, result_limit = 8, 30
+        elif platform == "tiktok" and source_mode == "tiktok":
+            query_limit, result_limit = 8, 30
         elif source_mode == "social":
-            query_limit, result_limit = (4, 20) if platform == "instagram" else (1, 8)
+            query_limit, result_limit = (4, 20) if platform in {"instagram", "tiktok"} else (1, 8)
         else:
             query_limit, result_limit = 1, 10
     elif source_mode in ("all", "combined"):
@@ -6742,18 +6753,16 @@ def apify_search_input(
             "resultsLimit": limit,
         }
     elif platform == "tiktok":
-        payload.update({
-            "searchSection": "",
-            "searchQueries": [query],
-            "search": query,
-            "maxProfilesPerQuery": limit,
-            "maxItems": limit,
-            "resultsPerPage": min(20, limit),
+        query_count = max(1, len(queries))
+        payload = {
+            "searchSection": "/user",
+            "searchQueries": queries,
+            "maxProfilesPerQuery": max(1, (limit + query_count - 1) // query_count),
             "shouldDownloadVideos": False,
             "shouldDownloadCovers": False,
             "shouldDownloadAvatars": False,
             "shouldDownloadSubtitles": False,
-        })
+        }
     elif platform == "linkedin":
         payload.update({
             "searchQuery": query[:300],
@@ -6810,10 +6819,14 @@ def joined_apify_values(item: dict, keys: tuple[str, ...]) -> str:
 
 def apify_external_links(item: dict) -> list[str]:
     links: list[str] = []
-    for key in ("externalUrl", "externalWebsite", "website", "websiteUrl"):
+    for key in ("externalUrl", "externalWebsite", "website", "websiteUrl", "bioLink"):
         value = item.get(key)
         if isinstance(value, str) and value.strip():
             links.append(value.strip())
+        elif isinstance(value, dict):
+            nested = first_text_value(value, ("url", "link", "href"))
+            if nested:
+                links.append(nested)
     external_urls = item.get("externalUrls")
     if isinstance(external_urls, list):
         for entry in external_urls:
@@ -6851,7 +6864,10 @@ def apify_item_url(platform: str, item: dict) -> str:
                 username = first_text_value(profile, ("username", "userName", "handle"))
                 if username:
                     url = f"https://www.instagram.com/{username.lstrip('@')}/"
-    username = first_text_value(item, ("username", "userName", "handle", "screenName", "channelId", "id"))
+    username_keys = ("username", "userName", "handle", "screenName", "channelId", "id")
+    if platform == "tiktok":
+        username_keys = ("username", "userName", "handle", "screenName", "name", "channelId", "id")
+    username = first_text_value(item, username_keys)
     if not username:
         username = nested_text_value(item, (
             ("authorMeta", "name"),
@@ -6892,13 +6908,26 @@ def normalize_apify_items(
     for item in dataset_items:
         if not isinstance(item, dict):
             continue
+        if item.get("errorCode"):
+            continue
+        author_meta = item.get("authorMeta") if isinstance(item.get("authorMeta"), dict) else {}
+        if platform == "tiktok" and (
+            item.get("privateAccount") is True
+            or author_meta.get("privateAccount") is True
+        ):
+            continue
         url = apify_item_url(platform, item)
         if not url or not is_valid_http_url(url):
             continue
-        raw_title = first_text_value(item, (
+        title_keys = (
             "name", "title", "fullName", "username", "userName", "channelName", "pageName", "displayName",
             "authorName", "authorUserName", "screenName", "companyName",
-        )) or nested_text_value(item, (
+        )
+        if platform == "tiktok":
+            title_keys = (
+                "nickName", "fullName", "displayName", "name", "username", "userName", "screenName",
+            )
+        raw_title = first_text_value(item, title_keys) or nested_text_value(item, (
             ("authorMeta", "nickName"),
             ("authorMeta", "name"),
             ("author", "nickname"),
@@ -6911,15 +6940,22 @@ def normalize_apify_items(
             if company_title:
                 title = company_title
         audience_metric = first_text_value(item, (
-            "followersCount", "subscribers", "subscriberCount", "likesCount", "views", "viewCount", "employeeCount", "companySize",
+            "followersCount", "fans", "subscribers", "subscriberCount", "likesCount", "views", "viewCount", "employeeCount", "companySize",
         ))
+        nested_audience_metric = nested_text_value(item, (
+            ("authorMeta", "fans"),
+            ("authorMeta", "heart"),
+            ("company", "followersCount"),
+            ("company", "companySize"),
+        ))
+        activity_metric = first_text_value(item, ("video", "videosCount", "postsCount"))
         snippet_parts = [
             raw_title if raw_title != title else "",
-            first_text_value(item, ("description", "biography", "bio", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName", "industry", "specialties")),
+            first_text_value(item, ("description", "biography", "bio", "signature", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName", "industry", "specialties")),
             joined_apify_values(item, ("info", "categories")),
             joined_apify_values(item, ("address", "businessAddress", "phone", "email")),
             joined_apify_values(item, (
-                "searchTerm", "cityName", "addressStreet", "businessEmail", "businessPhoneNumber", "contactPhoneNumber",
+                "searchTerm", "searchQuery", "locationCreated", "cityName", "addressStreet", "businessEmail", "businessPhoneNumber", "contactPhoneNumber",
             )),
             " ".join(apify_external_links(item)),
             nested_text_value(item, (
@@ -6930,16 +6966,12 @@ def normalize_apify_items(
                 ("about_me", "text"),
             )),
             f"audience {audience_metric}" if audience_metric else "",
-            nested_text_value(item, (
-                ("authorMeta", "fans"),
-                ("authorMeta", "heart"),
-                ("company", "followersCount"),
-                ("company", "companySize"),
-            )),
+            f"audience {nested_audience_metric}" if nested_audience_metric else "",
+            f"videos {activity_metric}" if activity_metric else "",
         ]
         snippet = clean_text(" ".join(part for part in snippet_parts if part))
         website_candidates = [first_text_value(item, (
-            "website", "websiteUrl", "companyWebsite", "externalWebsite", "homepage",
+            "website", "websiteUrl", "companyWebsite", "externalWebsite", "homepage", "bioLink",
         )) or nested_text_value(item, (
             ("authorMeta", "bioLink"),
             ("author", "bioLink"),
@@ -7083,6 +7115,11 @@ def search_apify_social(
                 "postsCount", "searchTerm", "searchSource", "private", "verified", "cityName",
                 "addressStreet", "businessEmail", "businessPhoneNumber",
             )
+        elif platform == "tiktok":
+            fields = (
+                "name", "nickName", "username", "signature", "bioLink", "fans", "video",
+                "privateAccount", "ttSeller", "verified", "id", "searchQuery", "authorMeta",
+            )
         try:
             items, run_status = run_apify_actor_dataset(
                 actor_id,
@@ -7100,7 +7137,7 @@ def search_apify_social(
         return normalize_apify_items(platform, items, query_label, origin, source_type, limit)
 
     executor = ThreadPoolExecutor(max_workers=1)
-    actor_queries: list[str | list[str]] = [queries] if platform == "facebook" else queries
+    actor_queries: list[str | list[str]] = [queries] if platform in {"facebook", "tiktok"} else queries
     futures = [executor.submit(run_query, query) for query in actor_queries]
     try:
         for future in as_completed(futures, timeout=APIFY_RUN_TIMEOUT_SECONDS + 50):
@@ -9871,7 +9908,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             item["origin"] = origin
             item["source_type"] = source_type
             item["source_url"] = item_url
-            item["customer_website"] = ""
+            item.setdefault("customer_website", "")
             item["skip_fetch"] = True
             path = safe_urlparse(item_url).path.lower()
             is_person = (
