@@ -128,6 +128,7 @@ PASSWORD_HASH_ITERATIONS = 210_000
 ADMIN_CONTROL_KEY = "_controlCenter"
 ADMIN_CONTROL_DEFAULTS = {
     "discovery": {
+        "adminOnly": False,
         "targetMin": 20,
         "targetMax": 30,
         "taskTimeoutMinutes": 12,
@@ -964,6 +965,7 @@ def normalize_admin_control(payload: dict | None, previous: dict | None = None) 
             control[section].update(incoming[section])
 
     discovery = control["discovery"]
+    discovery["adminOnly"] = bool(discovery.get("adminOnly", False))
     discovery["targetMin"] = max(1, min(100, int(discovery.get("targetMin") or 20)))
     discovery["targetMax"] = max(discovery["targetMin"], min(120, int(discovery.get("targetMax") or 30)))
     discovery["taskTimeoutMinutes"] = max(3, min(60, int(discovery.get("taskTimeoutMinutes") or 12)))
@@ -2466,6 +2468,8 @@ def assigned_country_matches(assigned: list[str], country: str) -> bool:
 def ensure_user_can_access_country(user: dict, country: str) -> None:
     if not user or user.get("role") == "admin":
         return
+    if bool(control_value("discovery", "adminOnly", False)):
+        raise PermissionError("管理员已禁止普通账户使用一键获客功能")
     assigned = normalize_assigned_countries(user.get("assignedCountries") or user.get("assigned_countries"))
     if ASSIGNED_COUNTRY_NONE in assigned:
         raise PermissionError("该账号未开通自动找客户功能")
@@ -10742,6 +10746,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "username": user.get("username", "") if user else "",
                     "role": user.get("role", "") if user else "",
                     "assignedCountries": user.get("assignedCountries", []) if user else [],
+                    "discoveryAdminOnly": bool(control_value("discovery", "adminOnly", False)),
                 },
             )
             return

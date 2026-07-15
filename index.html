@@ -6,7 +6,7 @@
   <title>华为系新能源汽车海外获客工作台</title>
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
-  <link rel="stylesheet" href="./styles.css?v=20260714-crm-contact-colors">
+  <link rel="stylesheet" href="./styles.css?v=20260715-admin-only-discovery">
 </head>
 <body>
   <aside class="sidebar">
@@ -599,6 +599,7 @@
           <div class="panel admin-api-section">
             <div class="panel-head"><div><h3>获客任务策略</h3><span>保存后对新任务立即生效</span></div></div>
             <div class="admin-settings-grid admin-control-grid">
+              <label class="admin-check-row"><input type="checkbox" data-control-path="discovery.adminOnly">仅管理员允许一键获客</label>
               <label>最低合格线索数<input type="number" min="1" max="100" data-control-path="discovery.targetMin"></label>
               <label>最多合格线索数<input type="number" min="1" max="120" data-control-path="discovery.targetMax"></label>
               <label>任务超时（分钟）<input type="number" min="3" max="60" data-control-path="discovery.taskTimeoutMinutes"></label>
@@ -1219,6 +1220,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260714-crm-contact-colors"></script>
+  <script src="./script.js?v=20260715-admin-only-discovery"></script>
 </body>
 </html>

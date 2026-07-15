@@ -1386,7 +1386,16 @@ function userAssignedCountries() {
 }
 
 function discoveryDisabledForSession() {
-  return currentSession?.role !== "admin" && userAssignedCountries().includes(ASSIGNED_COUNTRY_NONE);
+  if (currentSession?.role === "admin") return false;
+  return Boolean(currentSession?.discoveryAdminOnly)
+    || userAssignedCountries().includes(ASSIGNED_COUNTRY_NONE);
+}
+
+function discoveryDisabledReason() {
+  if (currentSession?.role !== "admin" && currentSession?.discoveryAdminOnly) {
+    return "管理员已禁止普通账户使用一键获客功能";
+  }
+  return "该账号未开通自动找客户功能";
 }
 
 function countryAllowedForSession(country) {
@@ -1560,7 +1569,7 @@ function customerProfileHtml(lead) {
 function renderCountries() {
   const marketCountries = visibleForeignCountries();
   $("#countryGrid").innerHTML = discoveryDisabledForSession()
-    ? `<p class="empty">该账号未开通自动找客户功能。</p>`
+    ? `<p class="empty">${escapeHtml(discoveryDisabledReason())}。</p>`
     : marketCountries.map((country) => `
     <article class="country-card" data-country="${escapeHtml(country.name)}" tabindex="0" role="button">
       <div class="country-rank">
@@ -1577,7 +1586,7 @@ function renderCountries() {
   const current = select.value;
   const selectCountries = marketCountries.length ? marketCountries : countries;
   if (discoveryDisabledForSession()) {
-    select.innerHTML = `<option value="">未开通自动找客户</option>`;
+    select.innerHTML = `<option value="">${escapeHtml(discoveryDisabledReason())}</option>`;
     select.disabled = true;
   } else {
   select.innerHTML = selectCountries.map((country) =>
@@ -1593,7 +1602,7 @@ function renderCountries() {
   const finderSubmit = $("#finderForm button[type='submit']");
   if (finderSubmit) {
     finderSubmit.disabled = discoveryDisabledForSession();
-    finderSubmit.title = discoveryDisabledForSession() ? "该账号未开通自动找客户功能" : "";
+    finderSubmit.title = discoveryDisabledForSession() ? discoveryDisabledReason() : "";
   }
   const domesticSelect = $("#finderDomesticRegion");
   if (domesticSelect) {
@@ -5866,7 +5875,7 @@ function bindForms() {
   $("#finderForm").addEventListener("submit", (event) => {
     event.preventDefault();
     if (discoveryDisabledForSession()) {
-      window.alert("该账号未开通自动找客户功能。");
+      window.alert(`${discoveryDisabledReason()}。`);
       return;
     }
     const activeCount = activeDiscoveryJobs().length;
