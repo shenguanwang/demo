@@ -188,7 +188,7 @@ ADMIN_SETTING_DEFINITIONS = {
     "SERPAPI_API_KEY": {"type": "secret", "label": "SerpApi API Key", "group": "search", "status": "active", "use": "Google Search and Google Maps result enrichment"},
     "HUNTER_API_KEY": {"type": "secret", "label": "Hunter.io API Key", "group": "email", "status": "active", "use": "Email candidates by company domain"},
     "APIFY_API_TOKEN": {"type": "secret", "label": "Apify API Token", "group": "social", "status": "active", "use": "Apify Actors for social and directory discovery"},
-    "APIFY_FACEBOOK_ACTOR_ID": {"type": "text", "label": "Apify Facebook Actor ID", "group": "social", "status": "reserved", "use": "Override Facebook Actor, for example apify/facebook-pages-scraper"},
+    "APIFY_FACEBOOK_ACTOR_ID": {"type": "text", "label": "Apify Facebook Actor ID", "group": "social", "status": "reserved", "use": "Override Facebook Actor, for example memo23/facebook-search-scraper"},
     "APIFY_INSTAGRAM_ACTOR_ID": {"type": "text", "label": "Apify Instagram Actor ID", "group": "social", "status": "reserved", "use": "Override Instagram Actor, for example apify/instagram-search-scraper"},
     "APIFY_TIKTOK_ACTOR_ID": {"type": "text", "label": "Apify TikTok Actor ID", "group": "social", "status": "reserved", "use": "Override TikTok Actor, for example clockworks/tiktok-scraper"},
     "APIFY_LINKEDIN_ACTOR_ID": {"type": "text", "label": "Apify LinkedIn Actor ID", "group": "social", "status": "reserved", "use": "Override LinkedIn Actor, for example harvestapi/linkedin-company-search"},
@@ -6574,7 +6574,7 @@ def social_search_variants(
 
 
 APIFY_SOCIAL_ACTORS = {
-    "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "apify/facebook-search-scraper"),
+    "facebook": ("APIFY_FACEBOOK_ACTOR_ID", "memo23/facebook-search-scraper"),
     "instagram": ("APIFY_INSTAGRAM_ACTOR_ID", "apify/instagram-search-scraper"),
     "tiktok": ("APIFY_TIKTOK_ACTOR_ID", "clockworks/tiktok-scraper"),
     "linkedin": ("APIFY_LINKEDIN_ACTOR_ID", "harvestapi/linkedin-company-search"),
@@ -6587,7 +6587,10 @@ def apify_actor_url_part(actor_id: str) -> str:
 
 def apify_actor_id(platform: str) -> str:
     env_key, default_actor = APIFY_SOCIAL_ACTORS.get(platform, ("", ""))
-    return runtime_setting(env_key, default_actor) if env_key else ""
+    actor_id = runtime_setting(env_key, default_actor) if env_key else ""
+    if platform == "facebook" and actor_id == "apify/facebook-search-scraper":
+        return default_actor
+    return actor_id
 
 
 def apify_keyword_query(query: str) -> str:
