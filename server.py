@@ -103,7 +103,7 @@ DISCOVERY_QUALIFIED_TARGET_MAX = 30
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
-APIFY_RUN_TIMEOUT_SECONDS = max(10, min(120, int(bootstrap_setting("APIFY_RUN_TIMEOUT_SECONDS", "25"))))
+APIFY_RUN_TIMEOUT_SECONDS = max(10, min(120, int(bootstrap_setting("APIFY_RUN_TIMEOUT_SECONDS", "120"))))
 APIFY_DISCOVERY_SOURCE_MODES = {"social", "instagram", "facebook", "tiktok", "linkedin"}
 ASSIGNED_COUNTRY_NONE = "__none__"
 DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "480")))
@@ -6483,6 +6483,9 @@ def social_search_variants(
             "facebook": ("facebook.com",),
             "tiktok": ("tiktok.com",),
         }.get(platform, (site,))
+        if platform == "facebook":
+            # The Facebook Actor works best with one country-level commercial query.
+            queries.append(f"{market} car dealer used cars auto dealership")
         for place in markets[:8]:
             queries.extend([
                 f"{place} cars {platform}",
