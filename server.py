@@ -103,7 +103,7 @@ DISCOVERY_QUALIFIED_TARGET_MAX = 30
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
 NETWORK_DEFAULT_TIMEOUT = max(5, int(bootstrap_setting("NETWORK_DEFAULT_TIMEOUT", "12")))
 DISCOVERY_SEARCH_TIMEOUT = max(8, int(os.environ.get("DISCOVERY_SEARCH_TIMEOUT", "18")))
-APIFY_RUN_TIMEOUT_SECONDS = max(10, min(60, int(bootstrap_setting("APIFY_RUN_TIMEOUT_SECONDS", "25"))))
+APIFY_RUN_TIMEOUT_SECONDS = max(10, min(120, int(bootstrap_setting("APIFY_RUN_TIMEOUT_SECONDS", "25"))))
 APIFY_DISCOVERY_SOURCE_MODES = {"social", "instagram", "facebook", "tiktok", "linkedin"}
 ASSIGNED_COUNTRY_NONE = "__none__"
 DISCOVERY_JOB_TIMEOUT_SECONDS = max(300, int(os.environ.get("DISCOVERY_JOB_TIMEOUT_SECONDS", "480")))
@@ -210,7 +210,7 @@ ADMIN_SETTING_DEFINITIONS = {
     "PUBLIC_BASE_URL": {"type": "url", "label": "公开访问地址", "group": "runtime", "status": "active", "use": "回调/公开链接"},
     "DISCOVERY_MAX_CONCURRENCY": {"type": "int", "label": "获客并发数", "group": "runtime", "status": "active", "use": "后台任务并发", "min": 1, "max": 8},
     "NETWORK_DEFAULT_TIMEOUT": {"type": "int", "label": "网络超时秒数", "group": "runtime", "status": "active", "use": "外部接口请求超时", "min": 5, "max": 60},
-    "APIFY_RUN_TIMEOUT_SECONDS": {"type": "int", "label": "Apify 单次超时秒数", "group": "social", "status": "active", "use": "限制单个 Apify Actor 空跑时间", "min": 10, "max": 60},
+    "APIFY_RUN_TIMEOUT_SECONDS": {"type": "int", "label": "Apify 单次超时秒数", "group": "social", "status": "active", "use": "限制单个 Apify Actor 空跑时间", "min": 10, "max": 120},
 }
 ADMIN_RUNTIME_KEYS = {"PUBLIC_BASE_URL", "DISCOVERY_MAX_CONCURRENCY", "NETWORK_DEFAULT_TIMEOUT", "APIFY_RUN_TIMEOUT_SECONDS"}
 ADMIN_CUSTOM_APIS_KEY = "_customApis"
