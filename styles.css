@@ -3238,7 +3238,7 @@ textarea {
   gap: 6px 14px;
 }
 
-.review-title-ai {
+.review-title-row .review-title-ai {
   margin: 0;
   color: #16803c;
   font-size: 12px;
@@ -3246,7 +3246,7 @@ textarea {
   text-align: left;
 }
 
-.review-title-ai strong {
+.review-title-row .review-title-ai strong {
   color: inherit;
 }
 
@@ -7210,7 +7210,7 @@ td {
   color: #58d68d;
 }
 
-:root[data-theme="dark"] .review-title-ai {
+:root[data-theme="dark"] .review-title-row .review-title-ai {
   color: #58d68d;
 }
 
