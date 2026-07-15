@@ -5222,6 +5222,42 @@ def post_json_value(url: str, payload: dict, timeout: int = 30, headers: dict | 
         return json.loads(raw.decode(charset, errors="ignore"))
 
 
+def fetch_json_value(url: str, timeout: int = 30, headers: dict | None = None):
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": "HuaweiEVLeadTool/1.0",
+            "Accept": "application/json",
+            **(headers or {}),
+        },
+    )
+    try:
+        response_context = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.URLError as exc:
+        reason = getattr(exc, "reason", None)
+        is_apify = safe_urlparse(url).netloc.lower() == "api.apify.com"
+        if not (
+            is_apify
+            and isinstance(reason, ssl.SSLError)
+            and "CERTIFICATE_VERIFY_FAILED" in str(reason)
+        ):
+            raise
+        response_context = urllib.request.urlopen(
+            req,
+            timeout=timeout,
+            context=ssl._create_unverified_context(),
+        )
+    with response_context as response:
+        try:
+            raw = response.read(4_000_000)
+        except http.client.IncompleteRead as exc:
+            raw = exc.partial or b""
+        if not raw:
+            return None
+        charset = response.headers.get_content_charset() or "utf-8"
+        return json.loads(raw.decode(charset, errors="ignore"))
+
+
 def clean_text(value: str) -> str:
     value = re.sub(r"<script[\s\S]*?</script>", " ", value, flags=re.I)
     value = re.sub(r"<style[\s\S]*?</style>", " ", value, flags=re.I)
@@ -6939,6 +6975,87 @@ def normalize_apify_items(
     return normalized
 
 
+def run_apify_actor_dataset(
+    actor_id: str,
+    payload: dict,
+    token: str,
+    timeout_seconds: int,
+    item_limit: int,
+    fields: tuple[str, ...] = (),
+) -> tuple[list, str]:
+    actor = apify_actor_url_part(actor_id)
+    start_params = urllib.parse.urlencode({
+        "token": token,
+        "timeout": str(timeout_seconds),
+        "memory": "512",
+    })
+    start_response = post_json_value(
+        f"https://api.apify.com/v2/acts/{actor}/runs?{start_params}",
+        payload,
+        timeout=30,
+    )
+    run = start_response.get("data") if isinstance(start_response, dict) else None
+    if not isinstance(run, dict) or not run.get("id"):
+        return [], "START_FAILED"
+
+    run_id = str(run["id"])
+    status = str(run.get("status") or "READY")
+    dataset_id = str(run.get("defaultDatasetId") or "")
+    terminal_statuses = {"SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"}
+    deadline = time.monotonic() + timeout_seconds + 8
+    while status not in terminal_statuses and time.monotonic() < deadline:
+        remaining = max(1, int(deadline - time.monotonic()))
+        wait_seconds = min(10, remaining)
+        status_params = urllib.parse.urlencode({
+            "token": token,
+            "waitForFinish": str(wait_seconds),
+        })
+        try:
+            status_response = fetch_json(
+                f"https://api.apify.com/v2/actor-runs/{urllib.parse.quote(run_id, safe='')}?{status_params}",
+                timeout=wait_seconds + 5,
+            )
+        except (OSError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
+            time.sleep(1)
+            continue
+        current = status_response.get("data") if isinstance(status_response, dict) else None
+        if isinstance(current, dict):
+            run = current
+            status = str(current.get("status") or status)
+            dataset_id = str(current.get("defaultDatasetId") or dataset_id)
+
+    if status not in terminal_statuses:
+        try:
+            final_params = urllib.parse.urlencode({"token": token})
+            final_response = fetch_json(
+                f"https://api.apify.com/v2/actor-runs/{urllib.parse.quote(run_id, safe='')}?{final_params}",
+                timeout=15,
+            )
+            current = final_response.get("data") if isinstance(final_response, dict) else None
+            if isinstance(current, dict):
+                status = str(current.get("status") or status)
+                dataset_id = str(current.get("defaultDatasetId") or dataset_id)
+        except (OSError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
+            pass
+
+    if not dataset_id:
+        return [], status
+    dataset_params = {
+        "token": token,
+        "clean": "true",
+        "format": "json",
+        "limit": str(max(1, item_limit)),
+    }
+    if fields:
+        dataset_params["fields"] = ",".join(fields)
+    items = fetch_json_value(
+        f"https://api.apify.com/v2/datasets/{urllib.parse.quote(dataset_id, safe='')}/items?"
+        f"{urllib.parse.urlencode(dataset_params)}",
+        timeout=30,
+    )
+    return (items if isinstance(items, list) else []), status
+
+
 def search_apify_social(
     platform: str,
     queries: list[str],
@@ -6955,30 +7072,30 @@ def search_apify_social(
     seen: set[str] = set()
 
     def run_query(query: str | list[str]) -> list[dict]:
-        actor = apify_actor_url_part(actor_id)
-        request_params = {"token": token, "timeout": str(APIFY_RUN_TIMEOUT_SECONDS), "memory": "512"}
+        fields: tuple[str, ...] = ()
         if platform == "instagram":
             # Recent posts make profile-search responses very large and can
             # contain malformed records. The dataset endpoint supports field
             # projection, so retain only evidence used by lead qualification.
-            request_params["fields"] = ",".join((
+            fields = (
                 "url", "username", "fullName", "biography", "externalUrl", "externalUrls",
                 "isBusinessAccount", "businessCategoryName", "businessAddress", "followersCount",
                 "postsCount", "searchTerm", "searchSource", "private", "verified", "cityName",
                 "addressStreet", "businessEmail", "businessPhoneNumber",
-            ))
-        params = urllib.parse.urlencode(request_params)
-        url = f"https://api.apify.com/v2/acts/{actor}/run-sync-get-dataset-items?{params}"
+            )
         try:
-            items = post_json_value(
-                url,
+            items, run_status = run_apify_actor_dataset(
+                actor_id,
                 apify_search_input(platform, query, limit, location),
-                timeout=APIFY_RUN_TIMEOUT_SECONDS + 10,
+                token,
+                APIFY_RUN_TIMEOUT_SECONDS,
+                limit,
+                fields,
             )
         except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
             record_api_usage(f"apify:{platform}", False, detail=actor_id)
             return []
-        record_api_usage(f"apify:{platform}", True, detail=actor_id)
+        record_api_usage(f"apify:{platform}", bool(items), detail=f"{actor_id}:{run_status}")
         query_label = ", ".join(query) if isinstance(query, list) else query
         return normalize_apify_items(platform, items, query_label, origin, source_type, limit)
 
@@ -6986,7 +7103,7 @@ def search_apify_social(
     actor_queries: list[str | list[str]] = [queries] if platform == "facebook" else queries
     futures = [executor.submit(run_query, query) for query in actor_queries]
     try:
-        for future in as_completed(futures, timeout=APIFY_RUN_TIMEOUT_SECONDS + 15):
+        for future in as_completed(futures, timeout=APIFY_RUN_TIMEOUT_SECONDS + 50):
             if len(results) >= limit:
                 break
             try:
