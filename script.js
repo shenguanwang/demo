@@ -1615,7 +1615,7 @@ function renderCountries() {
   updateFinderMarketControls();
 }
 
-function reviewRecommendationHtml(lead) {
+function reviewReasonParts(lead) {
   const fullReason = String(lead.contactReason || lead.reason || "").trim();
   const marker = /\s*AI\u590d\u6838\s*[:\uFF1A]\s*/i;
   const markerMatch = fullReason.match(marker);
@@ -1628,10 +1628,21 @@ function reviewRecommendationHtml(lead) {
       aiReason = aiReason || fullReason.slice(markerIndex + markerMatch[0].length).trim();
     }
   }
+  return { recommendation, aiReason };
+}
+
+function reviewAiResultHtml(lead) {
+  const { aiReason } = reviewReasonParts(lead);
+  return aiReason
+    ? `<p class="review-title-ai"><strong>AI复核：</strong><span>${escapeHtml(aiReason)}</span></p>`
+    : "";
+}
+
+function reviewRecommendationHtml(lead) {
+  const { recommendation } = reviewReasonParts(lead);
   return `
     <div class="review-recommendation">
       <p><strong>推荐联系理由：</strong><span>${escapeHtml(recommendation || "等待核验")}</span></p>
-      ${aiReason ? `<p class="review-ai-result"><strong>AI复核：</strong><span>${escapeHtml(aiReason)}</span></p>` : ""}
     </div>
   `;
 }
@@ -2313,7 +2324,7 @@ function renderReview(options = {}) {
     return `
     <article class="review-card">
       <div class="review-title-row">
-        <div>
+        <div class="review-title-main">
           <div class="review-card-meta">
             ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="tag">${escapeHtml(reviewModeLabel(reviewMode))}</span>`}
             <span class="tag">#${rankIndex + 1} · ${lead.researchAt ? "已完成公开信息尽调" : "待全网补全"}</span>
@@ -2322,9 +2333,12 @@ function renderReview(options = {}) {
           <h3>${escapeHtml(lead.company)}</h3>
           <p>${escapeHtml(lead.researchSummary || "当前只有原始发现来源，请先执行全网补全。")}</p>
         </div>
-        ${reviewMode === "pending" ? `<button class="research-button" type="button" data-research-index="${index}">
-          ${lead.researching ? "正在检索…" : lead.researchAt ? "重新全网核验" : "全网补全信息"}
-        </button>` : `<span class="review-approved-status">${reviewMode === "approved" ? "已进入客户池" : "已拒绝，保留为历史记录"}</span>`}
+        <div class="review-title-side">
+          ${reviewAiResultHtml(lead)}
+          ${reviewMode === "pending" ? `<button class="research-button" type="button" data-research-index="${index}">
+            ${lead.researching ? "正在检索…" : lead.researchAt ? "重新全网核验" : "全网补全信息"}
+          </button>` : `<span class="review-approved-status">${reviewMode === "approved" ? "已进入客户池" : "已拒绝，保留为历史记录"}</span>`}
+        </div>
       </div>
       <div class="review-decision">
         <div class="decision-main">

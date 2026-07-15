@@ -3218,6 +3218,33 @@ textarea {
   min-width: 0;
 }
 
+.review-title-main {
+  flex: 1 1 48%;
+}
+
+.review-title-side {
+  display: flex;
+  flex: 0 1 52%;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 14px;
+  min-width: 0;
+}
+
+.review-title-ai {
+  flex: 1 1 auto;
+  max-width: 520px;
+  margin: 5px 0 0;
+  color: #16803c;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: left;
+}
+
+.review-title-ai strong {
+  color: inherit;
+}
+
 .review-title-row .research-button {
   flex: 0 0 auto;
 }
@@ -3477,7 +3504,7 @@ textarea {
 .customer-profile-head {
   display: flex;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   margin-bottom: 7px;
 }
@@ -5539,6 +5566,17 @@ tbody tr:last-child td {
     flex-direction: column;
   }
 
+  .review-title-side {
+    flex: 1 1 auto;
+    width: 100%;
+    max-width: none;
+    justify-content: space-between;
+  }
+
+  .review-title-ai {
+    max-width: none;
+  }
+
   .crm-toolbar {
     grid-template-columns: 1fr 1fr;
   }
@@ -7171,6 +7209,10 @@ td {
 }
 
 :root[data-theme="dark"] .review-recommendation .review-ai-result {
+  color: #58d68d;
+}
+
+:root[data-theme="dark"] .review-title-ai {
   color: #58d68d;
 }
 
