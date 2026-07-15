@@ -131,7 +131,7 @@ ADMIN_CONTROL_DEFAULTS = {
         "adminOnly": False,
         "targetMin": 20,
         "targetMax": 30,
-        "taskTimeoutMinutes": 12,
+        "taskTimeoutMinutes": 25,
         "fallbackEnabled": True,
         "globalSources": ["google", "osm", "dealer", "youtube"],
         "sourceCaps": {
@@ -151,7 +151,7 @@ ADMIN_CONTROL_DEFAULTS = {
         "rejectPersonalAccounts": True,
         "requireContactOrWebsite": False,
         "blockRejectedMemory": True,
-        "minimumAutoImportScore": 50,
+        "minimumAutoImportScore": 40,
         "minimumAiConfidence": 55,
         "scoreWeights": {
             "automotive": 20, "country": 20, "chineseNev": 10, "huawei": 10,
@@ -361,7 +361,7 @@ def discovery_target_max() -> int:
 
 
 def discovery_task_timeout_seconds() -> int:
-    minutes = max(3, min(60, int(control_value("discovery", "taskTimeoutMinutes", 12))))
+    minutes = max(3, min(60, int(control_value("discovery", "taskTimeoutMinutes", 25))))
     return minutes * 60
 
 
@@ -968,7 +968,7 @@ def normalize_admin_control(payload: dict | None, previous: dict | None = None) 
     discovery["adminOnly"] = bool(discovery.get("adminOnly", False))
     discovery["targetMin"] = max(1, min(100, int(discovery.get("targetMin") or 20)))
     discovery["targetMax"] = max(discovery["targetMin"], min(120, int(discovery.get("targetMax") or 30)))
-    discovery["taskTimeoutMinutes"] = max(3, min(60, int(discovery.get("taskTimeoutMinutes") or 12)))
+    discovery["taskTimeoutMinutes"] = max(3, min(60, int(discovery.get("taskTimeoutMinutes") or 25)))
     discovery["fallbackEnabled"] = bool(discovery.get("fallbackEnabled", True))
     allowed_sources = {"google", "osm", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"}
     discovery["globalSources"] = [item for item in discovery.get("globalSources", []) if item in allowed_sources]
