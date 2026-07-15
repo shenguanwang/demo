@@ -6581,7 +6581,7 @@ function bindForms() {
   $("#reloadAdminSettings")?.addEventListener("click", () => loadAdminSettings());
   $("#refreshApifyUsage")?.addEventListener("click", () => loadApifyUsage());
   $("#refreshApiConsumption")?.addEventListener("click", () => loadApiConsumption());
-  $("#reloadAdminOperations")?.addEventListener("click", () => loadAdminOperations());
+  $("#reloadAdminOperations")?.addEventListener("click", () => loadAdminOperations({ feedback: true }));
   $("#saveAdminSettingsTop")?.addEventListener("click", () => $("#adminSettingsForm")?.requestSubmit());
   $("#restartAdminServerButton")?.addEventListener("click", async () => {
     if (!confirm("确定重启工作台服务吗？页面会短暂断开。")) return;
@@ -7648,14 +7648,22 @@ function renderAdminOperations(data = {}) {
   `).join("") : `<p class="empty">暂无管理员操作记录。</p>`;
 }
 
-async function loadAdminOperations() {
+async function loadAdminOperations({ feedback = false } = {}) {
   if (currentSession?.role !== "admin") return;
+  const button = $("#reloadAdminOperations");
+  const finishButtonLoading = feedback ? startButtonLoading(button, "刷新中") : null;
+  if (feedback) setAdminSettingsStatus("正在刷新系统运行状态…");
   try {
     const response = await apiFetch("/api/admin/operations", { cache: "no-store" });
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     renderAdminOperations(result);
+    if (feedback) {
+      finishButtonLoading?.("刷新成功", { autoResetMs: 1800 });
+      setAdminSettingsStatus(`刷新成功，系统状态已更新（${new Date().toLocaleTimeString("zh-CN", { hour12: false })}）。`, "success");
+    }
   } catch (error) {
+    finishButtonLoading?.("刷新失败", { autoResetMs: 1800 });
     setAdminSettingsStatus(error.message || "运行状态读取失败。", "error");
   }
 }
