@@ -3515,18 +3515,18 @@ textarea {
 }
 
 .customer-profile-head strong {
-  color: #5f4b8b;
+  color: #163a5f;
   font-size: 13px;
 }
 
 .customer-profile-head span {
-  color: #7a69a0;
+  color: #355b7d;
   font-size: 10px;
 }
 
 .customer-profile-summary {
   margin: 0 0 10px;
-  color: #5f5278;
+  color: #253b53;
   font-size: 12px;
   line-height: 1.55;
 }
@@ -3551,7 +3551,7 @@ textarea {
 }
 
 .lead-customer-profile dt {
-  color: #7a69a0;
+  color: #48637d;
   font-size: 11px;
 }
 
@@ -3559,7 +3559,7 @@ textarea {
   min-width: 0;
   margin: 0;
   overflow-wrap: anywhere;
-  color: #514467;
+  color: #1e3349;
   font-size: 11px;
 }
 
@@ -7260,17 +7260,17 @@ td {
 }
 
 :root[data-theme="dark"] .customer-profile-head strong {
-  color: #c4a9f2;
+  color: #9dccff;
 }
 
 :root[data-theme="dark"] .customer-profile-head span,
 :root[data-theme="dark"] .customer-profile-summary,
 :root[data-theme="dark"] .lead-customer-profile dt {
-  color: #b9a5dd !important;
+  color: #a9c8e5 !important;
 }
 
 :root[data-theme="dark"] .lead-customer-profile dd {
-  color: #d8c9ee;
+  color: #d8e9f8;
 }
 
 :root[data-theme="dark"] .score-dimensions span.has-score {
