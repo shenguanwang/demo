@@ -2330,11 +2330,13 @@ function renderReview(options = {}) {
             <span class="tag">#${rankIndex + 1} · ${lead.researchAt ? "已完成公开信息尽调" : "待全网补全"}</span>
             <span class="review-captured-at">${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.source || lead.origin || "未知来源")}</span>
           </div>
-          <h3>${escapeHtml(lead.company)}</h3>
+          <div class="review-lead-name-row">
+            <h3>${escapeHtml(lead.company)}</h3>
+            ${reviewAiResultHtml(lead)}
+          </div>
           <p>${escapeHtml(lead.researchSummary || "当前只有原始发现来源，请先执行全网补全。")}</p>
         </div>
         <div class="review-title-side">
-          ${reviewAiResultHtml(lead)}
           ${reviewMode === "pending" ? `<button class="research-button" type="button" data-research-index="${index}">
             ${lead.researching ? "正在检索…" : lead.researchAt ? "重新全网核验" : "全网补全信息"}
           </button>` : `<span class="review-approved-status">${reviewMode === "approved" ? "已进入客户池" : "已拒绝，保留为历史记录"}</span>`}

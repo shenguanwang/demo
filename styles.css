@@ -3219,22 +3219,27 @@ textarea {
 }
 
 .review-title-main {
-  flex: 1 1 48%;
+  flex: 1 1 auto;
 }
 
 .review-title-side {
   display: flex;
-  flex: 0 1 52%;
+  flex: 0 0 auto;
   align-items: flex-start;
   justify-content: flex-end;
   gap: 14px;
   min-width: 0;
 }
 
+.review-lead-name-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+}
+
 .review-title-ai {
-  flex: 1 1 auto;
-  max-width: 520px;
-  margin: 5px 0 0;
+  margin: 0;
   color: #16803c;
   font-size: 12px;
   line-height: 1.55;
@@ -5567,14 +5572,7 @@ tbody tr:last-child td {
   }
 
   .review-title-side {
-    flex: 1 1 auto;
-    width: 100%;
-    max-width: none;
-    justify-content: space-between;
-  }
-
-  .review-title-ai {
-    max-width: none;
+    align-self: flex-start;
   }
 
   .crm-toolbar {
