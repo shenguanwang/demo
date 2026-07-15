@@ -3651,7 +3651,7 @@ def discovery_progress_message(source_mode: str, stage: str) -> str:
         }.get(stage, "社媒综合搜索仍在后台执行。")
     if source_mode in {"combined", "all"}:
         return {
-            "search": "云端正在检索地图、企业官网、行业目录和公开社媒来源。",
+            "search": "云端正在检索地图、企业官网和汽车行业目录。" if source_mode == "combined" else "云端正在检索地图、企业官网、行业目录和公开社媒来源。",
             "extract": "正在提取候选企业、官网、电话、邮箱和原始来源。",
             "verify": "正在去重并交叉核验客户类型、采购意向和联系方式。",
         }.get(stage, "云端获客任务仍在后台执行。")
@@ -4223,6 +4223,22 @@ CITY_COORDS = {
     "Morocco": ("Casablanca", 33.5731, -7.5898),
     "China": ("Shanghai", 31.2304, 121.4737),
 }
+
+OSM_SEARCH_CENTERS = {
+    "Nigeria": (
+        ("Lagos", 6.5244, 3.3792),
+        ("Abuja", 9.0765, 7.3986),
+        ("Port Harcourt", 4.8156, 7.0498),
+        ("Kano", 12.0022, 8.5920),
+        ("Ibadan", 7.3775, 3.9470),
+        ("Benin City", 6.3350, 5.6037),
+    ),
+}
+
+OVERPASS_API_ENDPOINTS = (
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+)
 
 COUNTRY_SEARCH_META = {
     "China": {
@@ -8755,8 +8771,8 @@ def reverse_search_company_socials(company: str, country: str, limit_per_platfor
     return accounts[:8], evidence[:10]
 
 
-def enrich_google_place_result(item: dict, country: str) -> dict:
-    """Make a Google Places result carry website contacts and social evidence."""
+def enrich_google_place_result(item: dict, country: str, include_reverse_social: bool = False) -> dict:
+    """Add official-website contacts; reverse-search social profiles only when requested."""
     company = clean_text(item.get("title", ""))
     website = normalize_public_url(item.get("customer_website") or item.get("url") or "")
     contacts = extract_public_contacts(f"{item.get('snippet', '')} {item.get('contact', '')}", item.get("tags"))
@@ -8802,7 +8818,11 @@ def enrich_google_place_result(item: dict, country: str) -> dict:
                 "官网外链社媒账号",
             ),
         )
-    reverse_accounts, reverse_evidence = reverse_search_company_socials(company, country, limit_per_platform=1)
+    reverse_accounts, reverse_evidence = (
+        reverse_search_company_socials(company, country, limit_per_platform=1)
+        if include_reverse_social
+        else ([], [])
+    )
     for account in reverse_accounts:
         if account not in social_accounts:
             social_accounts.append(account)
@@ -8826,18 +8846,40 @@ def search_osm_dealers(country: str, limit: int = 12, target_type: str = "dealer
         CITY_COORDS["UAE"],
     )
     city, latitude, longitude = location
+    country_key = next((key for key in OSM_SEARCH_CENTERS if key.lower() in country.lower()), "")
+    search_centers = OSM_SEARCH_CENTERS.get(country_key) or ((city, latitude, longitude),)
     selectors = TARGET_PROFILES.get(target_type, TARGET_PROFILES["dealer"])["osm"]
     if not selectors:
         return []
     osm_parts = "".join(
-        f"{selector}(around:45000,{latitude},{longitude});"
+        f"{selector}(around:{30000 if len(search_centers) > 1 else 45000},{center_latitude},{center_longitude});"
+        for _, center_latitude, center_longitude in search_centers
         for selector in selectors
     )
-    query = f"[out:json][timeout:25];({osm_parts});out tags center {max(limit * 4, 30)};"
-    url = "https://overpass-api.de/api/interpreter?" + urllib.parse.urlencode({"data": query})
-    request = urllib.request.Request(url, headers={"User-Agent": "HuaweiEVLeadTool/1.0"})
-    with urllib.request.urlopen(request, timeout=35) as response:
-        payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+    query = f"[out:json][timeout:35];({osm_parts});out tags center {max(limit * 6, 60)};"
+    payload = None
+    last_error: Exception | None = None
+    request_body = urllib.parse.urlencode({"data": query}).encode("utf-8")
+    for endpoint in OVERPASS_API_ENDPOINTS:
+        request = urllib.request.Request(
+            endpoint,
+            data=request_body,
+            method="POST",
+            headers={
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "User-Agent": "HuaweiEVLeadTool/1.0",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=45) as response:
+                candidate_payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+            if isinstance(candidate_payload.get("elements"), list):
+                payload = candidate_payload
+                break
+        except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError) as exc:
+            last_error = exc
+    if payload is None:
+        raise RuntimeError(f"OpenStreetMap Overpass 暂时不可用：{last_error or '未返回有效数据'}")
     items: list[dict] = []
     seen_names = set()
     for element in payload.get("elements", []):
@@ -8853,9 +8895,20 @@ def search_osm_dealers(country: str, limit: int = 12, target_type: str = "dealer
         email = tags.get("email") or tags.get("contact:email") or ""
         contact = email or phone
         brand = tags.get("brand") or tags.get("operator") or ""
+        element_center = element.get("center") or element
+        element_latitude = float(element_center.get("lat") or latitude)
+        element_longitude = float(element_center.get("lon") or longitude)
+        result_city = min(
+            search_centers,
+            key=lambda center: (element_latitude - center[1]) ** 2 + (element_longitude - center[2]) ** 2,
+        )[0]
         osm_url = f"https://www.openstreetmap.org/{element.get('type', 'node')}/{element.get('id')}"
-        target_label = TARGET_PROFILES.get(target_type, TARGET_PROFILES["dealer"])["label"]
-        snippet = f"{name} is listed as a {target_label} related business in {city}."
+        osm_business_label = (
+            "car rental and fleet business"
+            if tags.get("amenity") == "car_rental" or tags.get("shop") == "car_rental"
+            else "car dealer or showroom (OpenStreetMap shop=car)"
+        )
+        snippet = f"{name} is listed as a {osm_business_label} in {result_city}, {country_search_meta(country)['location']}."
         if brand:
             snippet += f" Brand or operator: {brand}."
         if contact:
@@ -9809,6 +9862,7 @@ def discover(params: dict[str, list[str]]) -> dict:
 
     raw_results = []
     google_primary_results: list[dict] = []
+    google_places_error = ""
     notice = ""
     is_china_discovery = country_meta.get("code") == "cn"
     social_source_modes = {"social", "instagram", "facebook", "tiktok", "linkedin", "youtube"}
@@ -9816,11 +9870,11 @@ def discover(params: dict[str, list[str]]) -> dict:
     # A single-platform task must return accounts from that platform only. Business
     # websites may still be used below to discover linked social profiles, but map
     # and generic web records must not become leads for an Instagram/Facebook/etc.
-    # task. Cross-source enrichment belongs to social/combined searches.
+    # task. Cross-source enrichment belongs to social/all-source searches.
     include_support_sources = source_mode == "social" and not is_china_discovery
     if "google" in enabled_sources and ((use_geo_sources and source_mode in ("all", "combined", "google")) or include_support_sources):
         try:
-            active_cities = (cities[:3] or [market]) if include_support_sources else cities
+            active_cities = (cities[:3] or [market]) if include_support_sources else (cities[:6] or [market])
             google_city_limit = 3 if include_support_sources else min(10, max(4, result_limit // max(1, len(cities))))
             google_place_queries = (
                 "car dealer used cars showroom",
@@ -9829,12 +9883,20 @@ def discover(params: dict[str, list[str]]) -> dict:
             google_query_limit = max(3, (google_city_limit + len(google_place_queries) - 1) // len(google_place_queries))
             for city in active_cities:
                 for place_query in google_place_queries:
+                    if google_places_error:
+                        break
                     try:
                         google_primary_results += search_google_places(
                             country,
                             place_query,
                             limit=google_query_limit,
                             city=city,
+                        )
+                    except urllib.error.HTTPError as exc:
+                        google_places_error = (
+                            "Google Places API 返回 403，无权调用；请检查 Places API (New)、账单和 API Key 限制。"
+                            if exc.code == 403
+                            else f"Google Places API 返回 HTTP {exc.code}。"
                         )
                     except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                         pass
@@ -9851,8 +9913,9 @@ def discover(params: dict[str, list[str]]) -> dict:
             enriched_google_results: list[dict] = []
             if enrich_limit:
                 executor = ThreadPoolExecutor(max_workers=min(4, enrich_limit))
+                include_reverse_social = source_mode in ("all", "social")
                 futures = [
-                    executor.submit(enrich_google_place_result, item, country)
+                    executor.submit(enrich_google_place_result, item, country, include_reverse_social)
                     for item in google_primary_results[:enrich_limit]
                 ]
                 try:
@@ -9873,6 +9936,8 @@ def discover(params: dict[str, list[str]]) -> dict:
         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
             if source_mode == "google":
                 notice = f"{exc}。请在本机配置密钥后重试。"
+        if google_places_error:
+            notice = f"{notice} {google_places_error} 本轮已停止重复请求，并继续使用 OSM 与官网来源。".strip()
     if "osm" in enabled_sources and ((use_geo_sources and source_mode in ("all", "combined", "osm")) or include_support_sources):
         try:
             raw_results += search_osm_dealers(
@@ -9880,8 +9945,8 @@ def discover(params: dict[str, list[str]]) -> dict:
                 limit=min(result_limit, 8 if include_support_sources else 20 if source_mode in ("all", "combined") else 30),
                 target_type=target_type,
             )
-        except (OSError, ValueError, TimeoutError):
-            pass
+        except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
+            notice = f"{notice} {exc}。本轮继续使用 Google Maps 与官网来源。".strip()
     if "dealer" in enabled_sources and is_china_discovery and source_mode in ("all", "combined", "dealer"):
         raw_results += search_autohome_dealers(cities, limit=min(24, max(8, result_limit // 2)))
     if "dealer" in enabled_sources and (source_mode in ("all", "combined", "dealer") or include_support_sources):
@@ -9891,7 +9956,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         elif include_support_sources:
             max_web_queries = 4
         else:
-            max_web_queries = 24 if source_mode in ("all", "combined") and google_primary_results else 40 if source_mode in ("all", "combined") else 16
+            max_web_queries = 24 if source_mode in ("all", "combined") else 16
         search_variants = search_variants[:max_web_queries]
         per_query_limit = 5 if is_china_discovery and source_mode in ("all", "combined") else 4 if include_support_sources else 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
@@ -9915,7 +9980,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             try:
                 for item in web_results:
                     origin, source_type = source_details(item["url"])
-                    if is_china_discovery and source_mode in ("all", "combined", "dealer") and origin in {
+                    if source_mode in ("combined", "dealer") and origin in {
                         "YouTube", "Facebook", "Instagram", "TikTok", "LinkedIn",
                         "Telegram", "X / Twitter", "Threads", "Pinterest", "Reddit", "VK",
                     }:
@@ -9978,7 +10043,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     })
     selected_platforms = (
         list(platform_queries)
-        if source_mode in ("all", "social", "combined")
+        if source_mode in ("all", "social")
         else [source_mode] if source_mode in platform_queries else []
     )
     selected_platforms = [platform for platform in selected_platforms if platform in enabled_sources]
@@ -9998,7 +10063,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         "officialWebsiteProfiles": 0,
     }
     reverse_platforms = set(selected_platforms)
-    if source_mode in ("all", "combined", "social", "youtube") and (
+    if source_mode in ("all", "social", "youtube") and (
         not is_china_discovery or source_mode in ("social", "youtube")
     ):
         if "youtube" in enabled_sources:
@@ -10141,7 +10206,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["account_type"],
             )
             raw_results.append(item)
-    if "youtube" in enabled_sources and source_mode in ("all", "combined", "youtube", "social") and (
+    if "youtube" in enabled_sources and source_mode in ("all", "youtube", "social") and (
         not is_china_discovery or source_mode in ("social", "youtube")
     ):
         youtube_searches = []
@@ -10237,10 +10302,15 @@ def discover(params: dict[str, list[str]]) -> dict:
         "candidatePool": 0,
         "processed": 0,
         "aiRejected": 0,
+        "rejected": {},
         "qualifiedBeforeMerge": 0,
         "afterEntityMerge": 0,
         "final": 0,
     }
+
+    def reject_candidate(reason: str) -> None:
+        rejected = pipeline_stats["rejected"]
+        rejected[reason] = int(rejected.get(reason) or 0) + 1
     raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
     pipeline_stats["afterCountryDedup"] = len(raw_results)
     raw_results = balance_discovery_sources(raw_results)
@@ -10274,6 +10344,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         pipeline_stats["processed"] += 1
         item["url"] = normalize_public_url(item.get("url", ""))
         if not is_valid_http_url(item["url"]):
+            reject_candidate("invalidUrl")
             continue
         parsed = safe_urlparse(item["url"])
         domain = parsed.netloc.lower().removeprefix("www.")
@@ -10296,16 +10367,21 @@ def discover(params: dict[str, list[str]]) -> dict:
             blocked in domain or blocked in item["url"].lower()
             for blocked in BLOCKED_DOMAINS
         ):
+            reject_candidate("blockedDomain")
             continue
         allow_recent_content = bool(freshness_days) or target_type in ("buying", "government", "individual")
         if not is_social_result and any(word in title_lower for word in BLOCKED_TITLE_WORDS) and not allow_recent_content:
+            reject_candidate("blockedTitle")
             continue
         if not is_social_result and any(part in path_lower for part in BLOCKED_PATH_PARTS) and not allow_recent_content:
+            reject_candidate("blockedPath")
             continue
         if not is_social_result and re.search(r"/20\d{2}/\d{1,2}/\d{1,2}/", path_lower) and not allow_recent_content:
+            reject_candidate("datedContent")
             continue
         source_identity = raw_result_identity(item)
         if source_identity in seen_sources:
+            reject_candidate("duplicateSource")
             continue
         seen_sources.add(source_identity)
 
@@ -10328,13 +10404,17 @@ def discover(params: dict[str, list[str]]) -> dict:
 
         combined = f"{item['title']} {item['snippet']} {page_text} {item.get('url', '')}"
         if has_foreign_location_conflict(combined, country):
+            reject_candidate("countryConflict")
             continue
         if is_obviously_irrelevant_lead(combined):
+            reject_candidate("irrelevantBusiness")
             continue
         if is_media_or_content_channel(combined):
+            reject_candidate("mediaOrContent")
             continue
         if not is_social_result and is_brand_bound_chinese_dealer(combined):
             excluded_brand_bound_dealers += 1
+            reject_candidate("brandBoundDealer")
             continue
         if is_social_result:
             social_analysis = analyze_social_business_profile(
@@ -10350,6 +10430,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 social_analysis.get("isCommercial")
                 and social_analysis.get("hasAutomotiveMarker")
             ):
+                reject_candidate("nonCommercialSocial")
                 continue
             if item.get("origin") == "YouTube" and not (
                 allow_youtube_discovery_candidate
@@ -10358,6 +10439,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                     and social_analysis.get("hasAutomotiveMarker")
                 )
             ):
+                reject_candidate("nonCommercialYoutube")
                 continue
             social_search_stats["acceptedResults"] += 1
             social_search_stats["acceptedByPlatform"][item.get("origin", "")] = (
@@ -10373,12 +10455,14 @@ def discover(params: dict[str, list[str]]) -> dict:
                 re.I,
             )
             if not business_match:
+                reject_candidate("weakBusinessKeyword")
                 continue
             if re.match(r"^\s*20\d{2}\s+", item["title"]) and re.search(
                 r"\b(seater|4wd|awd|km|mileage|price|available)\b",
                 combined,
                 re.I,
             ):
+                reject_candidate("vehicleListing")
                 continue
         if not is_social_result and not re.search(
             r"\b(dealer|dealership|showroom|importer|exporter|trading|cars|motors|"
@@ -10388,6 +10472,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             combined,
             re.I,
         ):
+            reject_candidate("noAutomotiveKeyword")
             continue
         company = infer_company_name(item["title"], domain)
         lead_type = infer_type(combined)
@@ -10414,6 +10499,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         if item.get("origin") == "YouTube":
             published_at = item.get("latestVideoPublishedAt") or published_at
             if not is_recent_youtube_video_date(published_at):
+                reject_candidate("staleYoutube")
                 continue
         is_dealer_directory_source = source_mode == "dealer" and not is_social_result and bool(item.get("customer_website"))
         is_long_lived_business_source = (
@@ -10425,6 +10511,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
         )
         if is_social_result and not is_within_freshness(published_at, freshness_days):
+            reject_candidate("outsideFreshness")
             continue
         customer_website = item.get("customer_website") or (
             item["url"] if source_type == "车商官网或汽车行业网站" else ""
@@ -10508,6 +10595,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             and item.get("origin") != "OpenStreetMap"
             and not is_social_result
         ):
+            reject_candidate("websiteAuditFailed")
             continue
         official_contact_url = ""
         official_contact_excerpt = ""
@@ -10629,6 +10717,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         has_contact_entry = bool(official_contact_entry_url)
         contactable = bool(verified_email_sources or phone_sources or whatsapp_sources or has_contact_entry)
         if quality_policy.get("requireContactOrWebsite") and not (contactable or customer_website):
+            reject_candidate("noContactOrWebsite")
             continue
         official_source_count = 1 if customer_website else 0
         lead_evidence = list(item.get("google_evidence") or [])
@@ -10730,6 +10819,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         ai_policy = admin_control_settings().get("ai", {})
         if not ai_review:
             if ai_policy.get("failurePolicy") == "skip":
+                reject_candidate("aiUnavailableSkip")
                 continue
             ai_review = {
                 "provider": get_ai_provider() or "deepseek",
@@ -10755,6 +10845,7 @@ def discover(params: dict[str, list[str]]) -> dict:
             )
             if hard_reject or (ai_reject and not linkedin_actor_verified):
                 pipeline_stats["aiRejected"] += 1
+                reject_candidate("aiRejected")
                 continue
             if linkedin_actor_verified and ai_reject:
                 ai_review["decision"] = "manual_review"
