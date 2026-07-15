@@ -5589,16 +5589,40 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
     rejectedLeads.flatMap((lead) => [...leadRejectionFingerprints(lead)])
   );
   const blockRejectedMemory = adminSettingsSnapshot?.controlCenter?.quality?.blockRejectedMemory !== false;
-  const normalizedFresh = normalizedFound
-    .filter((lead) => lead.autoImportEligible !== false)
-    .filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()))
-    .filter((lead) => !blockRejectedMemory || !matchesRejectedLeadMemory(lead, rejectedFingerprintSet));
-  const fresh = limitDuplicateCustomerWebsites(normalizedFresh, [...reviewLeads, ...customers, ...rejectedLeads]);
+  const eligible = normalizedFound.filter((lead) => lead.autoImportEligible !== false);
+  const nonExisting = eligible.filter((lead) => !existing.has(`${lead.company}|${lead.source}`.toLowerCase()));
+  const notRejected = nonExisting.filter(
+    (lead) => !blockRejectedMemory || !matchesRejectedLeadMemory(lead, rejectedFingerprintSet)
+  );
+  const fresh = limitDuplicateCustomerWebsites(notRejected, [...reviewLeads, ...customers, ...rejectedLeads]);
   if (fresh.length) {
     reviewLeads = [...fresh, ...reviewLeads];
     refreshAllLeadViews();
   }
-  return { found, fresh };
+  return {
+    found,
+    fresh,
+    skipped: {
+      ineligible: normalizedFound.length - eligible.length,
+      existing: eligible.length - nonExisting.length,
+      rejected: nonExisting.length - notRejected.length,
+      duplicateWebsite: notRejected.length - fresh.length
+    }
+  };
+}
+
+function discoverySkippedMessage(merged) {
+  const skipped = merged?.skipped || {};
+  const reasons = [];
+  if (skipped.ineligible) {
+    reasons.push(`${skipped.ineligible} 条未达到自动入库规则（评分、国家或企业身份校验）`);
+  }
+  if (skipped.existing) reasons.push(`${skipped.existing} 条已在待审核或客户池`);
+  if (skipped.rejected) reasons.push(`${skipped.rejected} 条命中已拒绝记录`);
+  if (skipped.duplicateWebsite) reasons.push(`${skipped.duplicateWebsite} 条官网重复`);
+  return reasons.length
+    ? `${reasons.join("；")}，因此未自动导入。`
+    : "本次结果没有可自动导入的新线索。";
 }
 
 function autoImportCompletedDiscoveryJobs() {
@@ -5648,7 +5672,7 @@ async function importDiscoveryJob(jobId, options = {}) {
       title: `${automatic ? "搜索完成，已自动导入" : "已导入"} ${merged.fresh.length} 条新线索`,
       message: merged.fresh.length
         ? "任务结果已自动进入线索审核，并已同步到云端数据。"
-        : "任务结果中的线索已存在，没有重复导入。"
+        : discoverySkippedMessage(merged)
     });
     finishButtonLoading("已导入", { disabled: true });
     await loadDiscoveryJobs({ autoImport: false }).catch(() => undefined);
@@ -5914,7 +5938,7 @@ function bindForms() {
     })
       .then(async (result) => {
         const elapsedSeconds = searchProgress.stop();
-        const { found, fresh } = mergeDiscoveryResult(
+        const merged = mergeDiscoveryResult(
           result,
           data.sourceMode,
           result.__job || {
@@ -5925,6 +5949,7 @@ function bindForms() {
             createdAt: new Date().toISOString()
           }
         );
+        const { found, fresh } = merged;
         if (!found.length) {
           await markDiscoveryImported(result.__jobId, {
             importedCount: 0,
@@ -5962,7 +5987,7 @@ function bindForms() {
             state: "complete",
             title: "本轮搜索已完成",
             elapsed: `用时 ${elapsedSeconds} 秒`,
-            message: `${sourceLabel} · ${freshnessLabel}：发现的 ${found.length} 条线索均已存在，没有重复入库。`
+            message: `${sourceLabel} · ${freshnessLabel}：${discoverySkippedMessage(merged)}`
           });
           return;
         }
