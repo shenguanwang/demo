@@ -1393,7 +1393,7 @@ function discoveryDisabledForSession() {
 
 function discoveryDisabledReason() {
   if (currentSession?.role !== "admin" && currentSession?.discoveryAdminOnly) {
-    return "管理员已禁止普通账户使用一键获客功能";
+    return "接口正在调试，功能暂停";
   }
   return "该账号未开通自动找客户功能";
 }
@@ -1601,7 +1601,7 @@ function renderCountries() {
   }
   const finderSubmit = $("#finderForm button[type='submit']");
   if (finderSubmit) {
-    finderSubmit.disabled = discoveryDisabledForSession();
+    finderSubmit.disabled = discoveryDisabledForSession() && !currentSession?.discoveryAdminOnly;
     finderSubmit.title = discoveryDisabledForSession() ? discoveryDisabledReason() : "";
   }
   const domesticSelect = $("#finderDomesticRegion");

@@ -2469,7 +2469,7 @@ def ensure_user_can_access_country(user: dict, country: str) -> None:
     if not user or user.get("role") == "admin":
         return
     if bool(control_value("discovery", "adminOnly", False)):
-        raise PermissionError("管理员已禁止普通账户使用一键获客功能")
+        raise PermissionError("接口正在调试，功能暂停")
     assigned = normalize_assigned_countries(user.get("assignedCountries") or user.get("assigned_countries"))
     if ASSIGNED_COUNTRY_NONE in assigned:
         raise PermissionError("该账号未开通自动找客户功能")
