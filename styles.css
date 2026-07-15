@@ -3515,7 +3515,7 @@ textarea {
 }
 
 .customer-profile-head strong {
-  color: #17212b;
+  color: #245b9e;
   font-size: 13px;
 }
 
@@ -7218,9 +7218,12 @@ td {
   border-color: #343b46;
 }
 
-:root[data-theme="dark"] .customer-profile-head strong,
 :root[data-theme="dark"] .lead-customer-profile dd {
   color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .customer-profile-head strong {
+  color: #7cb7ff;
 }
 
 :root[data-theme="dark"] .customer-profile-summary,
