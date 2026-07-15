@@ -133,7 +133,7 @@ ADMIN_CONTROL_DEFAULTS = {
         "targetMax": 30,
         "taskTimeoutMinutes": 25,
         "fallbackEnabled": True,
-        "globalSources": ["google", "osm", "dealer", "youtube", "facebook", "instagram", "tiktok"],
+        "globalSources": ["google", "osm", "dealer", "youtube", "facebook", "instagram", "tiktok", "linkedin"],
         "sourceCaps": {
             "google": 30, "osm": 20, "dealer": 40, "instagram": 30,
             "facebook": 30, "tiktok": 30, "youtube": 30, "linkedin": 30,
@@ -6801,6 +6801,8 @@ def apify_query_plan(query_variants: list[str], source_mode: str, platform: str 
                 "Car showroom",
                 "Vehicle importer",
             ], 30
+        if platform == "linkedin" and source_mode == "linkedin":
+            return ["automotive"], 30
         if platform == "instagram" and source_mode == "instagram":
             query_limit, result_limit = 8, 30
         elif platform == "tiktok" and source_mode == "tiktok":
@@ -6884,16 +6886,14 @@ def apify_search_input(
             "shouldDownloadSubtitles": False,
         }
     elif platform == "linkedin":
-        payload.update({
-            "searchQuery": query[:300],
-            "locations": [],
-            "scraperMode": "short",
-            "takePages": max(1, min(2, (limit + 49) // 50)),
-            "query": query,
-            "search": query,
-            "limit": limit,
+        locations = location if isinstance(location, list) else [location]
+        payload = {
+            "locations": list(dict.fromkeys(value for value in locations if value))[:1],
+            "industryIds": ["1292", "1128", "53"],
+            "scraperMode": "full",
+            "takePages": 1,
             "maxItems": limit,
-        })
+        }
     return payload
 
 
@@ -6929,7 +6929,19 @@ def joined_apify_values(item: dict, keys: tuple[str, ...]) -> str:
         if isinstance(value, str) and value.strip():
             values.append(value)
         elif isinstance(value, list):
-            values.extend(str(entry) for entry in value if isinstance(entry, (str, int, float)))
+            for entry in value:
+                if isinstance(entry, (str, int, float)):
+                    values.append(str(entry))
+                elif isinstance(entry, dict):
+                    nested_values = [first_text_value(entry, (
+                        "text", "name", "title", "description", "address",
+                        "countryFull", "country", "city", "geographicArea",
+                    )), nested_text_value(entry, (
+                        ("parsed", "text"),
+                        ("parsed", "countryFull"),
+                        ("parsed", "country"),
+                    )), nested_text_value(entry, (("parsed", "city"),))]
+                    values.extend(value for value in nested_values if value)
         elif isinstance(value, dict):
             nested = first_text_value(value, ("text", "name", "title", "description", "address"))
             if nested:
@@ -7071,9 +7083,9 @@ def normalize_apify_items(
         activity_metric = first_text_value(item, ("video", "videosCount", "postsCount"))
         snippet_parts = [
             raw_title if raw_title != title else "",
-            first_text_value(item, ("description", "biography", "bio", "signature", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName", "industry", "specialties")),
-            joined_apify_values(item, ("info", "categories")),
-            joined_apify_values(item, ("address", "businessAddress", "phone", "email")),
+            first_text_value(item, ("description", "tagline", "biography", "bio", "signature", "about", "text", "fullText", "snippet", "summary", "categoryName", "businessCategoryName", "industry", "specialties")),
+            joined_apify_values(item, ("info", "categories", "industries", "specialties")),
+            joined_apify_values(item, ("address", "businessAddress", "locations", "phone", "email")),
             joined_apify_values(item, (
                 "searchTerm", "searchQuery", "locationCreated", "cityName", "addressStreet", "businessEmail", "businessPhoneNumber", "contactPhoneNumber",
             )),
@@ -7113,9 +7125,10 @@ def normalize_apify_items(
             "source_url": url,
             "customer_website": customer_website,
             "structured_business_profile": bool(
-                joined_apify_values(item, ("info", "categories", "address"))
+                joined_apify_values(item, ("info", "categories", "industries", "address", "locations"))
                 or first_text_value(item, (
-                    "phone", "email", "website", "businessCategoryName", "businessEmail", "businessPhoneNumber",
+                    "phone", "email", "website", "description", "tagline", "industry",
+                    "businessCategoryName", "businessEmail", "businessPhoneNumber",
                 ))
                 or item.get("isBusinessAccount") is True
             ),
@@ -10603,6 +10616,22 @@ def discover(params: dict[str, list[str]]) -> dict:
             published_at,
         )
         has_business_evidence = has_strong_automotive_business_evidence(combined)
+        linkedin_actor_verified = bool(
+            origin == "LinkedIn"
+            and item.get("apifyPlatform") == "linkedin"
+            and item.get("structured_business_profile")
+            and social_analysis.get("isCommercial")
+            and social_analysis.get("hasAutomotiveMarker")
+            and has_target_country_signal(combined, country)
+            and re.search(
+                r"\b(retail motor vehicles|wholesale motor vehicles|motor vehicle manufacturing|"
+                r"automotive|car dealer|dealership|vehicle importer|car importer|distributor|showroom)\b",
+                combined,
+                re.I,
+            )
+        )
+        if linkedin_actor_verified:
+            has_business_evidence = True
         ai_review = ai_review_lead_candidate(
             company=company,
             country=country,
@@ -10630,15 +10659,24 @@ def discover(params: dict[str, list[str]]) -> dict:
             ai_review["decision"] = "manual_review"
             ai_review["reason"] = f"AI置信度低于 {minimum_ai_confidence}%，需人工核验。"
         if ai_review:
-            if (
+            hard_reject = bool(
+                (quality_policy.get("strictCountryMatch") and ai_review.get("countryEvidence") == "conflict")
+                or (quality_policy.get("rejectPersonalAccounts") and ai_review.get("entityType") == "personal")
+            )
+            ai_reject = bool(
                 ai_review.get("decision") == "reject"
                 or (quality_policy.get("requireAutomotiveBusiness") and ai_review.get("automotiveBusiness") is False)
                 or ai_review.get("salesLeadEligible") is False
-                or (quality_policy.get("strictCountryMatch") and ai_review.get("countryEvidence") == "conflict")
-                or (quality_policy.get("rejectPersonalAccounts") and ai_review.get("entityType") == "personal")
-            ):
+            )
+            if hard_reject or (ai_reject and not linkedin_actor_verified):
                 pipeline_stats["aiRejected"] += 1
                 continue
+            if linkedin_actor_verified and ai_reject:
+                ai_review["decision"] = "manual_review"
+                ai_review["reason"] = (
+                    "LinkedIn Full 公司资料已确认目标地区与汽车行业，保留进入人工审核；"
+                    + clean_text(str(ai_review.get("reason") or ""))
+                )[:500]
             if ai_review.get("automotiveBusiness"):
                 has_business_evidence = True
                 if ai_review.get("businessType"):
