@@ -927,53 +927,6 @@ def combined_usage_entry(usage: dict, *source_names: str) -> dict:
     }
 
 
-def serpapi_official_usage() -> dict:
-    api_key = get_serpapi_api_key()
-    if not api_key:
-        raise ValueError("SERPAPI_API_KEY 未配置")
-    payload = fetch_json(
-        "https://serpapi.com/account.json?" + urllib.parse.urlencode({"api_key": api_key}),
-        timeout=20,
-    )
-    return {
-        "status": str(payload.get("account_status") or ""),
-        "plan": str(payload.get("plan_name") or payload.get("plan_id") or ""),
-        "used": int(payload.get("this_month_usage") or 0),
-        "limit": int(payload.get("searches_per_month") or 0),
-        "remaining": int(payload.get("total_searches_left") or payload.get("plan_searches_left") or 0),
-        "renewalAt": str(payload.get("plan_renewal_date") or ""),
-        "hourUsed": int(payload.get("this_hour_searches") or 0),
-        "hourLimit": int(payload.get("account_rate_limit_per_hour") or 0),
-    }
-
-
-def hunter_official_usage() -> dict:
-    api_key = get_hunter_api_key()
-    if not api_key:
-        raise ValueError("HUNTER_API_KEY 未配置")
-    payload = fetch_json(
-        "https://api.hunter.io/v2/account?" + urllib.parse.urlencode({"api_key": api_key}),
-        timeout=20,
-    )
-    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
-    requests = data.get("requests") if isinstance(data.get("requests"), dict) else {}
-    categories = []
-    for key, value in requests.items():
-        if not isinstance(value, dict):
-            continue
-        categories.append({
-            "key": str(key),
-            "used": int(value.get("used") or 0),
-            "available": int(value.get("available") or 0),
-        })
-    return {
-        "email": str(data.get("email") or ""),
-        "plan": str(data.get("plan_name") or data.get("plan") or ""),
-        "resetAt": str(data.get("reset_date") or ""),
-        "categories": categories,
-    }
-
-
 def deepseek_official_usage() -> dict:
     api_key = get_deepseek_api_key()
     if not api_key:
@@ -1026,8 +979,6 @@ def api_consumption_payload() -> dict:
     usage = admin_usage_summary()
     catalog = {item["key"]: item for item in admin_settings_payload().get("catalog", [])}
     official_fetchers = {
-        "serpapi": (bool(get_serpapi_api_key()), serpapi_official_usage),
-        "hunter": (bool(get_hunter_api_key()), hunter_official_usage),
         "deepseek": (bool(get_deepseek_api_key()), deepseek_official_usage),
     }
     official: dict[str, dict] = {}
@@ -1064,44 +1015,12 @@ def api_consumption_payload() -> dict:
             "resetAt": youtube_reset.isoformat(),
         },
         {
-            "key": "google-maps",
-            "label": "Google Maps Platform",
-            "configured": bool(catalog.get("GOOGLE_MAPS_API_KEY", {}).get("configured")),
-            "tracked": combined_usage_entry(usage, "google-maps"),
-            "officialMode": "cloud-monitoring",
-            "officialNote": "API Key 无权读取项目总用量或账单；官方数据需使用 Google Cloud Monitoring。",
-        },
-        {
-            "key": "serpapi",
-            "label": "SerpApi",
-            "configured": bool(catalog.get("SERPAPI_API_KEY", {}).get("configured")),
-            "tracked": combined_usage_entry(usage, "serpapi"),
-            "officialMode": "account-api",
-            "official": official.get("serpapi", {}),
-        },
-        {
-            "key": "hunter",
-            "label": "Hunter",
-            "configured": bool(catalog.get("HUNTER_API_KEY", {}).get("configured")),
-            "tracked": combined_usage_entry(usage, "hunter"),
-            "officialMode": "account-api",
-            "official": official.get("hunter", {}),
-        },
-        {
             "key": "deepseek",
             "label": "DeepSeek",
             "configured": bool(catalog.get("DEEPSEEK_API_KEY", {}).get("configured")),
             "tracked": combined_usage_entry(usage, "deepseek"),
             "officialMode": "balance-api",
             "official": official.get("deepseek", {}),
-        },
-        {
-            "key": "brave",
-            "label": "Brave Search API",
-            "configured": bool(catalog.get("BRAVE_SEARCH_API_KEY", {}).get("configured")),
-            "tracked": combined_usage_entry(usage, "brave"),
-            "officialMode": "dashboard-only",
-            "officialNote": "Brave 官方未提供账户余额接口；这里只显示本工作台真实调用记录。",
         },
     ]
     return {"checkedAt": now.isoformat(), "providers": providers}
