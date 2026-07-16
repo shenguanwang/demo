@@ -10389,7 +10389,7 @@ def social_accounts_from_business_websites(
                 item.get("url") and "openstreetmap.org" not in item.get("url", "")
             )
         ]
-    except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+    except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
         return []
 
     def inspect(seed: dict) -> list[dict]:
@@ -10820,7 +10820,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["origin"] = "OpenStreetMap 车商目录"
                 item["source_type"] = "地图车商目录（已登记官网）"
             raw_results += directory_websites
-        except (OSError, ValueError, TimeoutError):
+        except (OSError, ValueError, RuntimeError, TimeoutError):
             pass
     platform_queries = {
         "instagram": ("instagram.com", "Instagram", "社交媒体公开主页"),
