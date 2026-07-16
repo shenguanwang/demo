@@ -1116,6 +1116,12 @@ function persistLocalState(dirty = localStateDirty) {
   }));
 }
 
+function normalizeUserEnteredUrl(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return safeHttpUrl(/^[a-z][a-z\d+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
+}
+
 function recordIdentity(record, type) {
   if (type === "deletedRecords") return `deleted:${record?.key || ""}`;
   if (type === "quotes") {
@@ -6361,6 +6367,7 @@ function bindForms() {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     const parsed = manualParsedLead && typeof manualParsedLead === "object" ? manualParsedLead : {};
+    const customerWebsite = normalizeUserEnteredUrl(data.customerWebsite) || parsed.customerWebsite || "";
     const website = data.website || parsed.websiteContent || parsed.sourceExcerpt || `${data.company} ${data.type} ${data.country}`;
     const parsedScore = Number(parsed.score);
     const score = Number.isFinite(parsedScore)
@@ -6376,8 +6383,8 @@ function bindForms() {
       origin: "手动添加",
       sourceType: parsed.sourceType || "手动添加线索",
       sourceTitle: parsed.sourceTitle || data.company,
-      sourceUrl: parsed.sourceUrl || data.customerWebsite || "",
-      customerWebsite: data.customerWebsite || parsed.customerWebsite || "",
+      sourceUrl: parsed.sourceUrl || customerWebsite,
+      customerWebsite,
       contactName: data.contactName || parsed.contactName || "",
       contactRole: data.contactRole || parsed.contactRole || "",
       email: data.email || parsed.email || "",
@@ -6408,8 +6415,12 @@ function bindForms() {
     event.preventDefault();
     const form = event.currentTarget;
     const button = form.querySelector('button[type="submit"]');
-    const url = String(new FormData(form).get("url") || "").trim();
-    if (!url) return;
+    const url = normalizeUserEnteredUrl(new FormData(form).get("url"));
+    if (!url) {
+      setLeadParserStatus("请输入有效的网址，例如 example.com。", "error");
+      return;
+    }
+    form.elements.url.value = url;
     button.disabled = true;
     button.textContent = "正在解析...";
     setLeadParserStatus("正在读取公开页面并核验联系方式，请稍候。", "loading");

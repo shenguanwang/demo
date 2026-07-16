@@ -788,7 +788,7 @@
               </div>
               <form id="leadParserForm">
                 <label>线索来源网址
-                  <input id="leadParserUrl" name="url" type="url" required placeholder="https://example.com/">
+                  <input id="leadParserUrl" name="url" type="text" inputmode="url" autocomplete="url" spellcheck="false" required placeholder="example.com 或社媒主页网址">
                 </label>
                 <button class="primary" type="submit">解析线索</button>
               </form>
@@ -827,7 +827,7 @@
                   </select>
                 </label>
                 <label>客户官网（选填）
-                  <input name="customerWebsite" type="url" placeholder="https://example.com/">
+                  <input name="customerWebsite" type="text" inputmode="url" autocomplete="url" spellcheck="false" placeholder="example.com">
                 </label>
                 <label>联系人（选填）
                   <input name="contactName" placeholder="例如 Ahmed Ali">
@@ -1283,6 +1283,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260716-remove-review-delete"></script>
+  <script src="./script.js?v=20260716-flexible-url-input"></script>
 </body>
 </html>
