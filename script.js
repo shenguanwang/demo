@@ -2595,7 +2595,6 @@ function renderReview(options = {}) {
         ${reviewMode === "pending" ? `
           <button class="primary" type="button" data-review-action="approve" data-index="${index}">通过</button>
           <button class="ghost" type="button" data-review-action="reject" data-index="${index}">拒绝</button>
-          <button class="danger-button" type="button" data-review-action="delete" data-index="${index}">删除</button>
           <button class="ghost" type="button" data-review-edit="${index}" data-review-edit-id="${escapeHtml(editId)}">编辑</button>
         ` : reviewMode === "approved" ? `<button class="primary" type="button" data-section="crm">回到客户池</button>` : `<span class="review-approved-status">已拒绝线索</span>`}
       </div>
@@ -6529,7 +6528,6 @@ function bindForms() {
       });
     }
     if (button.dataset.reviewAction === "restore") restoreRejectedLead(index);
-    if (button.dataset.reviewAction === "delete") deleteReviewLeads([reviewLeads[index]?.id]);
   });
 
   $("#reviewGrid").addEventListener("submit", async (event) => {
