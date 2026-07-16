@@ -7861,7 +7861,7 @@ async function runAdminOperation(action) {
     "clear-failed-jobs": "确定删除全部失败和已取消任务记录吗？",
     "clean-old-jobs": "确定按设置的保留天数清理过期任务吗？",
     deduplicate: "确定扫描所有账号并删除重复线索吗？",
-    "prune-search-data": `确定删除 ${pruneCutoffDate} 之前的待审核线索、客户、拒绝记录和搜索任务吗？该操作不可撤销。`,
+    "prune-search-data": `确定删除 ${pruneCutoffDate} 之前的待审核线索、拒绝记录和搜索任务吗？客户池数据会永久保留。该操作不可撤销。`,
     "clear-tombstones": "确定清除已删除线索的拦截指纹吗？清除后这些线索可能再次被搜到。",
     "clear-rejected-memory": "确定清除全部已拒绝线索记忆吗？清除后被拒绝线索可能再次进入审核。",
     "force-logout": "确定强制所有账号重新登录吗？当前管理员也会退出。"
@@ -7877,7 +7877,7 @@ async function runAdminOperation(action) {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     setAdminSettingsStatus(
-      `清理完成：待审核 ${result.reviewLeads || 0} 条、客户 ${result.customers || 0} 条、拒绝记录 ${result.rejectedLeads || 0} 条、搜索任务 ${result.discoveryJobs || 0} 条。`,
+      `清理完成：待审核 ${result.reviewLeads || 0} 条、拒绝记录 ${result.rejectedLeads || 0} 条、搜索任务 ${result.discoveryJobs || 0} 条；客户池未改动。`,
       "success"
     );
     await loadAdminOperations();

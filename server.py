@@ -1919,7 +1919,7 @@ def prune_search_data_before(cutoff_date: str) -> dict:
         existing_keys = {item.get("key") for item in deleted_records if isinstance(item, dict)}
         removed_records = []
         changed = False
-        for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+        for bucket in ("reviewLeads", "rejectedLeads"):
             items = state.get(bucket) if isinstance(state.get(bucket), list) else []
             removed = [item for item in items if lead_was_added_before(item, cutoff)]
             if not removed:
@@ -2009,7 +2009,7 @@ def clear_all_search_data() -> dict:
                         deleted_records = state.get("deletedRecords") if isinstance(state.get("deletedRecords"), list) else []
                         existing_keys = {item.get("key") for item in deleted_records if isinstance(item, dict)}
                         removed_records = []
-                        for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+                        for bucket in ("reviewLeads", "rejectedLeads"):
                             items = state.get(bucket) if isinstance(state.get(bucket), list) else []
                             totals[bucket] += len(items)
                             removed_records.extend(item for item in items if isinstance(item, dict))
@@ -2042,7 +2042,7 @@ def clear_all_search_data() -> dict:
                     deleted_records = state.get("deletedRecords") if isinstance(state.get("deletedRecords"), list) else []
                     existing_keys = {item.get("key") for item in deleted_records if isinstance(item, dict)}
                     removed_records = []
-                    for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+                    for bucket in ("reviewLeads", "rejectedLeads"):
                         items = state.get(bucket) if isinstance(state.get(bucket), list) else []
                         totals[bucket] += len(items)
                         removed_records.extend(item for item in items if isinstance(item, dict))
@@ -2114,7 +2114,7 @@ def remove_stale_youtube_from_state(state: dict, now: str) -> tuple[dict, dict]:
     totals = {"reviewLeads": 0, "customers": 0, "rejectedLeads": 0, "deletedRecordsAdded": 0}
     deleted_records = state.get("deletedRecords") if isinstance(state.get("deletedRecords"), list) else []
     existing_keys = {item.get("key") for item in deleted_records if isinstance(item, dict)}
-    for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+    for bucket in ("reviewLeads", "rejectedLeads"):
         kept = []
         items = state.get(bucket) if isinstance(state.get(bucket), list) else []
         for record in items:
@@ -12579,7 +12579,7 @@ class Handler(SimpleHTTPRequestHandler):
                 record_admin_audit(
                     self.current_user()["username"],
                     "按日期清理搜索数据",
-                    f"删除 {result['cutoffDate']} 前数据：线索 {result['reviewLeads']}，客户 {result['customers']}，任务 {result['discoveryJobs']}",
+                    f"删除 {result['cutoffDate']} 前搜索数据：线索 {result['reviewLeads']}，任务 {result['discoveryJobs']}；客户池未改动",
                     self.client_ip(),
                 )
                 self.send_json(200, {"ok": True, **result})
