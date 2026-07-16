@@ -345,6 +345,7 @@ const riskProfiles = {
 });
 
 const STORAGE_KEY = "huawei-ev-export-workbench-v3";
+const LOCAL_STATE_CACHE_VERSION = 2;
 const SOCIAL_CAPTURE_SEEN_KEY = "huawei-ev-social-capture-seen-v1";
 const UI_SETTINGS_KEY = "huawei-ev-workbench-ui-settings-v1";
 const DEFAULT_UI_SETTINGS = {
@@ -1066,6 +1067,10 @@ function loadSavedState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
+    if (Number(parsed._cacheVersion || 0) !== LOCAL_STATE_CACHE_VERSION || parsed._cloudDirty !== true) {
+      localStorage.removeItem(STORAGE_KEY);
+      return fallback;
+    }
     return {
       reviewLeads: limitDuplicateCustomerWebsites(filterReviewLeadsForBusinessFit(parsed.reviewLeads)),
       customers: Array.isArray(parsed.customers) ? parsed.customers : [],
@@ -1097,11 +1102,16 @@ function workspaceStateSnapshot() {
 
 function persistLocalState(dirty = localStateDirty) {
   localStateDirty = dirty;
+  if (!localStateDirty) {
+    localStorage.removeItem(STORAGE_KEY);
+    return;
+  }
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     ...workspaceStateSnapshot(),
     ownerUsername: currentSession?.username || "",
     _cloudVersion: cloudStateVersion,
-    _cloudDirty: localStateDirty
+    _cloudDirty: true,
+    _cacheVersion: LOCAL_STATE_CACHE_VERSION
   }));
 }
 
