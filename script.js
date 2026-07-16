@@ -593,6 +593,7 @@ let quoteHistory = savedState.quotes;
 let afterSalesOrders = savedState.afterSalesOrders;
 let deletedRecords = savedState.deletedRecords;
 let lastQuote = null;
+let manualParsedLead = null;
 let cloudStateReady = false;
 let cloudStateVersion = Number(savedState._cloudVersion || 0);
 let localStateDirty = Boolean(savedState._cloudDirty);
@@ -3593,7 +3594,10 @@ function renderCrm() {
   $("#crmRows").innerHTML = filteredCustomers.length ? filteredCustomers.map(({ lead, index }) => `
     <tr class="crm-row">
       <td>
-        <button class="link-button crm-customer-link" type="button" data-crm-action="review" data-index="${index}">${escapeHtml(lead.company)}</button>
+        <div class="crm-customer-title">
+          <button class="link-button crm-customer-link" type="button" data-crm-action="review" data-index="${index}">${escapeHtml(lead.company)}</button>
+          ${lead.isManualLead ? '<span class="manual-lead-badge">手动添加</span>' : ""}
+        </div>
         <div class="crm-contact-line">${escapeHtml(lead.contactName || primaryEmailForLead(lead) || lead.phone || "暂无联系人")}</div>
         <div class="crm-contact-chips">${crmLeadContactSummary(lead)}</div>
       </td>
@@ -3874,6 +3878,7 @@ function normalizeLead(raw) {
     socialDecisionRole: raw.socialDecisionRole || "",
     socialBusinessConfidence: Number(raw.socialBusinessConfidence || 0),
     accountType: raw.accountType || "公司客户",
+    isManualLead: Boolean(raw.isManualLead),
     isDuplicate: Boolean(raw.isDuplicate),
     isCompetitor: Boolean(raw.isCompetitor),
     confidence: Number(raw.confidence || 0),
@@ -6356,26 +6361,72 @@ function bindForms() {
   $("#leadForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-    const website = data.website || `${data.company} ${data.type} ${data.country}`;
-    const score = scoreLeadFromText(`${data.company} ${data.type} ${data.country} ${website}`);
+    const parsed = manualParsedLead && typeof manualParsedLead === "object" ? manualParsedLead : {};
+    const website = data.website || parsed.websiteContent || parsed.sourceExcerpt || `${data.company} ${data.type} ${data.country}`;
+    const parsedScore = Number(parsed.score);
+    const score = Number.isFinite(parsedScore)
+      ? parsedScore
+      : scoreLeadFromText(`${data.company} ${data.type} ${data.country} ${website}`);
     const lead = {
+      ...parsed,
       company: data.company,
       country: data.country,
       city: data.city,
       type: data.type,
       source: data.source || "Website",
+      origin: "手动添加",
+      sourceType: parsed.sourceType || "手动添加线索",
+      sourceTitle: parsed.sourceTitle || data.company,
+      sourceUrl: parsed.sourceUrl || data.customerWebsite || "",
+      customerWebsite: data.customerWebsite || parsed.customerWebsite || "",
+      contactName: data.contactName || parsed.contactName || "",
+      contactRole: data.contactRole || parsed.contactRole || "",
+      email: data.email || parsed.email || "",
+      phone: data.phone || parsed.phone || "",
+      whatsapp: data.whatsapp || parsed.whatsapp || "",
       model: data.model,
       score,
-      stage: score >= 80 ? "准备联系" : "待审核",
+      baseScore: score,
+      stage: "准备联系",
       next: data.next || "发送首次开发信",
       website,
-      reason: `${data.city} 的${data.type}，官网信息显示：${website.slice(0, 90)}。适合推荐${data.model}。`
+      isManualLead: true,
+      manualApproval: true,
+      manualApprovalAt: new Date().toISOString(),
+      preferredChannel: data.whatsapp || parsed.whatsapp ? "WhatsApp" : "Email",
+      sourceExcerpt: parsed.sourceExcerpt || website,
+      reason: parsed.contactReason || `${data.city} 的${data.type}，公开信息显示：${website.slice(0, 90)}。适合推荐${data.model}。`
     };
-    reviewLeads.unshift(normalizeLead(lead));
+    customers.unshift(normalizeLead(lead));
     event.currentTarget.reset();
+    resetManualLeadParser();
     closeManualLeadModal();
     refreshAllLeadViews();
-    showSection("review");
+    showSection("crm");
+  });
+
+  $("#leadParserForm")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    const url = String(new FormData(form).get("url") || "").trim();
+    if (!url) return;
+    button.disabled = true;
+    button.textContent = "正在解析...";
+    setLeadParserStatus("正在读取公开页面并核验联系方式，请稍候。", "loading");
+    try {
+      const response = await apiFetch(`/api/parse-lead-source?${new URLSearchParams({ url })}`, { cache: "no-store" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || !result.ok) throw new Error(result.error || `解析失败（HTTP ${response.status}）`);
+      applyParsedLeadToManualForm(result);
+      renderLeadParserResult(result);
+      setLeadParserStatus("解析完成，结果已填入右侧表单。", "success");
+    } catch (error) {
+      setLeadParserStatus(error.message || "解析失败，请检查网址后重试。", "error");
+    } finally {
+      button.disabled = false;
+      button.textContent = "解析线索";
+    }
   });
 
   $("#openManualLeadModal")?.addEventListener("click", openManualLeadModal);
@@ -7908,12 +7959,80 @@ function closeUserRegionModal() {
   document.querySelector("[data-user-region-modal]")?.remove();
 }
 
+function setLeadParserStatus(message, state = "") {
+  const status = $("#leadParserStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.state = state;
+}
+
+function selectManualLeadValue(select, value) {
+  if (!select || !value) return;
+  const target = String(value).trim().toLowerCase();
+  const option = [...select.options].find((item) => item.value.trim().toLowerCase() === target);
+  if (option) select.value = option.value;
+}
+
+function applyParsedLeadToManualForm(result) {
+  const form = $("#leadForm");
+  if (!form) return;
+  manualParsedLead = result;
+  form.elements.company.value = result.company || "";
+  form.elements.country.value = result.country || "";
+  form.elements.city.value = result.city || "";
+  form.elements.source.value = result.source || (result.parsedSourceKind === "social" ? "Social media" : "Website");
+  form.elements.customerWebsite.value = result.customerWebsite || "";
+  form.elements.contactName.value = result.contactName || "";
+  form.elements.contactRole.value = result.contactRole || "";
+  form.elements.email.value = result.email || "";
+  form.elements.phone.value = result.phone || "";
+  form.elements.whatsapp.value = result.whatsapp || "";
+  form.elements.website.value = result.websiteContent || result.sourceExcerpt || "";
+  selectManualLeadValue(form.elements.type, result.type);
+  selectManualLeadValue(form.elements.model, result.model);
+}
+
+function renderLeadParserResult(result) {
+  const container = $("#leadParserResult");
+  if (!container) return;
+  const sourceUrl = safeHttpUrl(result.sourceUrl);
+  const websiteUrl = safeHttpUrl(result.customerWebsite);
+  const location = [result.country, result.city].filter(Boolean).join(" · ") || "未识别";
+  const contacts = [result.email, result.phone, result.whatsapp].filter(Boolean).join(" · ") || "未发现";
+  const sourceCount = Number(result.sourceCoverage?.total || result.evidenceSources?.length || 0);
+  container.innerHTML = `
+    <div class="lead-parser-result-head">
+      <span>${escapeHtml(result.parsedSourceKind === "social" ? "社媒主页" : "企业官网")}</span>
+      <strong>${escapeHtml(result.company || "未识别公司名")}</strong>
+    </div>
+    <dl>
+      <div><dt>地区</dt><dd>${escapeHtml(location)}</dd></div>
+      <div><dt>客户类型</dt><dd>${escapeHtml(result.type || "待确认")}</dd></div>
+      <div><dt>联系方式</dt><dd>${escapeHtml(contacts)}</dd></div>
+      <div><dt>初步评分</dt><dd>${escapeHtml(result.score ?? 0)} 分 · ${sourceCount} 个公开来源</dd></div>
+      ${websiteUrl ? `<div><dt>客户官网</dt><dd><a href="${escapeHtml(websiteUrl)}" target="_blank" rel="noopener">${escapeHtml(websiteUrl)}</a></dd></div>` : ""}
+      ${sourceUrl && sourceUrl !== websiteUrl ? `<div><dt>来源页面</dt><dd><a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener">${escapeHtml(sourceUrl)}</a></dd></div>` : ""}
+    </dl>`;
+  container.hidden = false;
+}
+
+function resetManualLeadParser() {
+  manualParsedLead = null;
+  $("#leadParserForm")?.reset();
+  const result = $("#leadParserResult");
+  if (result) {
+    result.hidden = true;
+    result.innerHTML = "";
+  }
+  setLeadParserStatus("支持企业官网、Facebook、Instagram、TikTok、YouTube、LinkedIn 等公开主页。");
+}
+
 function openManualLeadModal() {
   const modal = $("#manualLeadModal");
   if (!modal) return;
   modal.hidden = false;
   document.body.classList.add("modal-open");
-  window.requestAnimationFrame(() => modal.querySelector('input[name="company"]')?.focus());
+  window.requestAnimationFrame(() => $("#leadParserUrl")?.focus());
 }
 
 function closeManualLeadModal() {

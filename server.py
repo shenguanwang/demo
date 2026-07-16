@@ -5,6 +5,7 @@ import binascii
 import hashlib
 import hmac
 import http.client
+import ipaddress
 import json
 import os
 import re
@@ -8060,6 +8061,256 @@ def infer_company_website(company: str) -> tuple[str, list[dict]]:
     return "", []
 
 
+def ensure_public_lead_source_url(value: str) -> str:
+    url = normalize_public_url(value)
+    parsed = safe_urlparse(url)
+    hostname = (parsed.hostname or "").strip().lower()
+    if not url or not hostname or parsed.username or parsed.password:
+        raise ValueError("请输入有效的公开网址")
+    if hostname in {"localhost", "localhost.localdomain"} or hostname.endswith(".local"):
+        raise ValueError("不支持本机或内网网址")
+    try:
+        addresses = {
+            item[4][0]
+            for item in socket.getaddrinfo(hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+        }
+    except socket.gaierror as exc:
+        raise ValueError("网址域名无法解析") from exc
+    for address in addresses:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+        if (
+            ip.is_private
+            or ip.is_loopback
+            or ip.is_link_local
+            or ip.is_multicast
+            or ip.is_reserved
+            or ip.is_unspecified
+        ):
+            raise ValueError("不支持本机或内网网址")
+    return url
+
+
+def structured_business_names(page: str) -> list[str]:
+    names: list[str] = []
+    accepted_types = {
+        "organization", "corporation", "localbusiness", "automotivebusiness",
+        "autodealer", "store", "professionalservice",
+    }
+
+    def collect(value) -> None:
+        if isinstance(value, list):
+            for item in value:
+                collect(item)
+            return
+        if not isinstance(value, dict):
+            return
+        raw_type = value.get("@type")
+        types = raw_type if isinstance(raw_type, list) else [raw_type]
+        normalized_types = {clean_text(str(item)).lower() for item in types if item}
+        name = clean_text(str(value.get("name") or ""))
+        if name and normalized_types.intersection(accepted_types) and name not in names:
+            names.append(name)
+        for key in ("@graph", "publisher", "provider", "seller", "brand"):
+            collect(value.get(key))
+
+    for raw in re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+        page,
+        flags=re.I,
+    ):
+        try:
+            collect(json.loads(html.unescape(raw).strip()))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return names[:8]
+
+
+def clean_inferred_company_name(value: str) -> str:
+    value = clean_text(html.unescape(value or ""))
+    value = re.sub(r"\s+(?:[|–—:]|-\s+)\s*.*$", "", value).strip()
+    value = re.sub(r"\s+(?:official website|official site|home)$", "", value, flags=re.I).strip()
+    if len(value) < 2 or len(value) > 100:
+        return ""
+    if value.lower() in {"home", "welcome", "official", "website", "instagram", "facebook"}:
+        return ""
+    return value
+
+
+def infer_company_from_source(url: str, page: str = "", social_profile: dict | None = None) -> str:
+    candidates: list[str] = []
+    if page:
+        candidates.extend(structured_business_names(page))
+        visible_text = clean_text(page)
+        brand_match = re.search(
+            r"\b([A-Z][A-Z0-9&.' ]{2,45})\s*[–—-]\s*(?:delivering|motors|automotive|cars|vehicles)",
+            visible_text,
+        )
+        if brand_match:
+            candidates.append(brand_match.group(1))
+        for email_domain in re.findall(r"[A-Z0-9._%+-]+@([A-Z0-9.-]+\.[A-Z]{2,})", page, flags=re.I):
+            domain = email_domain.lower().removeprefix("www.")
+            if domain not in {"gmail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com", "mail.com"}:
+                candidates.append(domain.split(".", 1)[0].replace("-", " ").title())
+        meta = parse_meta_tags(page)
+        candidates.extend([
+            meta.get("og:site_name", ""),
+            meta.get("application-name", ""),
+            meta.get("og:title", ""),
+            meta.get("twitter:title", ""),
+        ])
+        title_match = re.search(r"<title[^>]*>([\s\S]*?)</title>", page, flags=re.I)
+        if title_match:
+            candidates.append(title_match.group(1))
+    if social_profile:
+        candidates.extend([
+            str(social_profile.get("title") or ""),
+            str(social_profile.get("handle") or "").lstrip("@").replace("_", " "),
+        ])
+    domain = safe_urlparse(url).netloc.lower().removeprefix("www.").split(":", 1)[0]
+    domain_stem = domain.split(".", 1)[0].replace("-", " ").replace("_", " ")
+    candidates.append(domain_stem.title())
+    for candidate in candidates:
+        cleaned = clean_inferred_company_name(candidate)
+        if cleaned:
+            return cleaned
+    return "未命名客户"
+
+
+def infer_lead_location(text: str, url: str) -> tuple[str, str]:
+    haystack = clean_text(text).lower()
+    domain = safe_urlparse(url).netloc.lower().removeprefix("www.")
+    tld_country = {
+        ".ae": "UAE", ".sa": "Saudi", ".qa": "Qatar", ".kw": "Kuwait",
+        ".om": "Oman", ".ng": "Nigeria", ".gh": "Ghana", ".eg": "Egypt",
+        ".kz": "Kazakhstan", ".ru": "Russia", ".uz": "Uzbekistan",
+        ".az": "Azerbaijan", ".am": "Armenia", ".kg": "Kyrgyzstan",
+    }
+    country = next((name for suffix, name in tld_country.items() if domain.endswith(suffix)), "")
+    signal_aliases = {
+        "UAE": ("united arab emirates", " uae ", "dubai", "abu dhabi", "+971"),
+        "Saudi": ("saudi arabia", "riyadh", "jeddah", "+966"),
+        "Qatar": (" qatar ", "doha", "+974"),
+        "Kuwait": ("kuwait", "+965"),
+        "Oman": (" oman ", "muscat", "+968"),
+        "Nigeria": ("nigeria", "lagos", "abuja", "+234"),
+        "Ghana": ("ghana", "accra", "+233"),
+        "Egypt": ("egypt", "cairo", "+20"),
+    }
+    if not country:
+        country = next(
+            (name for name, aliases in signal_aliases.items() if any(alias in f" {haystack} " for alias in aliases)),
+            "",
+        )
+    city = ""
+    for candidate in COUNTRY_HINTS.get(country, ()):
+        if candidate.lower() in haystack:
+            city = candidate
+            break
+    return country, city
+
+
+def infer_manual_lead_type(text: str) -> str:
+    value = clean_text(text).lower()
+    if re.search(r"\b(fleet|corporate transport|rental fleet|fleet buyer)\b", value):
+        return "Fleet buyer"
+    if re.search(r"\b(import|importer|deliver(?:y|ing)? .* from china|export)\b", value):
+        return "Auto importer"
+    if re.search(r"\b(luxury|premium|supercar).{0,40}\b(showroom|dealer|cars)\b", value):
+        return "Luxury car showroom"
+    if re.search(r"\b(parallel import|grey import)\b", value):
+        return "Parallel import dealer"
+    return "EV dealer" if re.search(r"\b(electric vehicle|electric cars|\bev\b|new energy)\b", value) else "Auto importer"
+
+
+def infer_recommended_model(text: str) -> str:
+    value = clean_text(text).lower()
+    model_signals = (
+        (("maextro s800", "尊界 s800", "zunjie s800", "s800"), "尊界 S800"),
+        (("aito m9", "问界 m9", "wenjie m9"), "问界 M9"),
+        (("aito m8", "问界 m8", "wenjie m8"), "问界 M8"),
+        (("luxeed r7", "智界 r7", "zhijie r7"), "智界 R7"),
+        (("stelato s9", "享界 s9", "xiangjie s9"), "享界 S9"),
+    )
+    return next((model for aliases, model in model_signals if any(alias in value for alias in aliases)), "问界 M9")
+
+
+def parse_lead_source(params: dict[str, list[str]]) -> dict:
+    source_url = ensure_public_lead_source_url((params.get("url") or [""])[0])
+    social_source = is_social_profile_url(source_url)
+    page = ""
+    final_url = source_url
+    social_profile = None
+    website = ""
+    source_text = ""
+
+    if social_source:
+        social_profile = read_social_profile(
+            source_url,
+            account_type="公司账号",
+            relationship="手动网址解析",
+            fetch_remote=True,
+        )
+        final_url = normalize_public_url(social_profile.get("url", "")) or source_url
+        external_websites = [
+            item for item in social_profile.get("externalWebsites", [])
+            if is_business_website_url(item)
+        ]
+        website = external_websites[0] if external_websites else ""
+        source_text = clean_text(" ".join([
+            str(social_profile.get("title") or ""),
+            str(social_profile.get("description") or ""),
+            " ".join(social_profile.get("businessSignals") or []),
+        ]))
+        if website:
+            pages = official_site_pages(website)
+            if pages:
+                page = pages[0].get("html", "")
+                source_text = clean_text(f"{source_text} {page}")
+    else:
+        if not is_business_website_url(source_url):
+            raise ValueError("该网址不是可识别的企业官网或支持的社媒主页")
+        page, final_url = fetch_document(source_url, timeout=18)
+        final_url = ensure_public_lead_source_url(final_url)
+        website = final_url
+        visible = clean_text(page)
+        source_text = clean_text(f"{visible[:40000]} {visible[-20000:]}")
+
+    company = infer_company_from_source(final_url, page, social_profile)
+    country, city = infer_lead_location(source_text, final_url)
+    lead_type = infer_manual_lead_type(source_text)
+    model = infer_recommended_model(source_text)
+    research_params = {
+        "company": [company],
+        "country": [", ".join(item for item in (city, country) if item)],
+        "website": [website],
+        "sourceUrl": [final_url],
+        "socialUrls": [final_url if social_source else ""],
+        "model": [model],
+        "type": [lead_type],
+        "mode": ["fast"],
+    }
+    result = research_company(research_params)
+    source_name, source_type = source_category(final_url)
+    result.update({
+        "company": company,
+        "country": country,
+        "city": city,
+        "type": lead_type,
+        "model": model,
+        "source": source_name,
+        "origin": source_name,
+        "sourceType": source_type,
+        "sourceTitle": company,
+        "sourceUrl": final_url,
+        "sourceExcerpt": extract_meta(page) if page else source_text[:1100],
+        "websiteContent": extract_meta(page) if page else source_text[:1100],
+        "parsedSourceKind": "social" if social_source else "website",
+    })
+    if social_profile and not result.get("socialProfiles"):
+        result["socialProfiles"] = [social_profile]
+    return result
+
+
 def research_company(params: dict[str, list[str]]) -> dict:
     company = clean_text((params.get("company") or [""])[0])
     country = clean_text((params.get("country") or [""])[0])
@@ -11666,6 +11917,15 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if parsed.path == "/api/parse-lead-source":
+            try:
+                result = parse_lead_source(urllib.parse.parse_qs(parsed.query))
+                self.send_json(200, result)
+            except ValueError as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except (OSError, TimeoutError, UnicodeError, urllib.error.URLError, http.client.HTTPException) as exc:
+                self.send_json(502, {"ok": False, "error": f"网址解析失败：{exc}"})
             return
         if parsed.path == "/api/research":
             try:
