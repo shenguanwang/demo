@@ -6092,6 +6092,17 @@ def analyze_social_business_profile(
     }
 
 
+def is_social_auth_redirect(original_url: str, final_url: str) -> bool:
+    original_platform = social_platform(original_url)
+    final_platform = social_platform(final_url)
+    if original_platform and final_platform != original_platform:
+        return True
+    path = safe_urlparse(final_url).path.lower().rstrip("/")
+    return path in {"/login", "/checkpoint", "/recover", "/privacy/consent"} or path.startswith(
+        ("/login/", "/checkpoint/", "/recover/")
+    )
+
+
 def read_social_profile(
     url: str,
     account_type: str = "公司账号",
@@ -6126,6 +6137,8 @@ def read_social_profile(
         if not fetch_remote:
             raise TimeoutError("skip remote social fetch")
         page, final_url = fetch_document(url, timeout=18, user_agent=user_agent)
+        if is_social_auth_redirect(url, final_url):
+            final_url = url
         page_contacts = extract_public_contacts(page)
         external_websites = page_contacts.get("websites") or []
         meta = parse_meta_tags(page)
@@ -7934,6 +7947,8 @@ def official_site_pages(website: str) -> list[dict]:
         path = safe_urlparse(absolute).path.lower()
         if safe_urlparse(absolute).netloc != parsed.netloc:
             continue
+        if not is_business_website_url(absolute):
+            continue
         if any(word in path for word in ("/contact", "/about", "/team", "/management", "/leadership")):
             if absolute not in preferred:
                 preferred.append(absolute)
@@ -8234,6 +8249,29 @@ def infer_recommended_model(text: str) -> str:
     return next((model for aliases, model in model_signals if any(alias in value for alias in aliases)), "问界 M9")
 
 
+def social_profile_website_candidates(source_url: str, profile: dict | None) -> list[str]:
+    profile = profile if isinstance(profile, dict) else {}
+    source_path = safe_urlparse(source_url).path.strip("/")
+    handles = [
+        str(profile.get("handle") or "").strip().lstrip("@"),
+        source_path.split("/")[-1] if source_path else "",
+    ]
+    candidates: list[str] = []
+    for handle in handles:
+        if re.fullmatch(r"(?:[a-z0-9-]+\.)+[a-z]{2,}", handle, flags=re.I):
+            candidates.append(normalize_public_url(handle))
+    candidates.extend(extract_business_websites(" ".join([
+        str(profile.get("title") or ""),
+        str(profile.get("description") or ""),
+    ])))
+    candidates.extend(profile.get("externalWebsites") or [])
+    return list(dict.fromkeys(
+        normalize_public_url(item)
+        for item in candidates
+        if is_business_website_url(item)
+    ))[:8]
+
+
 def parse_lead_source(params: dict[str, list[str]]) -> dict:
     source_url = ensure_public_lead_source_url((params.get("url") or [""])[0])
     social_source = is_social_profile_url(source_url)
@@ -8251,21 +8289,23 @@ def parse_lead_source(params: dict[str, list[str]]) -> dict:
             fetch_remote=True,
         )
         final_url = normalize_public_url(social_profile.get("url", "")) or source_url
-        external_websites = [
-            item for item in social_profile.get("externalWebsites", [])
-            if is_business_website_url(item)
-        ]
-        website = external_websites[0] if external_websites else ""
         source_text = clean_text(" ".join([
             str(social_profile.get("title") or ""),
             str(social_profile.get("description") or ""),
             " ".join(social_profile.get("businessSignals") or []),
         ]))
-        if website:
-            pages = official_site_pages(website)
-            if pages:
-                page = pages[0].get("html", "")
-                source_text = clean_text(f"{source_text} {page}")
+        for candidate in social_profile_website_candidates(source_url, social_profile):
+            pages = official_site_pages(candidate)
+            candidate_text = " ".join(
+                clean_text(item.get("html", ""))[:20_000] or item.get("text", "")
+                for item in pages[:3]
+            )
+            if not pages or not has_automotive_business_signal(candidate_text):
+                continue
+            website = normalize_public_url(pages[0].get("url", "")) or candidate
+            page = pages[0].get("html", "")
+            source_text = clean_text(f"{source_text} {candidate_text}")
+            break
     else:
         if not is_business_website_url(source_url):
             raise ValueError("该网址不是可识别的企业官网或支持的社媒主页")
@@ -8276,7 +8316,7 @@ def parse_lead_source(params: dict[str, list[str]]) -> dict:
         source_text = clean_text(f"{visible[:40000]} {visible[-20000:]}")
 
     company = infer_company_from_source(final_url, page, social_profile)
-    country, city = infer_lead_location(source_text, final_url)
+    country, city = infer_lead_location(source_text, website or final_url)
     lead_type = infer_manual_lead_type(source_text)
     model = infer_recommended_model(source_text)
     research_params = {
