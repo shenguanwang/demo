@@ -7930,6 +7930,7 @@ async function init() {
     redirectToLogin();
     return;
   }
+  await hydrateCloudState(false);
   const startupSteps = [
     ["北京时间", renderBeijingGreeting],
     ["用户区域", renderUserCountryOptions],
@@ -7958,10 +7959,6 @@ async function init() {
     }
   });
   renderWebsiteLeads();
-  hydrateCloudState(true).catch((error) => {
-    setCloudSyncStatus("云端不可用，当前使用本地副本", "error");
-    console.error("Cloud workspace load failed:", error);
-  });
   loadUsers().catch((error) => {
     if ($("#userRows")) $("#userRows").innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
   });
