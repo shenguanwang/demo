@@ -1653,8 +1653,18 @@ function leadCustomerProfile(lead) {
   return { buyerType, positioning, likelyNeeds, purchaseCapacity, contactStrategy, riskNotes, summary };
 }
 
+function leadSkipsAiAndVerification(lead) {
+  return Boolean(lead?.isManualEntryOnly || lead?.isWebsiteLead || lead?.skipInformationVerification);
+}
+
+function leadSourceBadgeHtml(lead) {
+  if (lead?.isWebsiteLead) return '<span class="website-source-badge">独立站来源</span>';
+  if (lead?.isManualLead) return '<span class="manual-lead-badge">手动添加</span>';
+  return "";
+}
+
 function customerProfileHtml(lead) {
-  if (lead.isManualEntryOnly) return "";
+  if (leadSkipsAiAndVerification(lead)) return "";
   const profile = leadCustomerProfile(lead);
   return `
     <section class="lead-customer-profile">
@@ -2454,7 +2464,7 @@ function renderReview(options = {}) {
         <div class="review-list-main">
           <div class="review-list-company-line">
             <strong><span class="review-row-number">${rankIndex + 1}</span>${escapeHtml(lead.company)}</strong>
-            ${lead.isManualLead ? '<span class="manual-lead-badge">手动添加</span>' : ""}
+            ${leadSourceBadgeHtml(lead)}
           </div>
           <span>${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.origin || lead.sourceType || "公开来源")}</span>
         </div>
@@ -2475,21 +2485,23 @@ function renderReview(options = {}) {
     const isEditing = editingReviewLeadId === editId;
     const isDetailOpen = openReviewDetailKey === editId;
     const regionVerification = leadRegionVerification(lead);
+    const skipVerification = leadSkipsAiAndVerification(lead);
+    const entryLabel = lead.isWebsiteLead ? "客户主动提交" : "手动填写";
     return `
     <article class="review-card">
       <div class="review-title-row">
         <div class="review-title-main">
           <div class="review-card-meta">
             ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="tag">${escapeHtml(reviewModeLabel(reviewMode))}</span>`}
-            <span class="tag">#${rankIndex + 1} · ${lead.isManualEntryOnly ? "手动填写" : lead.researchAt ? "已完成公开信息尽调" : "待全网补全"}</span>
+            <span class="tag">#${rankIndex + 1} · ${skipVerification ? entryLabel : lead.researchAt ? "已完成公开信息尽调" : "待全网补全"}</span>
             <span class="review-captured-at">${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.source || lead.origin || "未知来源")}</span>
           </div>
           <div class="review-lead-name-row">
             <h3>${escapeHtml(lead.company)}</h3>
-            ${lead.isManualLead ? '<span class="manual-lead-badge">手动添加</span>' : ""}
-            ${lead.isManualEntryOnly ? "" : reviewAiResultHtml(lead)}
+            ${leadSourceBadgeHtml(lead)}
+            ${skipVerification ? "" : reviewAiResultHtml(lead)}
           </div>
-          <p>${escapeHtml(lead.isManualEntryOnly ? "此客户由人工填写，未执行公开信息核验。" : lead.researchSummary || "当前仅有原始发现来源，等待系统自动核验。")}</p>
+          <p>${escapeHtml(skipVerification ? (lead.isWebsiteLead ? "此线索由客户通过独立站表单主动提交，不执行公开信息核验。" : "此客户由人工填写，未执行公开信息核验。") : lead.researchSummary || "当前仅有原始发现来源，等待系统自动核验。")}</p>
         </div>
         <div class="review-title-side">
           ${reviewMode === "pending" ? "" : `<span class="review-approved-status">${reviewMode === "approved" ? "已进入客户池" : "已拒绝，保留为历史记录"}</span>`}
@@ -2498,7 +2510,7 @@ function renderReview(options = {}) {
       <div class="review-decision">
         <div class="decision-main">
           <span>系统建议</span>
-          <strong>${escapeHtml(lead.isManualEntryOnly ? "手动录入客户" : lead.sourceCoverage?.decision || (lead.researchAt ? "建议人工复核" : "等待自动尽调"))}</strong>
+          <strong>${escapeHtml(skipVerification ? (lead.isWebsiteLead ? "独立站主动询盘" : "手动录入客户") : lead.sourceCoverage?.decision || (lead.researchAt ? "建议人工复核" : "等待自动尽调"))}</strong>
         </div>
         <div class="decision-score"><span>商业机会评分</span><strong>${escapeHtml(lead.score)} 分 · ${escapeHtml(scoreTierLabel(lead.scoreTier))}</strong></div>
         <div><span>公开来源</span><strong>${escapeHtml(lead.sourceCoverage?.total || lead.evidenceSources?.length || 0)}</strong></div>
@@ -2515,12 +2527,12 @@ function renderReview(options = {}) {
           <dd>${escapeHtml(regionVerification.target)}</dd>
         </div>
         <div>
-          <dt>${lead.isManualEntryOnly ? "区域信息" : "区域核实"}</dt>
-          <dd>${lead.isManualEntryOnly ? `<span class="region-verification-status verified">手动填写</span>${escapeHtml([lead.country, lead.city].filter(Boolean).join(" · ") || "未填写")}` : `<span class="region-verification-status ${regionVerification.status}">${escapeHtml(regionVerification.statusLabel)}</span>${escapeHtml(regionVerification.verifiedLocation)}`}</dd>
+          <dt>${skipVerification ? "区域信息" : "区域核实"}</dt>
+          <dd>${skipVerification ? `<span class="region-verification-status verified">${escapeHtml(entryLabel)}</span>${escapeHtml([lead.country, lead.city].filter(Boolean).join(" · ") || "未填写")}` : `<span class="region-verification-status ${regionVerification.status}">${escapeHtml(regionVerification.statusLabel)}</span>${escapeHtml(regionVerification.verifiedLocation)}`}</dd>
         </div>
         <div class="region-evidence">
-          <dt>${lead.isManualEntryOnly ? "信息来源" : "区域依据"}</dt>
-          <dd>${escapeHtml(lead.isManualEntryOnly ? "人工录入，不执行自动核验" : regionVerification.evidence)}</dd>
+          <dt>${skipVerification ? "信息来源" : "区域依据"}</dt>
+          <dd>${escapeHtml(skipVerification ? (lead.isWebsiteLead ? "YIMING AUTO 独立站表单" : "人工录入，不执行自动核验") : regionVerification.evidence)}</dd>
         </div>
         <div>
           <dt>客户官网</dt>
@@ -2531,16 +2543,16 @@ function renderReview(options = {}) {
           <dd>${escapeHtml([lead.contactName, lead.contactRole].filter(Boolean).join(" · ") || "未发现")}</dd>
         </div>
         <div class="key-email">
-          <dt>${lead.isManualEntryOnly ? "邮箱（手动填写）" : "已核验邮箱"}</dt>
-          <dd>${lead.isManualEntryOnly ? (lead.email ? `<a class="email-address" href="mailto:${escapeHtml(lead.email)}">${escapeHtml(lead.email)}</a>` : `<span class="email-empty">未填写</span>`) : renderEmailEvidence(lead)}</dd>
+          <dt>${skipVerification ? (lead.isWebsiteLead ? "邮箱（客户提交）" : "邮箱（手动填写）") : "已核验邮箱"}</dt>
+          <dd>${skipVerification ? (lead.email ? `<a class="email-address" href="mailto:${escapeHtml(lead.email)}">${escapeHtml(lead.email)}</a>` : `<span class="email-empty">未填写</span>`) : renderEmailEvidence(lead)}</dd>
         </div>
         <div>
           <dt>电话 / WhatsApp</dt>
           <dd>${renderContactSummary(lead)}</dd>
         </div>
         <div>
-          <dt>${lead.isManualEntryOnly ? "录入方式" : "可信度"}</dt>
-          <dd><strong>${lead.isManualEntryOnly ? "手动添加" : `${escapeHtml(lead.confidenceLabel || "待确认")} · ${escapeHtml(lead.confidence || 0)}%`}</strong></dd>
+          <dt>${skipVerification ? "录入方式" : "可信度"}</dt>
+          <dd><strong>${skipVerification ? (lead.isWebsiteLead ? "独立站客户提交" : "手动添加") : `${escapeHtml(lead.confidenceLabel || "待确认")} · ${escapeHtml(lead.confidence || 0)}%`}</strong></dd>
         </div>
         <div>
           <dt>推荐车型</dt>
@@ -2604,7 +2616,7 @@ function renderReview(options = {}) {
       ${reviewMode === "rejected" && lead.rejectReason ? `<div class="reject-reason-readonly"><strong>拒绝原因</strong><p>${escapeHtml(lead.rejectReason)}</p></div>` : ""}
       ${reviewMode === "rejected" ? `<div class="restore-rejected-actions"><button class="primary" type="button" data-review-action="restore" data-index="${index}">退回未审核</button></div>` : ""}
       ${reviewMode === "pending" && isEditing ? renderLeadEditForm(lead, index, editId) : ""}
-      ${lead.isManualEntryOnly ? "" : `<details class="review-more" data-review-detail-key="${escapeHtml(editId)}" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}" ${isDetailOpen ? "open" : ""}>
+      ${skipVerification ? "" : `<details class="review-more" data-review-detail-key="${escapeHtml(editId)}" data-review-detail-id="${escapeHtml(lead.id || index)}" data-review-detail-index="${index}" data-review-detail-mode="${reviewMode}" ${isDetailOpen ? "open" : ""}>
         <summary>
           <span>查看全部来源与核验详情</span>
           <small class="review-source-badges">
@@ -3371,8 +3383,8 @@ function websiteLeadToReviewLead(lead) {
     city: "",
     type: "Official website inquiry",
     source: lead.sourceUrl || "https://www.yiming-auto.com/#contact",
-    origin: "Official website",
-    sourceType: "Official website form",
+    origin: "独立站来源",
+    sourceType: "独立站客户表单",
     sourceTitle: `${lead.company || "Website inquiry"} · ${websiteLeadModelLabel(lead)}`,
     sourceUrl: lead.sourceUrl || "https://www.yiming-auto.com/#contact",
     sourceExcerpt: lead.message || text,
@@ -3387,6 +3399,19 @@ function websiteLeadToReviewLead(lead) {
     whatsapp: lead.whatsapp || "",
     model: lead.model || websiteLeadModelLabel(lead),
     website: text,
+    isWebsiteLead: true,
+    skipInformationVerification: true,
+    aiReview: {},
+    confidence: 0,
+    confidenceLabel: "客户主动提交",
+    sourceCoverage: {
+      total: 1,
+      official: 1,
+      independentDomains: 0,
+      contactable: Boolean(lead.email || lead.whatsapp || lead.contact),
+      missingFields: [],
+      decision: "独立站主动询盘"
+    },
     reason: `官网主动询盘：${lead.country || "未填写地区"}，${websiteLeadModelLabel(lead)}，预计 ${lead.quantity || 1} 台。`,
     next: "先确认国家、车型、数量、配置和交付时间，再生成开发信或报价。",
     createdAt: lead.createdAt || lead.receivedAt || new Date().toISOString(),
@@ -3593,7 +3618,7 @@ function renderCrm() {
       <td>
         <div class="crm-customer-title">
           <button class="link-button crm-customer-link" type="button" data-crm-action="review" data-index="${index}">${escapeHtml(lead.company)}</button>
-          ${lead.isManualLead ? '<span class="manual-lead-badge">手动添加</span>' : ""}
+          ${leadSourceBadgeHtml(lead)}
         </div>
         <div class="crm-contact-line">${escapeHtml(lead.contactName || primaryEmailForLead(lead) || lead.phone || "暂无联系人")}</div>
         <div class="crm-contact-chips">${crmLeadContactSummary(lead)}</div>
@@ -3786,6 +3811,12 @@ function primaryLeadPageEmailRecord(raw) {
 }
 
 function normalizeLead(raw) {
+  const isWebsiteLead = Boolean(
+    raw.isWebsiteLead
+    || raw.websiteLeadId
+    || /official website form|独立站客户表单/i.test(String(raw.sourceType || ""))
+    || /official website|独立站来源/i.test(String(raw.origin || ""))
+  );
   const primaryPageEmail = raw.email ? null : primaryLeadPageEmailRecord(raw);
   const effectiveEmail = raw.email || primaryPageEmail?.email || "";
   const promotedEmailSources = primaryPageEmail ? [{
@@ -3908,6 +3939,9 @@ function normalizeLead(raw) {
     accountType: raw.accountType || "公司客户",
     isManualLead: Boolean(raw.isManualLead),
     isManualEntryOnly: Boolean(raw.isManualEntryOnly),
+    isWebsiteLead,
+    websiteLeadId: raw.websiteLeadId || "",
+    skipInformationVerification: Boolean(raw.skipInformationVerification || isWebsiteLead),
     isDuplicate: Boolean(raw.isDuplicate),
     isCompetitor: Boolean(raw.isCompetitor),
     confidence: Number(raw.confidence || 0),
@@ -4025,7 +4059,7 @@ function restoreRejectedLead(index) {
 
 async function researchLead(index, options = {}) {
   const lead = reviewLeads[index];
-  if (!lead || lead.researching) return;
+  if (!lead || lead.researching || leadSkipsAiAndVerification(lead)) return;
   const mode = options.mode || "full";
   lead.researching = true;
   renderReview();
@@ -4096,7 +4130,7 @@ async function researchAllLeads() {
   const button = $("#researchAllLeads");
   const pending = reviewLeads
     .map((lead, index) => ({ lead, index }))
-    .filter(({ lead }) => !lead.researchAt);
+    .filter(({ lead }) => !lead.researchAt && !leadSkipsAiAndVerification(lead));
   if (!pending.length) {
     button.textContent = "当前线索已完成核验";
     setTimeout(() => { button.textContent = "全网补全当前线索"; }, 1600);

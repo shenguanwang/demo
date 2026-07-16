@@ -4866,6 +4866,23 @@ textarea {
   white-space: nowrap;
 }
 
+.website-source-badge {
+  padding: 2px 6px;
+  border: 1px solid #b8cee8;
+  border-radius: 999px;
+  background: #eef5fd;
+  color: #24558b;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.review-list-main .website-source-badge {
+  flex: 0 0 auto;
+  color: #24558b;
+  font-size: 9px;
+}
+
 .crm-contact-line {
   margin-top: 5px;
   color: #5c6877;
