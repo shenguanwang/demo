@@ -5683,6 +5683,8 @@ def is_valid_http_url(value: str) -> bool:
 
 SOCIAL_OR_PLATFORM_DOMAINS = (
     "instagram.com", "facebook.com", "linkedin.com", "tiktok.com",
+    "tiktokcdn.com", "tiktokcdn-us.com", "tiktokv.us", "tiktokw.us",
+    "byteoversea.com", "ibytedtos.com", "ibyteimg.com", "muscdn.com",
     "youtube.com", "youtu.be", "t.me", "telegram.me", "telegram.dog",
     "x.com", "twitter.com", "threads.net", "pinterest.", "reddit.com",
     "vk.com", "wa.me", "whatsapp.com", "linktr.ee", "beacons.ai",
@@ -6030,7 +6032,11 @@ def analyze_social_business_profile(
         if any(term in lower for term in terms)
     ]
     role = next(
-        (label for label, terms in decision_roles.items() if any(term in lower for term in terms)),
+        (
+            label
+            for label, terms in decision_roles.items()
+            if any(re.search(rf"\b{re.escape(term)}\b", lower) for term in terms)
+        ),
         "",
     )
     contact_signals = []
@@ -6051,9 +6057,11 @@ def analyze_social_business_profile(
     person_markers = (
         "owner", "founder", "manager", "director", "ceo", "entrepreneur",
     )
-    if role or "个人" in account_type or any(marker in lower for marker in person_markers):
+    explicit_person_type = "个人" in account_type and "待核验" not in account_type
+    explicit_company_type = "公司" in account_type and "待核验" not in account_type
+    if role or explicit_person_type or any(marker in lower for marker in person_markers):
         detected_type = "个人决策人"
-    elif business_signals or "公司" in account_type or any(marker in lower for marker in company_markers):
+    elif business_signals or explicit_company_type or any(marker in lower for marker in company_markers):
         detected_type = "公司商业账号"
     else:
         detected_type = "账号类型待核验"
@@ -6103,6 +6111,94 @@ def is_social_auth_redirect(original_url: str, final_url: str) -> bool:
     )
 
 
+def parse_tiktok_public_profile(page: str) -> dict:
+    match = re.search(
+        r'<script[^>]+id=["\']__UNIVERSAL_DATA_FOR_REHYDRATION__["\'][^>]*>([\s\S]*?)</script>',
+        page,
+        flags=re.I,
+    )
+    if not match:
+        return {}
+    try:
+        payload = json.loads(html.unescape(match.group(1)).strip())
+    except (json.JSONDecodeError, TypeError, ValueError):
+        return {}
+    scope = payload.get("__DEFAULT_SCOPE__") if isinstance(payload, dict) else None
+    detail = scope.get("webapp.user-detail") if isinstance(scope, dict) else None
+    user_info = detail.get("userInfo") if isinstance(detail, dict) else None
+    user = user_info.get("user") if isinstance(user_info, dict) else None
+    stats = user_info.get("stats") if isinstance(user_info, dict) else None
+    if not isinstance(user, dict):
+        return {}
+    return {
+        "handle": clean_text(str(user.get("uniqueId") or "")),
+        "title": clean_text(str(user.get("nickname") or user.get("uniqueId") or "")),
+        "description": clean_text(str(user.get("signature") or "")),
+        "followers": stats.get("followerCount") if isinstance(stats, dict) else "",
+        "isOrganization": user.get("isOrganization") == 1,
+        "private": user.get("privateAccount") is True,
+        "verified": user.get("verified") is True,
+    }
+
+
+def read_instagram_profile_via_apify(url: str) -> dict:
+    token = get_apify_api_token()
+    if not token:
+        return {}
+    fields = (
+        "inputUrl", "url", "username", "fullName", "biography", "externalUrl", "externalUrls",
+        "isBusinessAccount", "businessCategoryName", "businessAddress", "followersCount",
+        "postsCount", "cityName", "addressStreet", "businessEmail", "businessPhoneNumber",
+        "private", "verified", "error", "errorDescription",
+    )
+    try:
+        items, status = run_apify_actor_dataset(
+            "apify/instagram-scraper",
+            {
+                "directUrls": [url],
+                "resultsType": "details",
+                "resultsLimit": 1,
+                "addParentData": False,
+            },
+            token,
+            APIFY_RUN_TIMEOUT_SECONDS,
+            2,
+            fields,
+        )
+    except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
+        record_api_usage("apify:instagram", False, detail="apify/instagram-scraper:manual-profile")
+        return {}
+    record_api_usage("apify:instagram", bool(items), detail=f"apify/instagram-scraper:{status}:manual-profile")
+    expected_handle = safe_urlparse(url).path.strip("/").split("/")[-1].lower()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        if item.get("error") == "not_found":
+            return {"handle": expected_handle, "notFound": True}
+        if item.get("error") or item.get("private") is True:
+            continue
+        handle = clean_text(str(item.get("username") or "")).lstrip("@").lower()
+        if handle != expected_handle:
+            continue
+        description_parts = [
+            item.get("biography"), item.get("businessCategoryName"), item.get("businessAddress"),
+            item.get("cityName"), item.get("addressStreet"), item.get("businessEmail"),
+            item.get("businessPhoneNumber"),
+        ]
+        return {
+            "handle": handle,
+            "title": clean_text(str(item.get("fullName") or handle)),
+            "description": clean_text(" ".join(str(value) for value in description_parts if value)),
+            "externalWebsites": apify_external_links(item),
+            "email": clean_text(str(item.get("businessEmail") or "")),
+            "phone": clean_text(str(item.get("businessPhoneNumber") or "")),
+            "isOrganization": item.get("isBusinessAccount") is True,
+            "verified": item.get("verified") is True,
+            "followers": item.get("followersCount") or "",
+        }
+    return {}
+
+
 def read_social_profile(
     url: str,
     account_type: str = "公司账号",
@@ -6133,6 +6229,10 @@ def read_social_profile(
     description = ""
     final_url = url
     external_websites: list[str] = []
+    platform_confirmed_organization = False
+    profile_not_found = False
+    public_email = ""
+    public_phone = ""
     try:
         if not fetch_remote:
             raise TimeoutError("skip remote social fetch")
@@ -6140,7 +6240,11 @@ def read_social_profile(
         if is_social_auth_redirect(url, final_url):
             final_url = url
         page_contacts = extract_public_contacts(page)
-        external_websites = page_contacts.get("websites") or []
+        external_websites = (
+            []
+            if platform in {"Instagram", "TikTok"}
+            else page_contacts.get("websites") or []
+        )
         meta = parse_meta_tags(page)
         title = meta.get("og:title") or meta.get("twitter:title") or title
         description = (
@@ -6149,6 +6253,17 @@ def read_social_profile(
             or meta.get("description")
             or ""
         )
+        if platform == "TikTok":
+            public_profile = parse_tiktok_public_profile(page)
+            if public_profile:
+                handle = public_profile.get("handle") or handle
+                title = public_profile.get("title") or title
+                description = public_profile.get("description") or description
+                if public_profile.get("followers"):
+                    description = clean_text(f"{description} followers {public_profile['followers']}")
+                if public_profile.get("isOrganization"):
+                    account_type = "公司账号"
+                    platform_confirmed_organization = True
         if platform == "YouTube":
             title = meta.get("og:title") or title
             description = meta.get("og:description") or meta.get("description") or description
@@ -6173,6 +6288,24 @@ def read_social_profile(
                 pass
     except (OSError, TimeoutError, UnicodeError):
         pass
+    if platform == "Instagram" and fetch_remote and not description:
+        apify_profile = read_instagram_profile_via_apify(url)
+        if apify_profile:
+            profile_not_found = apify_profile.get("notFound") is True
+            handle = apify_profile.get("handle") or handle
+            title = apify_profile.get("title") or title
+            description = apify_profile.get("description") or description
+            external_websites = list(dict.fromkeys([
+                *external_websites,
+                *(apify_profile.get("externalWebsites") or []),
+            ]))
+            public_email = apify_profile.get("email") or ""
+            public_phone = apify_profile.get("phone") or ""
+            if apify_profile.get("followers"):
+                description = clean_text(f"{description} followers {apify_profile['followers']}")
+            if apify_profile.get("isOrganization"):
+                account_type = "公司账号"
+                platform_confirmed_organization = True
     if not description:
         description = "平台未向匿名访问返回公开简介，请打开原始主页人工核验。"
     analysis = analyze_social_business_profile(
@@ -6182,6 +6315,8 @@ def read_social_profile(
     )
     if analysis["accountType"] != "账号类型待核验":
         account_type = analysis["accountType"]
+    if platform_confirmed_organization:
+        account_type = "公司商业账号"
     return {
         "platform": platform,
         "accountType": account_type,
@@ -6191,6 +6326,9 @@ def read_social_profile(
         "url": final_url,
         "handle": handle[:120],
         "externalWebsites": external_websites[:5],
+        "profileNotFound": profile_not_found,
+        "publicEmail": public_email,
+        "publicPhone": public_phone,
         **analysis,
         "accountType": account_type,
     }
@@ -8235,7 +8373,9 @@ def infer_manual_lead_type(text: str) -> str:
         return "Luxury car showroom"
     if re.search(r"\b(parallel import|grey import)\b", value):
         return "Parallel import dealer"
-    return "EV dealer" if re.search(r"\b(electric vehicle|electric cars|\bev\b|new energy)\b", value) else "Auto importer"
+    if re.search(r"\b(electric vehicle|electric cars|\bev\b|new energy)\b", value):
+        return "EV dealer"
+    return "Auto business" if has_automotive_business_signal(value) else "待确认"
 
 
 def infer_recommended_model(text: str) -> str:
@@ -8322,6 +8462,8 @@ def parse_lead_source(params: dict[str, list[str]]) -> dict:
             relationship="手动网址解析",
             fetch_remote=True,
         )
+        if social_profile.get("profileNotFound"):
+            raise ValueError("Instagram 公开主页不存在或已失效")
         final_url = normalize_public_url(social_profile.get("url", "")) or source_url
         source_text = clean_text(" ".join([
             str(social_profile.get("title") or ""),
@@ -8369,6 +8511,21 @@ def parse_lead_source(params: dict[str, list[str]]) -> dict:
         "inferWebsite": ["1" if website or not social_source else "0"],
     }
     result = research_company(research_params)
+    if social_source and not website:
+        for field, sources_field in (
+            ("email", "emailSources"),
+            ("phone", "phoneSources"),
+            ("whatsapp", "whatsappSources"),
+        ):
+            result[field] = ""
+            result[sources_field] = []
+        direct_source = [{"url": final_url, "name": source_category(final_url)[0]}]
+        if social_profile.get("publicEmail"):
+            result["email"] = social_profile["publicEmail"]
+            result["emailSources"] = [{"value": result["email"], "sources": direct_source}]
+        if social_profile.get("publicPhone"):
+            result["phone"] = social_profile["publicPhone"]
+            result["phoneSources"] = [{"value": result["phone"], "sources": direct_source}]
     source_name, source_type = source_category(final_url)
     result.update({
         "company": company,
