@@ -1763,15 +1763,6 @@ function reviewAiResultHtml(lead) {
     : "";
 }
 
-function reviewRecommendationHtml(lead) {
-  const { recommendation } = reviewReasonParts(lead);
-  return `
-    <div class="review-recommendation">
-      <p><strong>推荐联系理由：</strong><span>${escapeHtml(recommendation || "等待核验")}</span></p>
-    </div>
-  `;
-}
-
 function scoreDimensionHtml(label, value, maximum) {
   const score = Number(value || 0);
   return `<span class="${score > 0 ? "has-score" : ""}">${escapeHtml(label)} <strong>${escapeHtml(score)}/${escapeHtml(maximum)}</strong></span>`;
@@ -2554,7 +2545,6 @@ function renderReview(options = {}) {
           <dd>${escapeHtml([...(lead.intentSignals || []), ...(lead.businessSignals || [])].join("、") || "汽车业务匹配，待进一步确认采购意向")}</dd>
         </div>
       </dl>
-      ${reviewRecommendationHtml(lead)}
       ${customerProfileHtml(lead)}
       ${(lead.reviewNotes || (lead.attachments || []).length) ? `
         <section class="lead-review-notes">
@@ -2809,9 +2799,6 @@ function renderLeadEditForm(lead, index, editId) {
         <label class="lead-edit-wide">机会信号（每行一个）
           <textarea name="signals" rows="3">${escapeHtml(leadEditTextListValue([...(lead.intentSignals || []), ...(lead.businessSignals || [])]))}</textarea>
         </label>
-        <label class="lead-edit-wide">推荐联系理由
-          <textarea name="contactReason" rows="4">${escapeHtml(lead.contactReason || lead.reason || "")}</textarea>
-        </label>
         <label class="lead-edit-wide">人工备注
           <textarea name="reviewNotes" rows="4" placeholder="可记录人工判断、截图说明、客户补充信息">${escapeHtml(lead.reviewNotes || "")}</textarea>
         </label>
@@ -2860,7 +2847,6 @@ async function saveReviewLeadEdit(index, form) {
     recommendedModels: recommendedModels.length ? recommendedModels : lead.recommendedModels,
     intentSignals: signals,
     businessSignals: [],
-    contactReason: String(data.contactReason || "").trim(),
     reviewNotes: String(data.reviewNotes || "").trim(),
     attachments,
     manualEditedAt: new Date().toISOString(),
