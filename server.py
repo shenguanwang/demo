@@ -8210,6 +8210,7 @@ def infer_lead_location(text: str, url: str) -> tuple[str, str]:
         "Nigeria": ("nigeria", "lagos", "abuja", "+234"),
         "Ghana": ("ghana", "accra", "+233"),
         "Egypt": ("egypt", "cairo", "+20"),
+        "Uzbekistan": ("uzbekistan", "o'zbekiston", "tashkent", "toshkent", "+998"),
     }
     if not country:
         country = next(
@@ -8272,6 +8273,39 @@ def social_profile_website_candidates(source_url: str, profile: dict | None) -> 
     ))[:8]
 
 
+def website_matches_social_profile(candidate: str, pages: list[dict], profile: dict | None) -> bool:
+    profile = profile if isinstance(profile, dict) else {}
+    identity_text = clean_text(" ".join([
+        str(profile.get("title") or ""),
+        str(profile.get("handle") or ""),
+    ])).lower()
+    stop_words = {
+        "auto", "autos", "car", "cars", "motor", "motors", "automotive",
+        "official", "company", "group", "dealer", "dealership", "showroom",
+        "avtosalon", "uzbekistan", "tashkent", "toshkent",
+    }
+    identity_tokens = [
+        token for token in re.findall(r"[a-z0-9]+", identity_text)
+        if len(token) >= 4 and token not in stop_words
+    ]
+    handle = re.sub(r"[^a-z0-9]", "", str(profile.get("handle") or "").lower())
+    handle_variants = {handle} if len(handle) >= 5 else set()
+    for suffix in ("uz", "kz", "kg", "az", "ae", "uae", "sa", "qa"):
+        if handle.endswith(suffix) and len(handle) - len(suffix) >= 5:
+            handle_variants.add(handle[:-len(suffix)])
+    haystack = " ".join([
+        candidate,
+        *[
+            f"{item.get('url', '')} {clean_text(item.get('html', ''))[:30_000]} {item.get('text', '')}"
+            for item in pages[:3]
+        ],
+    ]).lower()
+    compact_haystack = re.sub(r"[^a-z0-9]", "", haystack)
+    return any(value in compact_haystack for value in handle_variants) or any(
+        token in haystack for token in identity_tokens
+    )
+
+
 def parse_lead_source(params: dict[str, list[str]]) -> dict:
     source_url = ensure_public_lead_source_url((params.get("url") or [""])[0])
     social_source = is_social_profile_url(source_url)
@@ -8300,7 +8334,11 @@ def parse_lead_source(params: dict[str, list[str]]) -> dict:
                 clean_text(item.get("html", ""))[:20_000] or item.get("text", "")
                 for item in pages[:3]
             )
-            if not pages or not has_automotive_business_signal(candidate_text):
+            if (
+                not pages
+                or not has_automotive_business_signal(candidate_text)
+                or not website_matches_social_profile(candidate, pages, social_profile)
+            ):
                 continue
             website = normalize_public_url(pages[0].get("url", "")) or candidate
             page = pages[0].get("html", "")
@@ -8328,6 +8366,7 @@ def parse_lead_source(params: dict[str, list[str]]) -> dict:
         "model": [model],
         "type": [lead_type],
         "mode": ["fast"],
+        "inferWebsite": ["1" if website or not social_source else "0"],
     }
     result = research_company(research_params)
     source_name, source_type = source_category(final_url)
@@ -8358,6 +8397,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
     lead_type = clean_text((params.get("type") or [""])[0])
     research_mode = clean_text((params.get("mode") or ["full"])[0]).lower()
     fast_mode = research_mode in {"fast", "batch", "quick"}
+    infer_website = clean_text((params.get("inferWebsite") or ["1"])[0]).lower() not in {"0", "false", "no"}
     website = normalize_public_url((params.get("website") or [""])[0])
     source_url = normalize_public_url((params.get("sourceUrl") or [""])[0])
     provided_social_urls = [
@@ -8393,7 +8433,7 @@ def research_company(params: dict[str, list[str]]) -> dict:
     }
 
     inferred_site_pages: list[dict] = []
-    if not website:
+    if not website and infer_website:
         website, inferred_site_pages = infer_company_website(company)
     website_audit = {
         "url": website,
