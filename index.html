@@ -695,12 +695,14 @@
               <label>任务记录保留天数<input type="number" min="1" max="365" data-control-path="data.jobRetentionDays"></label>
               <label>搜索记录保留天数<input type="number" min="7" max="1095" data-control-path="data.searchRecordRetentionDays"></label>
               <label>备份提醒间隔（天）<input type="number" min="1" max="90" data-control-path="data.backupReminderDays"></label>
+              <label>历史数据截止日期<input id="adminPruneCutoffDate" type="date"></label>
             </div>
             <div class="admin-operation-grid">
               <button type="button" data-admin-operation="download-backup">导出业务备份</button>
               <button type="button" data-admin-operation="restore-backup">恢复业务备份</button>
               <button type="button" data-admin-operation="clean-old-jobs">清理过期任务</button>
               <button type="button" data-admin-operation="deduplicate">重建重复检测</button>
+              <button class="danger-button" type="button" data-admin-operation="prune-search-data">清理截止日期前搜索数据</button>
               <button class="danger-button" type="button" data-admin-operation="clear-tombstones">清除删除记录指纹</button>
               <button class="danger-button" type="button" data-admin-operation="clear-rejected-memory">清除拒绝线索记忆</button>
             </div>
@@ -1239,6 +1241,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260716-manual-lead-modal"></script>
+  <script src="./script.js?v=20260716-prune-search-data"></script>
 </body>
 </html>
