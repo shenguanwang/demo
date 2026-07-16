@@ -5214,9 +5214,14 @@ def is_youtube_automotive_lead(title: str, snippet: str, url: str = "") -> bool:
     return bool(has_auto_subject and has_trade_context)
 
 
-def youtube_query_plan(searches: list[tuple[str, str]], source_mode: str) -> tuple[list[tuple[str, str]], int]:
+def youtube_query_plan(
+    searches: list[tuple[str, str]],
+    source_mode: str,
+    country: str = "",
+) -> tuple[list[tuple[str, str]], int]:
     if source_mode == "youtube":
-        query_limit, per_query_limit = 8, 8
+        query_limit = 6 if country_search_meta(country).get("code") == "qa" else 10
+        per_query_limit = 12 if query_limit < 10 else 50
     elif source_mode == "social":
         query_limit, per_query_limit = 6, 8
     else:
@@ -5232,6 +5237,177 @@ def youtube_query_plan(searches: list[tuple[str, str]], source_mode: str) -> tup
         if len(deduped) >= query_limit:
             break
     return deduped, per_query_limit
+
+
+def youtube_discovery_searches(
+    country: str,
+    cities: list[str],
+    account_scope: str,
+) -> list[tuple[str, str]]:
+    country_code = country_search_meta(country).get("code", "").lower()
+    if country_code == "qa":
+        company_queries = [
+            "Automall Qatar used cars",
+            "Knightsbridge Automotive Qatar",
+            "Diar Al Azz Cars Qatar",
+            "AutoZ Qatar used cars",
+            "QMotor Qatar cars",
+            "Auto Class Qatar cars",
+        ]
+    else:
+        active_places = list(dict.fromkeys([*(cities[:5]), country_search_meta(country).get("location", "")]))
+        company_queries = [
+            f"{place} {term}"
+            for place in active_places
+            if place
+            for term in ("car dealer", "used cars", "car showroom")
+        ]
+    searches: list[tuple[str, str]] = []
+    if account_scope in ("company", "both"):
+        searches.extend((query, "company account") for query in company_queries)
+    if account_scope in ("person", "both"):
+        searches.extend(
+            (f"{query} owner manager", "owner or manager account")
+            for query in company_queries[:4]
+        )
+    return searches
+
+
+YOUTUBE_LOCAL_AUTO_BRANDS = (
+    "toyota", "lexus", "nissan", "infiniti", "renault", "hyundai", "genesis",
+    "geely", "mg motor", "gac", "mitsubishi", "mercedes", "bmw", "mini",
+    "jaguar", "land rover", "volvo", "honda", "ford", "kia", "jetour", "chery",
+)
+
+YOUTUBE_QATAR_VERIFIED_HANDLES = (
+    "toyotaqatar", "lexusqatar", "nissanqatar580", "infinitiqtr1285",
+    "renaultqatar3194", "hyundaiqatarskylineautomot4172", "geelyautoqatar",
+    "mgmotorqatar", "gac-qatar", "mitsubishimotorsqatar", "nbkmercedesbenz",
+    "alfardanautomobiles3090", "volvocarqatar", "qatarhonda", "fordqtr",
+    "kiaqatar", "jetourqatar1", "cheryqatar6926",
+)
+
+
+def search_youtube_verified_handles(handles: tuple[str, ...], country: str) -> list[dict]:
+    api_key = get_youtube_api_key()
+    if not api_key:
+        return []
+    country_code = country_search_meta(country).get("code", "").upper()
+    results: list[dict] = []
+    for raw_handle in handles:
+        handle = raw_handle.strip().lstrip("@")
+        channel_params = {
+            "part": "snippet,brandingSettings,contentDetails",
+            "forHandle": handle,
+            "fields": (
+                "items(id,snippet(title,description,customUrl),brandingSettings(channel(country)),"
+                "contentDetails(relatedPlaylists(uploads)))"
+            ),
+            "key": api_key,
+        }
+        try:
+            channel_payload = fetch_json(
+                "https://www.googleapis.com/youtube/v3/channels?" + urllib.parse.urlencode(channel_params),
+                timeout=20,
+            )
+            record_api_usage("youtube", True, detail="channels.forHandle")
+        except (OSError, ValueError, TimeoutError, http.client.HTTPException, json.JSONDecodeError):
+            record_api_usage("youtube", False, detail="channels.forHandle")
+            continue
+        channel_items = channel_payload.get("items") if isinstance(channel_payload, dict) else None
+        if not channel_items:
+            continue
+        channel = channel_items[0]
+        snippet = channel.get("snippet") or {}
+        branding = channel.get("brandingSettings") or {}
+        channel_country = str((branding.get("channel") or {}).get("country") or "").upper()
+        if country_code and channel_country and channel_country != country_code:
+            continue
+        uploads = (
+            ((channel.get("contentDetails") or {}).get("relatedPlaylists") or {}).get("uploads")
+            or ""
+        )
+        if not uploads:
+            continue
+        playlist_params = {
+            "part": "snippet,contentDetails",
+            "playlistId": uploads,
+            "maxResults": "1",
+            "fields": "items(snippet(title,description,publishedAt),contentDetails(videoPublishedAt))",
+            "key": api_key,
+        }
+        try:
+            playlist_payload = fetch_json(
+                "https://www.googleapis.com/youtube/v3/playlistItems?" + urllib.parse.urlencode(playlist_params),
+                timeout=20,
+            )
+            record_api_usage("youtube", True, detail="playlistItems.latest")
+        except (OSError, ValueError, TimeoutError, http.client.HTTPException, json.JSONDecodeError):
+            record_api_usage("youtube", False, detail="playlistItems.latest")
+            continue
+        playlist_items = playlist_payload.get("items") if isinstance(playlist_payload, dict) else None
+        if not playlist_items:
+            continue
+        latest = playlist_items[0]
+        latest_snippet = latest.get("snippet") or {}
+        published_at = (
+            (latest.get("contentDetails") or {}).get("videoPublishedAt")
+            or latest_snippet.get("publishedAt")
+            or ""
+        )
+        if not is_recent_youtube_video_date(published_at):
+            continue
+        custom_url = snippet.get("customUrl") or f"@{handle}"
+        results.append({
+            "title": snippet.get("title") or handle,
+            "url": f"https://www.youtube.com/{custom_url}" if custom_url.startswith("@") else f"https://www.youtube.com/@{handle}",
+            "snippet": clean_text(" ".join(filter(None, [
+                snippet.get("description", ""),
+                latest_snippet.get("title", ""),
+                latest_snippet.get("description", ""),
+            ])))[:1200],
+            "handle": published_at,
+            "channelId": channel.get("id", ""),
+            "country": channel_country,
+            "latestVideoPublishedAt": published_at,
+            "latestVideoTitle": latest_snippet.get("title", ""),
+            "apiSource": "YouTube Data API v3 verified handle",
+            "youtubeVerifiedHandle": True,
+        })
+    return results
+
+
+def is_local_official_youtube_auto_channel(item: dict, country: str) -> bool:
+    if country_search_meta(country).get("code") != "qa":
+        return False
+    title = clean_text(str(item.get("title") or ""))
+    snippet = clean_text(str(item.get("snippet") or ""))
+    url = normalize_public_url(str(item.get("url") or ""))
+    lower_title = title.lower()
+    lower_text = f"{title} {snippet} {url}".lower()
+    if any(region in lower_title for region in (
+        "middle east", "mena", " mea", "europe", "global", "international",
+        "usa", " uk", "bangladesh", "australia",
+    )) and "qatar" not in lower_title:
+        return False
+    has_brand = any(brand in lower_title for brand in YOUTUBE_LOCAL_AUTO_BRANDS) or bool(
+        item.get("youtubeVerifiedHandle")
+        and has_automotive_business_signal(lower_text)
+    )
+    has_market_identity = bool(
+        "qatar" in lower_title
+        or (
+            re.search(r"(?:qatar|doha|\bqa\b|\bqtr\b)", lower_text, re.I)
+            and (item.get("country") == "QA" or item.get("youtubeVerifiedHandle"))
+        )
+    )
+    has_official_identity = bool(
+        re.search(r"\b(official|exclusive agent|exclusive dealer|official distributor)\b", lower_text)
+        or item.get("country") == "QA"
+        or re.search(r"(?:qatar|qtr|qa)(?:\d+)?/?$", safe_urlparse(url).path.lower())
+        or "qatar" in lower_title
+    )
+    return bool(has_brand and has_market_identity and has_official_identity)
 
 
 def discovery_source_bucket(item: dict) -> str:
@@ -6453,7 +6629,7 @@ def search_youtube_channels(query: str, limit: int = 5, country: str = "") -> li
     if api_key:
         per_type_limit = max(1, min(limit, 50))
         search_items = []
-        for result_type in ("channel", "video"):
+        for result_type in ("video",):
             params = {
                 "part": "snippet",
                 "type": result_type,
@@ -6461,10 +6637,13 @@ def search_youtube_channels(query: str, limit: int = 5, country: str = "") -> li
                 "maxResults": str(per_type_limit),
                 "fields": "items(id/channelId,id/videoId,snippet(channelId,channelTitle,title,description,publishedAt))",
                 "key": api_key,
+                "order": "relevance",
+                "publishedAfter": (
+                    datetime.now(timezone.utc) - timedelta(days=YOUTUBE_MAX_VIDEO_AGE_DAYS)
+                ).isoformat().replace("+00:00", "Z"),
             }
             if country_code:
                 params["regionCode"] = country_code
-                params["relevanceLanguage"] = "en"
             request = urllib.request.Request(
                 "https://www.googleapis.com/youtube/v3/search?" + urllib.parse.urlencode(params),
                 headers={"User-Agent": "HuaweiEVLeadTool/1.0"},
@@ -6555,7 +6734,12 @@ def search_youtube_channels(query: str, limit: int = 5, country: str = "") -> li
                 {
                     "title": detail_snippet.get("title") or snippet.get("channelTitle") or snippet.get("title") or "YouTube channel",
                     "url": channel_url,
-                    "snippet": detail_snippet.get("description") or latest_video.get("snippet") or snippet.get("description", ""),
+                    "snippet": clean_text(" ".join(filter(None, [
+                        detail_snippet.get("description", ""),
+                        latest_video.get("videoTitle", ""),
+                        latest_video.get("snippet", ""),
+                        snippet.get("description", ""),
+                    ])))[:1200],
                     "handle": latest_video.get("publishedAt", ""),
                     "channelId": channel_id,
                     "country": branding_channel.get("country", ""),
@@ -6564,12 +6748,14 @@ def search_youtube_channels(query: str, limit: int = 5, country: str = "") -> li
                     "apiSource": "YouTube Data API v3",
                 }
             )
-            if len(results) >= per_type_limit * 2:
+            if len(results) >= limit:
                 break
-        try:
-            fallback_results = search_youtube_public_channels(query, limit=limit)
-        except (OSError, ValueError, TimeoutError, UnicodeError, json.JSONDecodeError):
-            fallback_results = []
+        fallback_results = []
+        if len(results) < 3:
+            try:
+                fallback_results = search_youtube_public_channels(query, limit=limit)
+            except (OSError, ValueError, TimeoutError, UnicodeError, json.JSONDecodeError):
+                fallback_results = []
         seen_urls = {normalize_public_url(item.get("url", "")).lower().rstrip("/") for item in results}
         for item in fallback_results:
             identity = normalize_public_url(item.get("url", "")).lower().rstrip("/")
@@ -9561,6 +9747,29 @@ def clean_phone_value(value: str) -> str:
     return value
 
 
+def phone_value_matches_country(value: str, country: str) -> bool:
+    target_codes = {"Qatar": "974", "UAE": "971", "Saudi": "966", "Kuwait": "965"}
+    target_code = next((code for name, code in target_codes.items() if name.lower() in country.lower()), "")
+    if not target_code:
+        return True
+    raw = html.unescape(str(value or "")).strip()
+    international = re.search(r"(?:wa\.me/|api\.whatsapp\.com/send\?phone=|\+)(\d{3,15})", raw, re.I)
+    if not international:
+        return True
+    return international.group(1).startswith(target_code)
+
+
+def clean_whatsapp_value(value: str) -> str:
+    raw = html.unescape(str(value or "")).strip()
+    message_link = re.search(r"https?://wa\.me/message/[A-Za-z0-9_-]+", raw, re.I)
+    if message_link:
+        return message_link.group(0)
+    phone_link = re.search(r"https?://wa\.me/\+?(\d{8,15})", raw, re.I)
+    if phone_link:
+        return f"https://wa.me/{phone_link.group(1)}"
+    return clean_phone_value(raw)
+
+
 def valid_phone_candidate(value: str, context: str = "") -> bool:
     value = clean_phone_value(value)
     digits = re.sub(r"\D", "", value)
@@ -10647,8 +10856,8 @@ def discover(params: dict[str, list[str]]) -> dict:
         "officialWebsiteProfiles": 0,
     }
     reverse_platforms = set(selected_platforms)
-    if source_mode in ("all", "social", "youtube") and (
-        not is_china_discovery or source_mode in ("social", "youtube")
+    if source_mode in ("all", "social") and (
+        not is_china_discovery or source_mode == "social"
     ):
         if "youtube" in enabled_sources:
             reverse_platforms.add("youtube")
@@ -10793,37 +11002,22 @@ def discover(params: dict[str, list[str]]) -> dict:
     if "youtube" in enabled_sources and source_mode in ("all", "youtube", "social") and (
         not is_china_discovery or source_mode in ("social", "youtube")
     ):
-        youtube_searches = []
-        city = next(
-            (cities[0] for key, cities in COUNTRY_HINTS.items() if key.lower() in country.lower()),
-            country.split(" ")[0],
-        )
-        if account_scope in ("company", "both"):
-            youtube_searches.append(
-                (f"{city} car dealer", "公司账号")
-            )
-        if account_scope in ("person", "both"):
-            youtube_searches.append(
-                (f"{city} car dealer owner manager", "个人/经营者账号（待核验）")
-            )
-        youtube_searches = []
-        if account_scope in ("company", "both"):
-            youtube_searches.extend(
-                (query, "company account")
-                for query in city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS)
-            )
-        if account_scope in ("person", "both"):
-            youtube_searches.extend(
-                (query, "owner or manager account")
-                for query in city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, "owner manager founder")
-            )
-        youtube_searches, youtube_per_query_limit = youtube_query_plan(youtube_searches, source_mode)
+        youtube_searches = youtube_discovery_searches(country, cities, account_scope)
+        youtube_searches, youtube_per_query_limit = youtube_query_plan(youtube_searches, source_mode, country)
+        youtube_candidates: list[tuple[dict, str]] = []
+        if country_meta.get("code") == "qa" and account_scope in ("company", "both"):
+            try:
+                verified_items = search_youtube_verified_handles(YOUTUBE_QATAR_VERIFIED_HANDLES, country)
+            except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
+                verified_items = []
+            youtube_candidates.extend((item, "company account") for item in verified_items)
         for youtube_query, youtube_account_type in youtube_searches:
             try:
                 youtube_items = search_youtube_channels(youtube_query, limit=youtube_per_query_limit, country=country)
             except (OSError, ValueError, TimeoutError, json.JSONDecodeError):
                 youtube_items = []
-            for item in youtube_items:
+            youtube_candidates.extend((item, youtube_account_type) for item in youtube_items)
+        for item, youtube_account_type in youtube_candidates:
                 location_text = f"{item.get('title', '')} {item.get('snippet', '')} {item.get('country', '')}".lower()
                 location_terms = {
                     country.split(" ")[0].lower(),
@@ -10845,6 +11039,19 @@ def discover(params: dict[str, list[str]]) -> dict:
                     item.get("snippet", ""),
                     item.get("url", ""),
                 )
+                youtube_local_official = is_local_official_youtube_auto_channel(item, country)
+                youtube_discovery_candidate = youtube_discovery_candidate or youtube_local_official
+                if country_meta.get("code") == "qa" and not youtube_local_official:
+                    title_identity = clean_text(str(item.get("title") or "")).lower()
+                    has_company_title = any(term in title_identity for term in (
+                        "auto", "car", "motor", "vehicle", "showroom", "fleet", "rent", "trading",
+                    ))
+                    youtube_discovery_candidate = bool(
+                        youtube_discovery_candidate
+                        and has_company_title
+                        and has_strong_automotive_business_evidence(location_text)
+                        and has_target_country_signal(location_text, country)
+                    )
                 if not youtube_discovery_candidate:
                     continue
                 if (
@@ -10859,6 +11066,9 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["account_type"] = youtube_account_type
                 item["social_analysis"] = youtube_analysis
                 item["youtube_discovery_candidate"] = youtube_discovery_candidate
+                item["youtube_local_official_channel"] = youtube_local_official
+                if youtube_local_official:
+                    item["structured_business_profile"] = True
                 raw_results.append(item)
     if source_mode in platform_queries:
         expected_origin = platform_queries[source_mode][1]
@@ -10990,10 +11200,15 @@ def discover(params: dict[str, list[str]]) -> dict:
         if has_foreign_location_conflict(combined, country):
             reject_candidate("countryConflict")
             continue
-        if is_obviously_irrelevant_lead(combined):
+        verified_local_youtube = bool(
+            item.get("origin") == "YouTube"
+            and item.get("youtube_local_official_channel")
+            and item.get("structured_business_profile")
+        )
+        if is_obviously_irrelevant_lead(combined) and not verified_local_youtube:
             reject_candidate("irrelevantBusiness")
             continue
-        if is_media_or_content_channel(combined):
+        if is_media_or_content_channel(combined) and not verified_local_youtube:
             reject_candidate("mediaOrContent")
             continue
         if not is_social_result and is_brand_bound_chinese_dealer(combined):
@@ -11307,11 +11522,17 @@ def discover(params: dict[str, list[str]]) -> dict:
         phone_sources = [
             {"value": phone, "sources": [{"url": contact_source_url, "name": contact_source_name, "excerpt": contact_source_excerpt[:260]}]}
             for phone in contacts.get("phones") or ([contacts["phone"]] if contacts["phone"] else [])
+            if phone_value_matches_country(phone, country)
         ]
         whatsapp_sources = [
             {"value": value, "sources": [{"url": contact_source_url, "name": contact_source_name, "excerpt": contact_source_excerpt[:260]}]}
-            for value in contacts.get("whatsapps") or ([contacts["whatsapp"]] if contacts["whatsapp"] else [])
+            for raw_value in contacts.get("whatsapps") or ([contacts["whatsapp"]] if contacts["whatsapp"] else [])
+            for value in [clean_whatsapp_value(raw_value)]
+            if value
+            if phone_value_matches_country(value, country)
         ]
+        contacts["phone"] = phone_sources[0]["value"] if phone_sources else ""
+        contacts["whatsapp"] = whatsapp_sources[0]["value"] if whatsapp_sources else ""
         has_contact_entry = bool(official_contact_entry_url)
         contactable = bool(verified_email_sources or phone_sources or whatsapp_sources or has_contact_entry)
         if quality_policy.get("requireContactOrWebsite") and not (contactable or customer_website):
@@ -11388,6 +11609,12 @@ def discover(params: dict[str, list[str]]) -> dict:
             published_at,
         )
         has_business_evidence = has_strong_automotive_business_evidence(combined)
+        youtube_local_verified = bool(
+            origin == "YouTube"
+            and item.get("youtube_local_official_channel")
+            and item.get("structured_business_profile")
+            and has_target_country_signal(combined, country)
+        )
         linkedin_actor_verified = bool(
             origin == "LinkedIn"
             and item.get("apifyPlatform") == "linkedin"
@@ -11402,7 +11629,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 re.I,
             )
         )
-        if linkedin_actor_verified:
+        if linkedin_actor_verified or youtube_local_verified:
             has_business_evidence = True
         ai_review = ai_review_lead_candidate(
             company=company,
@@ -11441,14 +11668,15 @@ def discover(params: dict[str, list[str]]) -> dict:
                 or (quality_policy.get("requireAutomotiveBusiness") and ai_review.get("automotiveBusiness") is False)
                 or ai_review.get("salesLeadEligible") is False
             )
-            if hard_reject or (ai_reject and not linkedin_actor_verified):
+            platform_business_verified = linkedin_actor_verified or youtube_local_verified
+            if hard_reject or (ai_reject and not platform_business_verified):
                 pipeline_stats["aiRejected"] += 1
                 reject_candidate("aiRejected")
                 continue
-            if linkedin_actor_verified and ai_reject:
+            if platform_business_verified and ai_reject:
                 ai_review["decision"] = "manual_review"
                 ai_review["reason"] = (
-                    "LinkedIn Full 公司资料已确认目标地区与汽车行业，保留进入人工审核；"
+                    "平台企业资料已确认目标地区与汽车行业，保留进入人工审核；"
                     + clean_text(str(ai_review.get("reason") or ""))
                 )[:500]
             if ai_review.get("automotiveBusiness"):
