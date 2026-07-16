@@ -10980,7 +10980,15 @@ def discover(params: dict[str, list[str]]) -> dict:
                         " ".join(social_websites),
                     ) if value
                 )
-        source_contact_text = f"{item.get('snippet', '')} {item.get('title', '')}"
+        profile_contact_text = " ".join(
+            str(value or "")
+            for value in (
+                social_profile.get("title"),
+                social_profile.get("description"),
+                " ".join(social_profile.get("contactSignals") or []),
+            )
+        )
+        source_contact_text = f"{item.get('snippet', '')} {item.get('title', '')} {contact} {profile_contact_text}"
         contacts = extract_public_contacts(source_contact_text, item.get("tags"))
         if item.get("google_public_contacts"):
             contacts = merge_public_contacts(contacts, item.get("google_public_contacts") or {})
@@ -11084,22 +11092,28 @@ def discover(params: dict[str, list[str]]) -> dict:
         contact_source_url = official_contact_url or source_url
         contact_source_name = "公司官网" if official_contact_url else origin
         contact_source_excerpt = official_contact_excerpt or source_excerpt
-        email_sources = [
-            {
+        email_sources = []
+        primary_profile_contact_text = f"{source_contact_text} {page if is_social_result else ''}"
+        for email in contacts.get("emails") or ([contacts["email"]] if contacts["email"] else []):
+            is_lead_profile_email = bool(
+                is_social_result
+                and re.search(re.escape(email), primary_profile_contact_text, re.I)
+            )
+            email_sources.append({
                 "email": email,
                 "sources": [{
                     "url": contact_source_url,
-                    "name": contact_source_name,
+                    "name": "线索主页来源" if is_lead_profile_email else contact_source_name,
+                    "sourceKind": "lead_profile" if is_lead_profile_email else "",
                     "verified": bool(
-                        item.get("origin") in ("OpenStreetMap", "Google Maps")
+                        is_lead_profile_email
+                        or item.get("origin") in ("OpenStreetMap", "Google Maps")
                         or official_contact_url
                         or (page and re.search(re.escape(email), page, re.I))
                     ),
                     "excerpt": contact_source_excerpt[:260],
                 }],
-            }
-            for email in contacts.get("emails") or ([contacts["email"]] if contacts["email"] else [])
-        ]
+            })
         if customer_website and target_type != "individual":
             try:
                 hunter_candidates = hunter_email_candidates(customer_website, company, limit=5)

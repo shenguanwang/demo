@@ -744,10 +744,11 @@ function renderEmailEvidence(lead) {
   if (!records.length) return `<span class="email-empty">公开页面未发现</span>`;
   return `<div class="email-evidence-list">${records.map((record) => {
     const sources = Array.isArray(record.sources) ? record.sources : [];
+    const isLeadProfileSource = sources.some((source) => source.sourceKind === "lead_profile");
     return `
       <div class="email-evidence-item">
         <a class="email-address" href="mailto:${escapeHtml(record.email)}">${escapeHtml(record.email)}</a>
-        <span class="verified-badge">已核验</span>
+        <span class="verified-badge">${isLeadProfileSource ? "线索主页来源" : "已核验"}</span>
         <span class="email-source-links">
           ${sources.length ? sources.map((source, sourceIndex) => {
             const url = safeHttpUrl(source.url);
@@ -3768,16 +3769,43 @@ function refreshAllLeadViews() {
   saveState();
 }
 
+function primaryLeadPageEmailRecord(raw) {
+  const primaryUrls = new Set([
+    raw?.sourceUrl,
+    ...(Array.isArray(raw?.socialProfiles)
+      ? raw.socialProfiles
+          .filter((profile) => /原线索|手动网址解析/.test(String(profile?.relationship || "")))
+          .map((profile) => profile?.url)
+      : [])
+  ].map(canonicalLeadUrl).filter(Boolean));
+  if (!primaryUrls.size) return null;
+  return (Array.isArray(raw?.unverifiedEmailCandidates) ? raw.unverifiedEmailCandidates : []).find((record) => (
+    /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(String(record?.email || "").trim())
+    && (record.sources || []).some((source) => primaryUrls.has(canonicalLeadUrl(source?.url)))
+  )) || null;
+}
+
 function normalizeLead(raw) {
+  const primaryPageEmail = raw.email ? null : primaryLeadPageEmailRecord(raw);
+  const effectiveEmail = raw.email || primaryPageEmail?.email || "";
+  const promotedEmailSources = primaryPageEmail ? [{
+    email: primaryPageEmail.email,
+    sources: (primaryPageEmail.sources || []).map((source) => ({
+      ...source,
+      name: "线索主页来源",
+      sourceKind: "lead_profile",
+      verified: true
+    }))
+  }] : [];
   const website = raw.website || raw.reason || `${raw.company || "Unknown"} ${raw.type || ""}`;
   const fallbackEvaluation = evaluateLeadScore(
     `${raw.company} ${raw.type} ${raw.country} ${website}`,
     {
       model: raw.model,
-      email: raw.email,
+      email: effectiveEmail,
       phone: raw.phone,
       whatsapp: raw.whatsapp,
-      hasContact: Boolean(raw.email || raw.phone || raw.whatsapp),
+      hasContact: Boolean(effectiveEmail || raw.phone || raw.whatsapp),
       hasOfficialWebsite: Boolean(raw.customerWebsite),
       contactName: raw.contactName,
       contactRole: raw.contactRole,
@@ -3849,18 +3877,22 @@ function normalizeLead(raw) {
     customerWebsite: sanitizeCustomerWebsite(raw.customerWebsite || ""),
     contactName: raw.contactName || "",
     contactRole: raw.contactRole || "",
-    email: raw.email || "",
+    email: effectiveEmail,
     emailSources: Array.isArray(raw.emailSources) && raw.emailSources.length
       ? raw.emailSources
-      : raw.email
-        ? [{
-            email: raw.email,
-            sources: raw.sourceUrl || raw.source
-              ? [{ url: raw.sourceUrl || raw.source, name: raw.origin || "原始来源" }]
-              : []
-          }]
-        : [],
-    unverifiedEmailCandidates: Array.isArray(raw.unverifiedEmailCandidates) ? raw.unverifiedEmailCandidates : [],
+      : promotedEmailSources.length
+        ? promotedEmailSources
+        : effectiveEmail
+          ? [{
+              email: effectiveEmail,
+              sources: raw.sourceUrl || raw.source
+                ? [{ url: raw.sourceUrl || raw.source, name: raw.origin || "原始来源" }]
+                : []
+            }]
+          : [],
+    unverifiedEmailCandidates: Array.isArray(raw.unverifiedEmailCandidates)
+      ? raw.unverifiedEmailCandidates.filter((record) => String(record?.email || "").toLowerCase() !== effectiveEmail.toLowerCase())
+      : [],
     phone: raw.phone || "",
     phoneSources: Array.isArray(raw.phoneSources) ? raw.phoneSources : [],
     whatsapp: raw.whatsapp || "",
