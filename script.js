@@ -2114,27 +2114,55 @@ function discoveryJobPreviewLeads(job) {
   }));
 }
 
+function discoveryResultLeadKey(lead) {
+  const id = String(lead?.id || "").trim();
+  if (id) return `id:${id}`;
+  return [
+    normalizedLeadIdentityText(lead?.company),
+    normalizedLeadIdentityText(lead?.country),
+    canonicalLeadUrl(lead?.sourceUrl || lead?.customerWebsite || lead?.source)
+  ].join("|");
+}
+
+function discoveryJobDisplayLeads(job) {
+  const imported = reviewLeads.filter((lead) => discoveryJobLeadMatches(lead, job?.id));
+  const preview = discoveryJobPreviewLeads(job);
+  if (!preview.length) return imported.map((lead) => ({ ...lead, discoveryImported: true }));
+
+  const importedByKey = new Map(imported.map((lead) => [discoveryResultLeadKey(lead), lead]));
+  const displayed = preview.map((lead) => {
+    const importedLead = importedByKey.get(discoveryResultLeadKey(lead));
+    if (importedLead) {
+      importedByKey.delete(discoveryResultLeadKey(lead));
+      return { ...importedLead, discoveryImported: true };
+    }
+    return { ...lead, discoveryImported: false };
+  });
+  importedByKey.forEach((lead) => displayed.push({ ...lead, discoveryImported: true }));
+  return displayed;
+}
+
 function renderLeads() {
   const job = activeDiscoveryJob();
-  let filteredLeads = reviewLeads.filter((lead) => discoveryJobLeadMatches(lead, activeDiscoveryJobFilter));
-  const showingJobPreview = Boolean(job && !filteredLeads.length && Array.isArray(job.result?.leads) && job.result.leads.length);
-  if (showingJobPreview) {
-    filteredLeads = discoveryJobPreviewLeads(job);
-  }
+  const filteredLeads = job
+    ? discoveryJobDisplayLeads(job)
+    : reviewLeads.filter((lead) => discoveryJobLeadMatches(lead, activeDiscoveryJobFilter));
+  const importedCount = job ? filteredLeads.filter((lead) => lead.discoveryImported).length : filteredLeads.length;
   const summary = $("#candidateLeadSummary");
   if (summary) {
     summary.textContent = job
-      ? `${discoveryJobLabel(job)}：显示 ${filteredLeads.length} 条候选客户`
+      ? `${discoveryJobLabel(job)}：发现 ${filteredLeads.length} 条，已进入审核 ${importedCount} 条`
       : "点击客户卡片可跳到审核详情";
   }
   $("#leadList").innerHTML = filteredLeads.length ? filteredLeads.map((lead) => `
-    <article class="lead-card" data-candidate-lead="${escapeHtml(lead.id || "")}" role="button" tabindex="0" title="查看线索审核详情">
+    <article class="lead-card" ${lead.discoveryImported === false ? "" : `data-candidate-lead="${escapeHtml(lead.id || "")}" role="button" tabindex="0"`} title="${lead.discoveryImported === false ? "未达到自动导入规则" : "查看线索审核详情"}">
       <h3>${escapeHtml(lead.company)}</h3>
       <div class="lead-meta">
         <span>${escapeHtml(lead.country)} / ${escapeHtml(lead.city)}</span>
         <span>${escapeHtml(lead.type)}</span>
         <span>${escapeHtml(lead.origin || "公开网页")}</span>
         <span>${escapeHtml(lead.sourceType || "公开商业网站")}</span>
+        ${job ? `<span>${lead.discoveryImported === false ? "未自动导入" : "已进入审核"}</span>` : ""}
       </div>
       <p>${escapeHtml(lead.reason)}</p>
       <strong class="score ${scoreVisualClass(lead.score)}">${lead.score} 分 · ${escapeHtml(lead.scoreTier || "D")}级</strong>
