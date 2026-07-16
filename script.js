@@ -2451,7 +2451,10 @@ function renderReview(options = {}) {
       <article class="review-list-row ${rowId === selectedReviewLeadId ? "active" : ""}" data-review-lead-row="${escapeHtml(rowId)}" tabindex="0">
         ${reviewMode === "pending" ? `<label class="review-select"><input type="checkbox" data-review-select="${escapeHtml(lead.id)}" ${reviewSelectedIds.has(lead.id) ? "checked" : ""}><span>选择</span></label>` : `<span class="review-approved-mark">${escapeHtml(reviewModeLabel(reviewMode))}</span>`}
         <div class="review-list-main">
-          <strong><span class="review-row-number">${rankIndex + 1}</span>${escapeHtml(lead.company)}</strong>
+          <div class="review-list-company-line">
+            <strong><span class="review-row-number">${rankIndex + 1}</span>${escapeHtml(lead.company)}</strong>
+            ${lead.isManualLead ? '<span class="manual-lead-badge">手动添加</span>' : ""}
+          </div>
           <span>${escapeHtml(formatReviewLeadTime(lead))} · ${escapeHtml(lead.origin || lead.sourceType || "公开来源")}</span>
         </div>
         <div class="review-list-badges">
@@ -2482,6 +2485,7 @@ function renderReview(options = {}) {
           </div>
           <div class="review-lead-name-row">
             <h3>${escapeHtml(lead.company)}</h3>
+            ${lead.isManualLead ? '<span class="manual-lead-badge">手动添加</span>' : ""}
             ${lead.isManualEntryOnly ? "" : reviewAiResultHtml(lead)}
           </div>
           <p>${escapeHtml(lead.isManualEntryOnly ? "此客户由人工填写，未执行公开信息核验。" : lead.researchSummary || "当前仅有原始发现来源，等待系统自动核验。")}</p>

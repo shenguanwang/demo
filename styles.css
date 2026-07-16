@@ -3476,6 +3476,23 @@ textarea {
   min-width: 0;
 }
 
+.review-list-company-line {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.review-list-company-line > strong {
+  min-width: 0;
+}
+
+.review-list-main .manual-lead-badge {
+  flex: 0 0 auto;
+  color: #16754a;
+  font-size: 9px;
+}
+
 .review-list-main strong {
   overflow: hidden;
   color: #111827;
