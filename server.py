@@ -1884,6 +1884,102 @@ def lead_tombstone_keys(record: dict) -> set[str]:
     return {key for key in keys if key}
 
 
+def lead_was_added_before(record: dict, cutoff: datetime) -> bool:
+    if not isinstance(record, dict):
+        return False
+    for key in ("createdAt", "importedAt", "discoveredAt", "discoveryJobImportedAt"):
+        parsed = parse_timestamp(str(record.get(key) or ""))
+        if parsed:
+            return parsed < cutoff
+    return False
+
+
+def prune_search_data_before(cutoff_date: str) -> dict:
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(cutoff_date or "")):
+        raise ValueError("截止日期格式必须为 YYYY-MM-DD")
+    try:
+        cutoff = datetime.fromisoformat(cutoff_date).replace(tzinfo=timezone.utc)
+    except ValueError as exc:
+        raise ValueError("截止日期无效") from exc
+
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    totals = {
+        "cutoffDate": cutoff_date,
+        "workspaces": 0,
+        "reviewLeads": 0,
+        "customers": 0,
+        "rejectedLeads": 0,
+        "deletedRecordsAdded": 0,
+        "discoveryJobs": 0,
+    }
+
+    def prune_workspace(state: dict) -> tuple[dict, bool]:
+        deleted_records = state.get("deletedRecords") if isinstance(state.get("deletedRecords"), list) else []
+        existing_keys = {item.get("key") for item in deleted_records if isinstance(item, dict)}
+        removed_records = []
+        changed = False
+        for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+            items = state.get(bucket) if isinstance(state.get(bucket), list) else []
+            removed = [item for item in items if lead_was_added_before(item, cutoff)]
+            if not removed:
+                continue
+            state[bucket] = [item for item in items if not lead_was_added_before(item, cutoff)]
+            totals[bucket] += len(removed)
+            removed_records.extend(removed)
+            changed = True
+        for record in removed_records:
+            for key in lead_tombstone_keys(record):
+                if key in existing_keys:
+                    continue
+                deleted_records.insert(0, {"key": key, "type": "prunedSearchData", "deletedAt": now})
+                existing_keys.add(key)
+                totals["deletedRecordsAdded"] += 1
+        state["deletedRecords"] = deleted_records[:10000]
+        return state, changed
+
+    with STATE_LOCK:
+        initialize_state_store()
+        if DATABASE_URL:
+            with postgres_connection() as connection:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT workspace_key, state FROM workspace_state ORDER BY workspace_key")
+                    for workspace_key, raw_state in cursor.fetchall():
+                        state = raw_state if isinstance(raw_state, dict) else json.loads(raw_state)
+                        state, changed = prune_workspace(state)
+                        if not changed:
+                            continue
+                        cursor.execute(
+                            """
+                            UPDATE workspace_state
+                            SET state = %s::jsonb, version = version + 1000, updated_at = NOW()
+                            WHERE workspace_key = %s
+                            """,
+                            (json.dumps(normalize_workspace_state(state), ensure_ascii=False), workspace_key),
+                        )
+                        totals["workspaces"] += 1
+                    cursor.execute("DELETE FROM discovery_jobs WHERE created_at < %s RETURNING job_id", (cutoff,))
+                    totals["discoveryJobs"] = len(cursor.fetchall())
+        else:
+            with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+                rows = connection.execute("SELECT workspace_key, state FROM workspace_state ORDER BY workspace_key").fetchall()
+                for workspace_key, raw_state in rows:
+                    state, changed = prune_workspace(json.loads(raw_state))
+                    if not changed:
+                        continue
+                    connection.execute(
+                        """
+                        UPDATE workspace_state
+                        SET state = ?, version = version + 1000, updated_at = ?
+                        WHERE workspace_key = ?
+                        """,
+                        (json.dumps(normalize_workspace_state(state), ensure_ascii=False), now, workspace_key),
+                    )
+                    totals["workspaces"] += 1
+                cursor = connection.execute("DELETE FROM discovery_jobs WHERE created_at < ?", (cutoff.isoformat(),))
+                totals["discoveryJobs"] = max(0, int(cursor.rowcount or 0))
+    return totals
+
+
 def clear_all_search_data() -> dict:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     totals = {
@@ -11727,6 +11823,26 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json(400, {"ok": False, "error": "缺少清洗确认口令"})
                     return
                 result = clear_all_search_data()
+                self.send_json(200, {"ok": True, **result})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/prune-search-data":
+            if not self.require_admin():
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                if payload.get("confirm") != "PRUNE_SEARCH_DATA":
+                    self.send_json(400, {"ok": False, "error": "缺少按日期清理确认口令"})
+                    return
+                result = prune_search_data_before(str(payload.get("cutoffDate") or ""))
+                record_admin_audit(
+                    self.current_user()["username"],
+                    "按日期清理搜索数据",
+                    f"删除 {result['cutoffDate']} 前数据：线索 {result['reviewLeads']}，客户 {result['customers']}，任务 {result['discoveryJobs']}",
+                    self.client_ip(),
+                )
                 self.send_json(200, {"ok": True, **result})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
