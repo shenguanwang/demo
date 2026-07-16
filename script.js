@@ -6373,8 +6373,19 @@ function bindForms() {
     };
     reviewLeads.unshift(normalizeLead(lead));
     event.currentTarget.reset();
+    closeManualLeadModal();
     refreshAllLeadViews();
     showSection("review");
+  });
+
+  $("#openManualLeadModal")?.addEventListener("click", openManualLeadModal);
+  $("#manualLeadModal")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget || event.target.closest("[data-close-manual-lead]")) {
+      closeManualLeadModal();
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !$("#manualLeadModal")?.hidden) closeManualLeadModal();
   });
 
   $("#reviewGrid").addEventListener("click", (event) => {
@@ -7874,6 +7885,21 @@ function renderUserCountryEditor(username, selected = []) {
 
 function closeUserRegionModal() {
   document.querySelector("[data-user-region-modal]")?.remove();
+}
+
+function openManualLeadModal() {
+  const modal = $("#manualLeadModal");
+  if (!modal) return;
+  modal.hidden = false;
+  document.body.classList.add("modal-open");
+  window.requestAnimationFrame(() => modal.querySelector('input[name="company"]')?.focus());
+}
+
+function closeManualLeadModal() {
+  const modal = $("#manualLeadModal");
+  if (!modal) return;
+  modal.hidden = true;
+  document.body.classList.remove("modal-open");
 }
 
 async function loadUsers() {

@@ -6,7 +6,7 @@
   <title>华为系新能源汽车海外获客工作台</title>
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
-  <link rel="stylesheet" href="./styles.css?v=20260715-profile-high-contrast">
+  <link rel="stylesheet" href="./styles.css?v=20260716-manual-lead-modal">
 </head>
 <body>
   <aside class="sidebar">
@@ -766,44 +766,55 @@
           <h2>客户池 CRM</h2>
           <p>作用：把通过审核的客户统一管理，记录阶段、负责人、适合车型和下一步动作。</p>
         </div>
+        <button class="primary" id="openManualLeadModal" type="button">手动增加线索</button>
       </div>
-      <form class="panel crm-form" id="leadForm">
-        <div class="panel-head">
-          <h3>手动新增线索</h3>
-          <span>先进入审核，不直接进客户池</span>
+      <div class="manual-lead-modal-backdrop" id="manualLeadModal" hidden>
+        <div class="manual-lead-modal" role="dialog" aria-modal="true" aria-labelledby="manualLeadModalTitle">
+          <form class="crm-form" id="leadForm">
+            <div class="panel-head manual-lead-modal-head">
+              <div>
+                <h3 id="manualLeadModalTitle">手动新增线索</h3>
+                <span>保存后先进入线索审核，不直接进入客户池</span>
+              </div>
+              <button class="ghost compact" type="button" data-close-manual-lead>关闭</button>
+            </div>
+            <div class="form-grid compact">
+              <label>公司名 <input name="company" required placeholder="例如 Dubai Premium Motors"></label>
+              <label>国家 <input name="country" required placeholder="例如 UAE"></label>
+              <label>城市 <input name="city" required placeholder="例如 Dubai"></label>
+              <label>客户类型
+                <select name="type">
+                  <option>Luxury car showroom</option>
+                  <option>Auto importer</option>
+                  <option>EV dealer</option>
+                  <option>Parallel import dealer</option>
+                  <option>Fleet buyer</option>
+                </select>
+              </label>
+              <label>来源 <input name="source" value="Website"></label>
+              <label>适合车型
+                <select name="model">
+                  <option>问界 M9</option>
+                  <option>尊界 S800</option>
+                  <option>享界 S9</option>
+                  <option>问界 M8</option>
+                  <option>智界 R7</option>
+                </select>
+              </label>
+              <label>客户官网内容
+                <textarea name="website" rows="3" placeholder="粘贴官网简介、社媒简介或你看到的客户信息"></textarea>
+              </label>
+              <label>下一步动作
+                <textarea name="next" rows="3">发送 WhatsApp 首次开发信</textarea>
+              </label>
+            </div>
+            <div class="manual-lead-modal-actions">
+              <button class="ghost" type="button" data-close-manual-lead>取消</button>
+              <button class="primary" type="submit">保存到待审核</button>
+            </div>
+          </form>
         </div>
-        <div class="form-grid compact">
-          <label>公司名 <input name="company" required placeholder="例如 Dubai Premium Motors"></label>
-          <label>国家 <input name="country" required placeholder="例如 UAE"></label>
-          <label>城市 <input name="city" required placeholder="例如 Dubai"></label>
-          <label>客户类型
-            <select name="type">
-              <option>Luxury car showroom</option>
-              <option>Auto importer</option>
-              <option>EV dealer</option>
-              <option>Parallel import dealer</option>
-              <option>Fleet buyer</option>
-            </select>
-          </label>
-          <label>来源 <input name="source" value="Website"></label>
-          <label>适合车型
-            <select name="model">
-              <option>问界 M9</option>
-              <option>尊界 S800</option>
-              <option>享界 S9</option>
-              <option>问界 M8</option>
-              <option>智界 R7</option>
-            </select>
-          </label>
-          <label>客户官网内容
-            <textarea name="website" rows="3" placeholder="粘贴官网简介、社媒简介或你看到的客户信息"></textarea>
-          </label>
-          <label>下一步动作
-            <textarea name="next" rows="3">发送 WhatsApp 首次开发信</textarea>
-          </label>
-        </div>
-        <button class="primary" type="submit">保存到待审核</button>
-      </form>
+      </div>
       <div class="split-actions section-gap">
         <button class="primary" id="exportCustomerTable" type="button">导出客户表格 CSV</button>
         <button class="ghost" id="exportData" type="button">导出完整备份 JSON</button>
@@ -1228,6 +1239,6 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260716-clear-local-business-cache"></script>
+  <script src="./script.js?v=20260716-manual-lead-modal"></script>
 </body>
 </html>
