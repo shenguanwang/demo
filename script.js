@@ -403,6 +403,12 @@ const NON_CUSTOMER_WEBSITE_PATTERNS = [
   "starbucks."
 ];
 
+const DIRECTORY_OPERATOR_WEBSITE_DOMAINS = [
+  "dubicars.com",
+  "saudisale.com",
+  "qmotor.com"
+];
+
 const MAX_LEADS_PER_CUSTOMER_WEBSITE = 5;
 
 const IRRELEVANT_REVIEW_LEAD_PATTERNS = [
@@ -446,7 +452,11 @@ function isNonCustomerWebsiteUrl(value) {
 }
 
 function sanitizeCustomerWebsite(value) {
-  return isNonCustomerWebsiteUrl(value) ? "" : String(value || "").trim();
+  const hostname = leadHostname(value);
+  const isDirectoryOperator = DIRECTORY_OPERATOR_WEBSITE_DOMAINS.some((domain) => (
+    hostname === domain || hostname.endsWith(`.${domain}`)
+  ));
+  return isNonCustomerWebsiteUrl(value) || isDirectoryOperator ? "" : String(value || "").trim();
 }
 
 function customerWebsiteKey(value) {
@@ -5285,11 +5295,37 @@ function discoveryJobImportedCount(job) {
   return discoveryJobRawCount(job);
 }
 
+function discoveryJobSkippedCount(job) {
+  const stored = job?.result?.skippedCount;
+  if (stored !== undefined && stored !== null && stored !== "") {
+    return Math.max(0, Number(stored) || 0);
+  }
+  return Math.max(0, discoveryJobRawCount(job) - discoveryJobImportedCount(job));
+}
+
+function discoveryJobSkipBreakdownText(job) {
+  const skipped = job?.result?.skipBreakdown;
+  if (!skipped || typeof skipped !== "object") return "";
+  return [
+    ["未达自动导入", skipped.ineligible],
+    ["账号已有", skipped.existing],
+    ["已拒绝", skipped.rejected],
+    ["官网重复", skipped.duplicateWebsite]
+  ].filter(([, count]) => Number(count) > 0)
+    .map(([label, count]) => `${label} ${Number(count)}`)
+    .join(" · ");
+}
+
 function discoveryJobResultText(job) {
   const count = discoveryJobRawCount(job);
   if (job.imported) {
     const importedCount = discoveryJobImportedCount(job);
-    if (importedCount) return `已导入 ${importedCount} 条`;
+    const skippedCount = discoveryJobSkippedCount(job);
+    if (importedCount) {
+      return skippedCount
+        ? `发现 ${count} 条 · 导入 ${importedCount} 条 · 跳过 ${skippedCount} 条`
+        : `已导入 ${importedCount} 条`;
+    }
     if (count) return `发现 ${count} 条`;
     return "已导入 0 条";
   }
@@ -5673,7 +5709,8 @@ async function markDiscoveryImported(jobId, counts = {}) {
       id: jobId,
       importedCount: counts.importedCount,
       rawCount: counts.rawCount,
-      skippedCount: counts.skippedCount
+      skippedCount: counts.skippedCount,
+      skipBreakdown: counts.skipBreakdown
     })
   }).catch(() => undefined);
   await loadDiscoveryJobs().catch(() => undefined);
@@ -5910,7 +5947,8 @@ async function importDiscoveryJob(jobId, options = {}) {
     await markDiscoveryImported(jobId, {
       importedCount,
       rawCount: merged.found.length,
-      skippedCount: Math.max(0, merged.found.length - importedCount)
+      skippedCount: Math.max(0, merged.found.length - importedCount),
+      skipBreakdown: merged.skipped
     });
     setFinderProgress({
       percent: 100,
@@ -6202,7 +6240,8 @@ function bindForms() {
           await markDiscoveryImported(result.__jobId, {
             importedCount: 0,
             rawCount: 0,
-            skippedCount: 0
+            skippedCount: 0,
+            skipBreakdown: merged.skipped
           });
           setFinderProgress({
             percent: 100,
@@ -6227,7 +6266,8 @@ function bindForms() {
           await markDiscoveryImported(result.__jobId, {
             importedCount: 0,
             rawCount: found.length,
-            skippedCount: found.length
+            skippedCount: found.length,
+            skipBreakdown: merged.skipped
           });
           setFinderProgress({
             percent: 100,
@@ -6242,7 +6282,8 @@ function bindForms() {
         await markDiscoveryImported(result.__jobId, {
           importedCount,
           rawCount: found.length,
-          skippedCount: Math.max(0, found.length - importedCount)
+          skippedCount: Math.max(0, found.length - importedCount),
+          skipBreakdown: merged.skipped
         });
         setFinderProgress({
           percent: 100,
@@ -7822,7 +7863,10 @@ function renderAdminOperations(data = {}) {
       <strong>${escapeHtml(job.country || "未知地区")} · ${escapeHtml(discoverySourceLabel(job.sourceMode))}</strong>
       <span>${escapeHtml(job.ownerUsername || "admin")}</span>
       <span>${escapeHtml(formatJobTime(job.updatedAt || job.createdAt || ""))}</span>
-      <small title="${escapeHtml(job.error || job.message || "")}">${escapeHtml((job.error || job.message || "").slice(0, 100))}</small>
+      <small title="${escapeHtml(job.error || job.message || "")}">
+        ${escapeHtml((job.error || job.message || "").slice(0, 100))}
+        ${job.result ? `<br>发现 ${discoveryJobRawCount(job)} · 导入 ${discoveryJobImportedCount(job)} · 跳过 ${discoveryJobSkippedCount(job)}${discoveryJobSkipBreakdownText(job) ? `（${escapeHtml(discoveryJobSkipBreakdownText(job))}）` : ""}` : ""}
+      </small>
     </article>
   `).join("") : `<p class="empty">暂无任务记录。</p>`;
   if ($("#adminTaskSummary")) $("#adminTaskSummary").textContent = `${summary.activeJobs || 0} 个运行中，${summary.failedJobs || 0} 个失败`;

@@ -4088,6 +4088,7 @@ def mark_discovery_job_imported(
     imported_count: int | None = None,
     raw_count: int | None = None,
     skipped_count: int | None = None,
+    skip_breakdown: dict | None = None,
 ) -> dict | None:
     job = load_discovery_job(job_id, owner_username)
     if not job:
@@ -4107,6 +4108,12 @@ def mark_discovery_job_imported(
     if skipped_count is not None:
         maximum_skipped = max(0, int(result.get("rawCount") or 0) - int(result.get("importedCount") or 0))
         result["skippedCount"] = min(maximum_skipped, max(0, int(skipped_count)))
+    if isinstance(skip_breakdown, dict):
+        allowed_skip_reasons = ("ineligible", "existing", "rejected", "duplicateWebsite")
+        result["skipBreakdown"] = {
+            reason: max(0, int(skip_breakdown.get(reason) or 0))
+            for reason in allowed_skip_reasons
+        }
     job["result"] = result
     job["updatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     save_discovery_job(job)
@@ -6962,6 +6969,8 @@ def is_business_website_url(url: str) -> bool:
     if any(asset in domain for asset in STATIC_ASSET_DOMAINS):
         return False
     if any(platform in domain for platform in SOCIAL_OR_PLATFORM_DOMAINS):
+        return False
+    if any(domain == operator or domain.endswith(f".{operator}") for operator in local_discovery_domains()):
         return False
     if any(part in path for part in NON_CUSTOMER_WEBSITE_PATHS):
         return False
@@ -13874,6 +13883,7 @@ class Handler(SimpleHTTPRequestHandler):
                     optional_count(payload.get("importedCount")),
                     optional_count(payload.get("rawCount")),
                     optional_count(payload.get("skippedCount")),
+                    payload.get("skipBreakdown"),
                 )
                 if not job:
                     self.send_json(404, {"ok": False, "error": "获客任务不存在"})
