@@ -5144,8 +5144,176 @@ ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES = (
 )
 
 
+ALGERIA_DIRECTORY_OPERATOR_DOMAINS = (
+    "pagesjaunes-dz.com",
+    "blalgeria.com",
+    "haousli.com",
+    "easyprospect.blalgeria.com",
+    "tidjara.dz",
+    "goafricaonline.com",
+    "leafletjs.com",
+    "openstreetmap.org",
+    "schema.org",
+    "wordpress.org",
+    "gmpg.org",
+    "google.com",
+    "googleapis.com",
+    "gstatic.com",
+)
+
+
+def normalize_algeria_phone(value: str) -> str:
+    digits = re.sub(r"\D", "", urllib.parse.unquote(html.unescape(value or "")))
+    if digits.startswith("00213"):
+        digits = digits[2:]
+    if digits.startswith("213") and 11 <= len(digits) <= 12:
+        return f"+{digits}"
+    if digits.startswith("0") and 9 <= len(digits) <= 10:
+        return f"+213{digits[1:]}"
+    if 8 <= len(digits) <= 9:
+        return f"+213{digits}"
+    return ""
+
+
+def algeria_directory_local_business(document: str) -> dict:
+    def find_local_business(value) -> dict:
+        if isinstance(value, dict):
+            value_type = value.get("@type")
+            type_values = value_type if isinstance(value_type, list) else [value_type]
+            if any(str(item or "").lower() in {"localbusiness", "automotivedealer", "autodealer"} for item in type_values):
+                return value
+            for nested in value.values():
+                found = find_local_business(nested)
+                if found:
+                    return found
+        elif isinstance(value, list):
+            for nested in value:
+                found = find_local_business(nested)
+                if found:
+                    return found
+        return {}
+
+    for raw_value in re.findall(
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>([\s\S]*?)</script>',
+        document,
+        re.I,
+    ):
+        try:
+            parsed = json.loads(html.unescape(raw_value).strip())
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        found = find_local_business(parsed)
+        if found:
+            return found
+    return {}
+
+
+def algeria_directory_official_websites(document: str, detail_url: str) -> list[str]:
+    detail_domain = safe_urlparse(detail_url).netloc.lower().removeprefix("www.")
+    websites = []
+    for raw_url in re.findall(r'href=["\']([^"\']+)["\']', document, re.I):
+        if re.match(r"^(?:mailto|tel|javascript|data):", html.unescape(raw_url).strip(), re.I):
+            continue
+        candidate = normalize_public_url(urllib.parse.urljoin(detail_url, html.unescape(raw_url)))
+        domain = safe_urlparse(candidate).netloc.lower().removeprefix("www.")
+        if (
+            not candidate
+            or domain == detail_domain
+            or any(domain == blocked or domain.endswith(f".{blocked}") for blocked in ALGERIA_DIRECTORY_OPERATOR_DOMAINS)
+            or not is_business_website_url(candidate)
+        ):
+            continue
+        if candidate not in websites:
+            websites.append(candidate)
+    return websites[:4]
+
+
+def algeria_directory_detail(source_name: str, company: str, detail_url: str) -> dict:
+    try:
+        document, final_url = fetch_document(detail_url, timeout=12)
+    except (OSError, TimeoutError, UnicodeError, urllib.error.URLError, http.client.HTTPException):
+        return {"detail_url": detail_url, "fetched": False}
+
+    relevant_document = document
+    if source_name in {"Pages Jaunes Algérie", "Go Africa Online Algérie"}:
+        relevant_document = re.split(r"<footer\b", document, maxsplit=1, flags=re.I)[0]
+    local_business = algeria_directory_local_business(document)
+    contacts = extract_public_contacts(relevant_document)
+
+    phones = []
+    for raw_phone in re.findall(r'href=["\']tel:([^"\']+)["\']', relevant_document, re.I):
+        phone = normalize_algeria_phone(raw_phone)
+        if phone and phone not in phones:
+            phones.append(phone)
+    local_phone = normalize_algeria_phone(str(local_business.get("telephone") or ""))
+    if local_phone and local_phone not in phones:
+        phones.insert(0, local_phone)
+
+    operator_email_domains = {"tidjara.dz", "pagesjaunes-dz.com", "blalgeria.com", "goafricaonline.com"}
+    emails = [
+        email for email in (contacts.get("emails") or [])
+        if email.split("@")[-1].lower() not in operator_email_domains
+    ]
+    local_email = clean_text(str(local_business.get("email") or "")).lower()
+    if local_email and "@" in local_email and local_email.split("@")[-1] not in operator_email_domains:
+        emails.insert(0, local_email)
+    emails = list(dict.fromkeys(emails))[:8]
+
+    social_accounts = [
+        account for account in (contacts.get("social_accounts") or [])
+        if not re.search(r"pages[.-]?jaunes|tidjara|goafricaonline", account, re.I)
+    ]
+    websites = algeria_directory_official_websites(relevant_document, final_url)
+    address = ""
+    local_address = local_business.get("address")
+    if isinstance(local_address, dict):
+        address = clean_text(" ".join(
+            str(local_address.get(key) or "")
+            for key in ("streetAddress", "addressLocality", "addressRegion", "addressCountry")
+        ))
+    if not address:
+        address_match = re.search(r"<address[^>]*>([\s\S]*?)</address>", relevant_document, re.I)
+        if address_match:
+            address = clean_text(address_match.group(1))[:240]
+    if not address:
+        text = clean_text(relevant_document)
+        address_match = re.search(
+            r"(?:Adresse|Address)\s*[:：]?\s*(.{5,220}?)(?=(?:Téléphone|Telephone|Tél\.?|Phone|Email|Site web|Website|Produits|Activité|$))",
+            text,
+            re.I,
+        )
+        if address_match:
+            address = clean_text(address_match.group(1))[:240]
+
+    contacts.update({
+        "email": emails[0] if emails else "",
+        "emails": emails,
+        "phone": phones[0] if phones else "",
+        "phones": phones,
+        "social_accounts": social_accounts[:8],
+        "websites": websites,
+    })
+    description = clean_text(str(local_business.get("description") or "")) or extract_meta(relevant_document)
+    strong_non_sales = bool(re.search(
+        r"\b(trucks?|camions?|motos?|motocycles?|spare parts?|auto parts?|tyres?|tires?|garage|repair|workshop|"
+        r"maintenance|car wash|detailing|equipment|equipements?)\b|"
+        r"(pièces détachées|réparation|pneus?|lavage)",
+        f"{company} {description}",
+        re.I,
+    ))
+    return {
+        "detail_url": normalize_public_url(final_url) or detail_url,
+        "fetched": True,
+        "contacts": contacts,
+        "website": websites[0] if websites else "",
+        "address": address,
+        "description": description[:700],
+        "sales_fit": not strong_non_sales,
+    }
+
+
 def search_algeria_automotive_directories(limit: int = 90) -> list[dict]:
-    results: list[dict] = []
+    candidates: list[dict] = []
     seen_urls: set[str] = set()
     per_directory_limit = max(12, (max(1, limit) + len(ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES) - 1) // len(ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES))
     for source_name, directory_url, path_pattern in ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES:
@@ -5172,27 +5340,76 @@ def search_algeria_automotive_directories(limit: int = 90) -> list[dict]:
                 continue
             seen_urls.add(identity)
             context = clean_text(page[max(0, anchor.start() - 500): min(len(page), anchor.end() + 1200)])
-            contact = extract_contact(context)
-            results.append({
+            candidates.append({
                 "title": company,
                 "url": absolute_url,
                 "source_url": absolute_url,
-                "customer_website": "",
-                "snippet": clean_text(
-                    f"{company} is listed as an automotive dealer, vehicle distributor or car showroom in Algeria. "
-                    f"Local directory: {source_name}. {context}"
-                )[:1200],
-                "contact": contact,
                 "origin": source_name,
                 "source_type": "Algeria local automotive business directory",
-                "skip_fetch": True,
+                "listing_context": context,
             })
             source_count += 1
-            if len(results) >= limit or source_count >= per_directory_limit:
+            if len(candidates) >= limit or source_count >= per_directory_limit:
                 break
-        if len(results) >= limit:
+        if len(candidates) >= limit:
             break
-    return results[:limit]
+
+    details: dict[str, dict] = {}
+    if candidates:
+        executor = ThreadPoolExecutor(max_workers=min(8, len(candidates)))
+        futures = {
+            executor.submit(algeria_directory_detail, item["origin"], item["title"], item["url"]): item["url"]
+            for item in candidates
+        }
+        try:
+            for future in as_completed(futures, timeout=max(40, min(150, len(candidates) * 3))):
+                try:
+                    details[futures[future]] = future.result()
+                except (OSError, ValueError, RuntimeError, TimeoutError):
+                    details[futures[future]] = {"detail_url": futures[future], "fetched": False}
+        except FuturesTimeoutError:
+            pass
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+    results = []
+    for item in candidates:
+        detail = details.get(item["url"], {})
+        contacts = detail.get("contacts") if isinstance(detail.get("contacts"), dict) else {}
+        contact_parts = [
+            *(contacts.get("emails") or []),
+            *(contacts.get("phones") or []),
+            *(contacts.get("social_accounts") or []),
+        ]
+        website = detail.get("website", "")
+        address = detail.get("address", "")
+        description = detail.get("description", "")
+        item.update({
+            "url": detail.get("detail_url") or item["url"],
+            "source_url": detail.get("detail_url") or item["source_url"],
+            "customer_website": website,
+            "snippet": clean_text(
+                f"{item['title']} is listed as an automotive dealership, authorized car agent or vehicle distributor in Algeria. "
+                f"Local directory: {item['origin']}. Address: {address}. {description}"
+            )[:1400],
+            "contact": " ".join([*contact_parts, website]),
+            "directory_public_contacts": contacts,
+            "directory_detail_fetched": bool(detail.get("fetched")),
+            "directory_sales_fit": bool(detail.get("sales_fit", True)),
+            "skip_fetch": True,
+        })
+        item.pop("listing_context", None)
+        results.append(item)
+
+    return sorted(
+        results,
+        key=lambda item: (
+            -int(bool(item.get("directory_sales_fit"))),
+            -int(bool(item.get("customer_website"))),
+            -int(bool(item.get("contact"))),
+            str(item.get("title") or ""),
+        ),
+    )[:limit]
 
 
 AUTOHOME_CITY_SLUGS = {
@@ -10315,6 +10532,8 @@ def infer_type(text: str) -> str:
         return "Corporate buyer"
     if any(word in lower for word in ("buying request", "rfq", "wanted", "looking to buy")):
         return "Active buyer"
+    if re.search(r"\b(car dealer|auto dealer|vehicle dealer|dealership|concessionnaire|agent agr[ée]e?)\b", lower):
+        return "Car dealer"
     if any(word in lower for word in ("showroom", "luxury cars", "pre-owned", "supercars")):
         return "Luxury car showroom"
     if any(word in lower for word in ("import", "export", "trading", "parallel")):
@@ -11609,6 +11828,8 @@ def discover(params: dict[str, list[str]]) -> dict:
         contacts = extract_public_contacts(source_contact_text, item.get("tags"))
         if item.get("google_public_contacts"):
             contacts = merge_public_contacts(contacts, item.get("google_public_contacts") or {})
+        if item.get("directory_public_contacts"):
+            contacts = merge_public_contacts(contacts, item.get("directory_public_contacts") or {})
         if page and (is_raw_social_or_video_source or not any(contacts.get(key) for key in ("email", "phone", "whatsapp"))):
             contacts = merge_public_contacts(
                 contacts,
@@ -11646,6 +11867,13 @@ def discover(params: dict[str, list[str]]) -> dict:
             and not is_google_places
             and item.get("origin") != "OpenStreetMap"
             and not is_social_result
+            and not (
+                source_type == "Algeria local automotive business directory"
+                and any(
+                    (item.get("directory_public_contacts") or {}).get(key)
+                    for key in ("email", "phone", "whatsapp")
+                )
+            )
         ):
             reject_candidate("websiteAuditFailed")
             continue
@@ -11725,6 +11953,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                     "verified": bool(
                         is_lead_profile_email
                         or item.get("origin") in ("OpenStreetMap", "Google Maps")
+                        or item.get("directory_detail_fetched")
                         or official_contact_url
                         or (page and re.search(re.escape(email), page, re.I))
                     ),
@@ -11984,6 +12213,14 @@ def discover(params: dict[str, list[str]]) -> dict:
             has_business_evidence
             and country_match
             and score >= int(quality_policy.get("minimumAutoImportScore") or 0)
+            and (
+                source_type != "Algeria local automotive business directory"
+                or (
+                    item.get("directory_detail_fetched")
+                    and item.get("directory_sales_fit")
+                    and (contactable or customer_website)
+                )
+            )
         )
         contact_reason = (
             f"该线索与“{target_label}”目标匹配，"
