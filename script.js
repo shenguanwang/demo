@@ -667,6 +667,42 @@ let crmTierFilter = "all";
 let crmStageFilter = "all";
 let crmSortBy = "priority";
 let navigationBound = false;
+let salesOverviewBound = false;
+let salesMap = null;
+let selectedSalesCountry = "";
+let salesMapMetric = "leads";
+let salesMapRange = "all";
+
+const salesCountryCoordinates = {
+  UAE: [24.45, 54.38],
+  "Saudi Arabia": [24.71, 46.67],
+  Kazakhstan: [48.02, 66.92],
+  Russia: [55.75, 37.62],
+  Qatar: [25.29, 51.53],
+  Kuwait: [29.38, 47.99],
+  Uzbekistan: [41.31, 69.24],
+  Azerbaijan: [40.41, 49.87],
+  Nigeria: [9.08, 8.68],
+  Ghana: [7.95, -1.02],
+  Algeria: [28.03, 1.66],
+  "Côte d'Ivoire": [7.54, -5.55],
+  Egypt: [26.82, 30.8],
+  Kyrgyzstan: [41.2, 74.77],
+  Ethiopia: [9.15, 40.49],
+  Oman: [21.47, 55.98],
+  Armenia: [40.07, 45.04],
+  Bahrain: [26.07, 50.56],
+  Jordan: [31.24, 36.51],
+  Georgia: [42.32, 43.36],
+  Vietnam: [14.06, 108.28],
+  Philippines: [12.88, 121.77],
+  Mexico: [23.63, -102.55],
+  Brazil: [-14.24, -51.93],
+  Chile: [-33.45, -70.67],
+  Colombia: [4.57, -74.3],
+  Morocco: [31.79, -7.09],
+  China: [35.86, 104.2]
+};
 
 const productProfiles = {
   "问界 M9": {
@@ -3661,9 +3697,6 @@ function renderCrm() {
       </td>
     </tr>
   `).join("") : `<tr><td colspan="9">当前筛选条件下没有符合条件的客户。</td></tr>`;
-  $("#heroPending").textContent = reviewLeads.length;
-  $("#heroCustomers").textContent = customers.length;
-  $("#heroGradeA").textContent = customers.filter((lead) => lead.score >= 80).length;
   renderLeadSelect();
 }
 
@@ -5036,6 +5069,326 @@ function recordFollowUp(index) {
   refreshAllLeadViews();
 }
 
+function salesCountryKey(value = "") {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const known = Object.keys(salesCountryCoordinates).find((country) =>
+    text.toLowerCase() === country.toLowerCase()
+    || text.toLowerCase().startsWith(`${country.toLowerCase()} `)
+    || text.toLowerCase().includes(country.toLowerCase())
+  );
+  return known || text.split(/\s+/)[0];
+}
+
+function salesCountryLabel(country) {
+  return countries.find((item) => salesCountryKey(item.name) === country)?.name || country;
+}
+
+function salesRecordDate(record = {}) {
+  return record.updatedAt || record.lastContactAt || record.approvedAt || record.researchAt
+    || record.importedAt || record.discoveredAt || record.createdAt || "";
+}
+
+function salesDateInRange(value, range) {
+  if (range === "all") return true;
+  const date = new Date(value || "");
+  return !Number.isNaN(date.getTime()) && date.getTime() >= Date.now() - Number(range) * 86400000;
+}
+
+function salesSourceName(record = {}) {
+  const text = [
+    record.origin, record.platform, record.sourceMode, record.discoverySource,
+    record.sourceType, record.source, record.sourceUrl
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (text.includes("facebook")) return "Facebook";
+  if (text.includes("instagram")) return "Instagram";
+  if (text.includes("tiktok")) return "TikTok";
+  if (text.includes("youtube")) return "YouTube";
+  if (text.includes("linkedin")) return "LinkedIn";
+  if (text.includes("google") || text.includes("maps")) return "Google Maps";
+  if (text.includes("openstreetmap") || text.includes("osm")) return "OpenStreetMap";
+  return "官网 / 目录";
+}
+
+function emptySalesCountry(country) {
+  return {
+    country, leads: 0, pending: 0, customers: 0, contactable: 0, quoted: 0,
+    completed: 0, quoteAmount: 0, overdue: 0, missingContact: 0,
+    sources: {}, models: {}, owners: {}, latestActivity: ""
+  };
+}
+
+function addSalesCount(target, key, value = 1) {
+  if (key) target[key] = Number(target[key] || 0) + Number(value || 0);
+}
+
+function localSalesCountryAggregates(range = "all") {
+  const aggregates = {};
+  const ensure = (country) => aggregates[country] || (aggregates[country] = emptySalesCountry(country));
+  const customerCountryById = new Map();
+  const customerCountryByName = new Map();
+  const today = new Date().toISOString().slice(0, 10);
+  [
+    ...reviewLeads.map((lead) => ({ lead, pending: true })),
+    ...customers.map((lead) => ({ lead, pending: false }))
+  ].forEach(({ lead, pending }) => {
+    if (!salesDateInRange(salesRecordDate(lead), range)) return;
+    const country = salesCountryKey(lead.country);
+    if (!country) return;
+    const item = ensure(country);
+    item.leads += 1;
+    item.pending += pending ? 1 : 0;
+    item.customers += pending ? 0 : 1;
+    item.contactable += lead.email || lead.phone || lead.whatsapp ? 1 : 0;
+    item.missingContact += lead.email || lead.phone || lead.whatsapp ? 0 : 1;
+    item.completed += lead.stage === "已成交" ? 1 : 0;
+    item.overdue += !pending && !["已成交", "已流失"].includes(lead.stage)
+      && lead.nextFollowAt && lead.nextFollowAt < today ? 1 : 0;
+    addSalesCount(item.sources, salesSourceName(lead));
+    (lead.recommendedModels || [lead.model]).filter(Boolean).slice(0, 4)
+      .forEach((model) => addSalesCount(item.models, model));
+    addSalesCount(item.owners, currentSession?.username || "当前账号");
+    const activity = salesRecordDate(lead);
+    if (activity > item.latestActivity) item.latestActivity = activity;
+    if (!pending) {
+      if (lead.id) customerCountryById.set(String(lead.id), country);
+      if (lead.company) customerCountryByName.set(String(lead.company).toLowerCase(), country);
+    }
+  });
+  quoteHistory.forEach((quote) => {
+    if (!salesDateInRange(salesRecordDate(quote), range)) return;
+    const country = salesCountryKey(quote.country)
+      || customerCountryById.get(String(quote.customerId || ""))
+      || customerCountryByName.get(String(quote.customer || "").toLowerCase())
+      || Object.keys(salesCountryCoordinates).find((key) =>
+        String(quote.destination || "").toLowerCase().includes(key.toLowerCase())
+      );
+    if (!country) return;
+    const item = ensure(country);
+    item.quoted += 1;
+    item.quoteAmount += Number(quote.total || 0);
+    if (quote.model) addSalesCount(item.models, quote.model);
+    const activity = salesRecordDate(quote);
+    if (activity > item.latestActivity) item.latestActivity = activity;
+  });
+  return aggregates;
+}
+
+function effectiveSalesCountryAggregates() {
+  if (currentSession?.role === "admin" && adminKpiSnapshot?.countryAggregates) {
+    return Object.fromEntries(Object.entries(adminKpiSnapshot.countryAggregates).map(([country, item]) => [
+      country,
+      { country, ...(item.periods?.[salesMapRange] || item.periods?.all || item) }
+    ]));
+  }
+  return localSalesCountryAggregates(salesMapRange);
+}
+
+function formatOverviewMoney(value) {
+  const amount = Number(value || 0);
+  if (amount >= 1000000) return `$${(amount / 1000000).toFixed(1)}M`;
+  if (amount >= 1000) return `$${Math.round(amount / 1000)}K`;
+  return `$${Math.round(amount).toLocaleString("en-US")}`;
+}
+
+function sortedSalesEntries(values = {}) {
+  return Object.entries(values || {}).sort((a, b) => Number(b[1]) - Number(a[1]));
+}
+
+function renderSalesCountryPanel(country, item) {
+  const panel = $("#salesCountryPanel");
+  if (!panel || !item) return;
+  const sources = sortedSalesEntries(item.sources).slice(0, 6);
+  const sourceMax = Math.max(1, ...sources.map((entry) => Number(entry[1] || 0)));
+  const models = sortedSalesEntries(item.models).slice(0, 5);
+  const owners = sortedSalesEntries(item.owners).slice(0, 5);
+  panel.innerHTML = `
+    <div class="country-panel-head">
+      <span>当前市场</span>
+      <h2>${escapeHtml(salesCountryLabel(country))}</h2>
+      <p>最近活动：${escapeHtml(formatSyncTime(item.latestActivity))}</p>
+    </div>
+    <div class="country-stat-grid">
+      <div><span>全部线索</span><strong>${Number(item.leads || 0)}</strong></div>
+      <div><span>可联系</span><strong>${Number(item.contactable || 0)}</strong></div>
+      <div><span>已报价</span><strong>${Number(item.quoted || 0)}</strong></div>
+      <div><span>已成交</span><strong>${Number(item.completed || 0)}</strong></div>
+    </div>
+    <div class="country-detail-block">
+      <h3>线索来源</h3>
+      ${sources.length ? sources.map(([source, count]) => `
+        <div class="country-source-row"><span>${escapeHtml(source)}</span>
+          <i style="width:${Math.max(8, Number(count) / sourceMax * 100)}%"></i><b>${Number(count)}</b>
+        </div>`).join("") : "<p>暂无来源数据</p>"}
+    </div>
+    <div class="country-detail-block">
+      <h3>推荐车型</h3>
+      <div class="country-models">${models.length
+        ? models.map(([model, count]) => `<span>${escapeHtml(model)} · ${Number(count)}</span>`).join("")
+        : "<span>暂无车型数据</span>"}</div>
+    </div>
+    <div class="country-detail-block">
+      <h3>负责销售</h3>
+      <div class="country-owners">${owners.length
+        ? owners.map(([owner, count]) => `<span>${escapeHtml(owner)} · ${Number(count)}</span>`).join("")
+        : "<span>未分配</span>"}</div>
+    </div>
+    <div class="country-panel-actions">
+      <button type="button" data-overview-action="review-country" data-country="${escapeHtml(country)}">查看该国线索</button>
+      <button type="button" data-overview-action="discover-country" data-country="${escapeHtml(country)}">继续开发市场</button>
+    </div>`;
+}
+
+function salesMarkerColor(item) {
+  if (Number(item.completed || 0) > 0) return "#2e9b69";
+  if (Number(item.quoted || 0) > 0) return "#d79a2b";
+  return "#3c82c4";
+}
+
+function renderSalesMap(aggregates) {
+  const container = $("#salesWorldMap");
+  if (!container) return;
+  const entries = Object.entries(aggregates)
+    .filter(([country, item]) => salesCountryCoordinates[country] && Number(item[salesMapMetric] || 0) > 0)
+    .sort((a, b) => Number(b[1][salesMapMetric] || 0) - Number(a[1][salesMapMetric] || 0));
+  if (!window.L) {
+    container.innerHTML = `<div class="sales-map-fallback">${entries.map(([country, item]) => `
+      <button type="button" data-sales-country="${escapeHtml(country)}">
+        <strong>${escapeHtml(salesCountryLabel(country))}</strong>
+        <span>${Number(item[salesMapMetric] || 0)} 条</span>
+      </button>`).join("") || "<p>当前没有可显示的国家数据。</p>"}</div>`;
+    return;
+  }
+  if (!salesMap) {
+    salesMap = L.map(container, { minZoom: 1, maxZoom: 6, zoomSnap: .25, worldCopyJump: true })
+      .setView([24, 35], 2);
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png", {
+      maxZoom: 6,
+      attribution: "&copy; OpenStreetMap &copy; CARTO"
+    }).addTo(salesMap);
+    salesMap.salesLayers = L.layerGroup().addTo(salesMap);
+  }
+  salesMap.salesLayers.clearLayers();
+  entries.forEach(([country, item], index) => {
+    const value = Number(item[salesMapMetric] || 0);
+    const marker = L.circleMarker(salesCountryCoordinates[country], {
+      radius: Math.min(25, 7 + Math.sqrt(value) * 1.8),
+      color: "#fff",
+      weight: 2,
+      fillColor: salesMarkerColor(item),
+      fillOpacity: .88
+    }).addTo(salesMap.salesLayers);
+    marker.bindTooltip(`${salesCountryLabel(country)} · ${value}`, {
+      permanent: index < 7, direction: "top", className: "sales-map-label", offset: [0, -7]
+    });
+    marker.on("click", () => {
+      selectedSalesCountry = country;
+      renderSalesCountryPanel(country, item);
+      salesMap.flyTo(salesCountryCoordinates[country], Math.max(2.25, salesMap.getZoom()), { duration: .45 });
+    });
+  });
+  window.requestAnimationFrame(() => salesMap?.invalidateSize());
+}
+
+function renderSalesAlerts(aggregates) {
+  const box = $("#salesAlertList");
+  if (!box) return;
+  const alerts = Object.entries(aggregates).flatMap(([country, item]) => {
+    const rows = [];
+    if (Number(item.overdue || 0)) rows.push({
+      priority: Number(item.overdue),
+      title: `${salesCountryLabel(country)} 有 ${Number(item.overdue)} 位客户逾期未跟进`,
+      detail: "建议销售今天优先联系，避免线索失去时效。"
+    });
+    if (Number(item.missingContact || 0) >= 3) rows.push({
+      priority: Number(item.missingContact),
+      title: `${salesCountryLabel(country)} 有 ${Number(item.missingContact)} 条线索缺少联系方式`,
+      detail: "建议在线索审核中补全邮箱、电话或 WhatsApp。"
+    });
+    if (Number(item.quoted || 0) > Number(item.completed || 0)) rows.push({
+      priority: Number(item.quoted) - Number(item.completed),
+      title: `${salesCountryLabel(country)} 有 ${Number(item.quoted) - Number(item.completed)} 个报价待推进`,
+      detail: "检查客户反馈、付款条件和下一次跟进日期。"
+    });
+    return rows;
+  }).sort((a, b) => b.priority - a.priority).slice(0, 3);
+  box.innerHTML = alerts.length ? alerts.map((alert) => `
+    <article class="sales-alert-item">
+      <strong><b>!</b> ${escapeHtml(alert.title)}</strong>
+      <span>${escapeHtml(alert.detail)}</span>
+    </article>`).join("") : `
+    <article class="sales-alert-item">
+      <strong>当前没有紧急事项</strong>
+      <span>系统未发现逾期跟进、联系方式缺失或未推进报价。</span>
+    </article>`;
+}
+
+function renderSalesOverview() {
+  if (!$("#salesWorldMap")) return;
+  const aggregates = effectiveSalesCountryAggregates();
+  const totals = Object.values(aggregates).reduce((sum, item) => ({
+    leads: sum.leads + Number(item.leads || 0),
+    contactable: sum.contactable + Number(item.contactable || 0),
+    quoted: sum.quoted + Number(item.quoted || 0),
+    completed: sum.completed + Number(item.completed || 0),
+    quoteAmount: sum.quoteAmount + Number(item.quoteAmount || 0)
+  }), { leads: 0, contactable: 0, quoted: 0, completed: 0, quoteAmount: 0 });
+  $("#globalLeadCount").textContent = totals.leads.toLocaleString("zh-CN");
+  $("#globalContactableCount").textContent = totals.contactable.toLocaleString("zh-CN");
+  $("#globalQuotedCount").textContent = totals.quoted.toLocaleString("zh-CN");
+  $("#globalCompletedCount").textContent = totals.completed.toLocaleString("zh-CN");
+  $("#globalQuoteAmount").textContent = formatOverviewMoney(totals.quoteAmount);
+  renderSalesMap(aggregates);
+  renderSalesAlerts(aggregates);
+  if (!selectedSalesCountry || !aggregates[selectedSalesCountry]) {
+    selectedSalesCountry = Object.entries(aggregates)
+      .sort((a, b) => Number(b[1].leads || 0) - Number(a[1].leads || 0))[0]?.[0] || "";
+  }
+  if (selectedSalesCountry && aggregates[selectedSalesCountry]) {
+    renderSalesCountryPanel(selectedSalesCountry, aggregates[selectedSalesCountry]);
+  }
+}
+
+function bindSalesOverview() {
+  if (salesOverviewBound) return;
+  salesOverviewBound = true;
+  $("#overviewRange")?.addEventListener("change", (event) => {
+    salesMapRange = event.currentTarget.value || "all";
+    renderSalesOverview();
+  });
+  $(".map-metric-tabs")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-map-metric]");
+    if (!button) return;
+    salesMapMetric = button.dataset.mapMetric || "leads";
+    $$(".map-metric-tabs [data-map-metric]").forEach((item) =>
+      item.classList.toggle("active", item === button)
+    );
+    renderSalesOverview();
+  });
+  $("#salesWorldMap")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-sales-country]");
+    if (!button) return;
+    const aggregates = effectiveSalesCountryAggregates();
+    selectedSalesCountry = button.dataset.salesCountry;
+    renderSalesCountryPanel(selectedSalesCountry, aggregates[selectedSalesCountry]);
+  });
+  $("#salesCountryPanel")?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-overview-action]");
+    if (!button) return;
+    const country = button.dataset.country || "";
+    if (button.dataset.overviewAction === "discover-country") {
+      chooseMarket(salesCountryLabel(country));
+      return;
+    }
+    showSection("review");
+    renderReviewFilterOptions();
+    const filter = $("#reviewCountryFilter");
+    const option = [...(filter?.options || [])].find((item) => salesCountryKey(item.value) === country);
+    if (filter && option) filter.value = option.value;
+    renderReview();
+  });
+}
+
 function summarizeKpiState(state) {
   const stateReviewLeads = Array.isArray(state?.reviewLeads) ? state.reviewLeads : [];
   const stateCustomers = Array.isArray(state?.customers) ? state.customers : [];
@@ -5196,6 +5549,7 @@ function renderKpis() {
     <div class="wide"><span>当前最重要动作</span><strong>${escapeHtml(nextRecommendation)}</strong></div>
   `;
   renderAdminKpis();
+  renderSalesOverview();
 }
 
 function bindNavigation() {
@@ -5216,6 +5570,12 @@ function showSection(id) {
     history.replaceState(null, "", `#${id}`);
   }
   window.scrollTo({ top: 0, behavior: "smooth" });
+  if (id === "overview") {
+    window.requestAnimationFrame(() => {
+      renderSalesOverview();
+      salesMap?.invalidateSize();
+    });
+  }
 }
 
 function showRequestedSection() {
@@ -8215,10 +8575,14 @@ function renderBeijingGreeting() {
   if (hour >= 5 && hour < 11) greeting = "早上好";
   else if (hour >= 11 && hour < 13) greeting = "中午好";
   else if (hour >= 13 && hour < 18) greeting = "下午好";
-  $("#timeGreeting").textContent = greeting;
-  $("#beijingDate").textContent =
-    `${parts.year}年${parts.month}月${parts.day}日 · ${weekday} · ` +
-    `${parts.hour}:${parts.minute}:${parts.second} · 北京时间`;
+  const greetingBox = $("#timeGreeting");
+  const dateBox = $("#beijingDate");
+  if (greetingBox) greetingBox.textContent = greeting;
+  if (dateBox) {
+    dateBox.textContent =
+      `${parts.year}年${parts.month}月${parts.day}日 · ${weekday} · ` +
+      `${parts.hour}:${parts.minute}:${parts.second} · 北京时间`;
+  }
 }
 
 async function init() {
@@ -8252,7 +8616,9 @@ async function init() {
     ["风险", renderRiskProfile],
     ["售后", renderAfterSales],
     ["KPI", renderKpis],
+    ["销售地图", renderSalesOverview],
     ["导航", bindNavigation],
+    ["销售地图交互", bindSalesOverview],
     ["表单", bindForms]
   ];
   startupSteps.forEach(([name, callback]) => {

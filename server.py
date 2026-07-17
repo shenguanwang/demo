@@ -1627,9 +1627,197 @@ def summarize_workspace_for_kpi(state: dict) -> dict:
     }
 
 
+SALES_COUNTRY_KEYS = (
+    "Saudi Arabia", "Côte d'Ivoire", "UAE", "Kazakhstan", "Russia", "Qatar",
+    "Kuwait", "Uzbekistan", "Azerbaijan", "Nigeria", "Ghana", "Algeria",
+    "Egypt", "Kyrgyzstan", "Ethiopia", "Oman", "Armenia", "Bahrain",
+    "Jordan", "Georgia", "Vietnam", "Philippines", "Mexico", "Brazil",
+    "Chile", "Colombia", "Morocco", "China",
+)
+
+
+def sales_country_key(value: object) -> str:
+    text = str(value or "").strip()
+    lower = text.lower()
+    for country in SALES_COUNTRY_KEYS:
+        if lower == country.lower() or lower.startswith(f"{country.lower()} ") or country.lower() in lower:
+            return country
+    return text.split()[0] if text else ""
+
+
+def sales_record_date(record: dict) -> str:
+    for key in (
+        "updatedAt", "lastContactAt", "approvedAt", "researchAt", "importedAt",
+        "discoveredAt", "createdAt",
+    ):
+        if record.get(key):
+            return str(record[key])
+    return ""
+
+
+def sales_date_in_range(value: str, days: int | None) -> bool:
+    if days is None:
+        return True
+    try:
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed >= datetime.now(timezone.utc) - timedelta(days=days)
+    except (TypeError, ValueError):
+        return False
+
+
+def sales_source_name(record: dict) -> str:
+    text = " ".join(str(record.get(key) or "") for key in (
+        "origin", "platform", "sourceMode", "discoverySource", "sourceType", "source", "sourceUrl",
+    )).lower()
+    for token, label in (
+        ("facebook", "Facebook"),
+        ("instagram", "Instagram"),
+        ("tiktok", "TikTok"),
+        ("youtube", "YouTube"),
+        ("linkedin", "LinkedIn"),
+        ("openstreetmap", "OpenStreetMap"),
+        ("osm", "OpenStreetMap"),
+        ("google", "Google Maps"),
+        ("maps", "Google Maps"),
+    ):
+        if token in text:
+            return label
+    return "官网 / 目录"
+
+
+def empty_sales_country_period() -> dict:
+    return {
+        "leads": 0,
+        "pending": 0,
+        "customers": 0,
+        "contactable": 0,
+        "quoted": 0,
+        "completed": 0,
+        "quoteAmount": 0.0,
+        "overdue": 0,
+        "missingContact": 0,
+        "sources": {},
+        "models": {},
+        "owners": {},
+        "latestActivity": "",
+    }
+
+
+def increment_sales_group(target: dict, key: object, amount: int = 1) -> None:
+    label = str(key or "").strip()
+    if label:
+        target[label] = int(target.get(label, 0)) + int(amount)
+
+
+def summarize_workspace_by_country(state: dict, username: str) -> dict:
+    review_leads = state.get("reviewLeads", []) if isinstance(state, dict) else []
+    customers = state.get("customers", []) if isinstance(state, dict) else []
+    quotes = state.get("quotes", []) if isinstance(state, dict) else []
+    result: dict[str, dict] = {}
+    ranges = {"all": None, "30": 30, "7": 7}
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    customer_country_by_id = {}
+    customer_country_by_name = {}
+    for lead in customers:
+        if not isinstance(lead, dict):
+            continue
+        country = sales_country_key(lead.get("country"))
+        if lead.get("id") and country:
+            customer_country_by_id[str(lead["id"])] = country
+        if lead.get("company") and country:
+            customer_country_by_name[str(lead["company"]).strip().lower()] = country
+
+    for range_key, days in ranges.items():
+        for lead, pending in [
+            *((item, True) for item in review_leads if isinstance(item, dict)),
+            *((item, False) for item in customers if isinstance(item, dict)),
+        ]:
+            if not sales_date_in_range(sales_record_date(lead), days):
+                continue
+            country = sales_country_key(lead.get("country"))
+            if not country:
+                continue
+            country_item = result.setdefault(country, {"country": country, "periods": {}})
+            item = country_item["periods"].setdefault(range_key, empty_sales_country_period())
+            item["leads"] += 1
+            item["pending"] += 1 if pending else 0
+            item["customers"] += 0 if pending else 1
+            has_contact = bool(
+                lead.get("email") or lead.get("phone") or lead.get("whatsapp")
+                or lead.get("emailSources") or lead.get("phoneSources") or lead.get("whatsappSources")
+            )
+            item["contactable"] += 1 if has_contact else 0
+            item["missingContact"] += 0 if has_contact else 1
+            item["completed"] += 1 if str(lead.get("stage") or "") == "已成交" else 0
+            item["overdue"] += 1 if (
+                not pending
+                and str(lead.get("stage") or "") not in {"已成交", "已流失"}
+                and str(lead.get("nextFollowAt") or "")
+                and str(lead.get("nextFollowAt")) < today
+            ) else 0
+            increment_sales_group(item["sources"], sales_source_name(lead))
+            models = lead.get("recommendedModels")
+            if not isinstance(models, list):
+                models = [lead.get("model")]
+            for model in models[:4]:
+                increment_sales_group(item["models"], model)
+            increment_sales_group(item["owners"], username)
+            activity = sales_record_date(lead)
+            if activity > item["latestActivity"]:
+                item["latestActivity"] = activity
+
+        for quote in quotes:
+            if not isinstance(quote, dict) or not sales_date_in_range(sales_record_date(quote), days):
+                continue
+            country = (
+                sales_country_key(quote.get("country"))
+                or customer_country_by_id.get(str(quote.get("customerId") or ""))
+                or customer_country_by_name.get(str(quote.get("customer") or "").strip().lower())
+            )
+            if not country:
+                destination = str(quote.get("destination") or "").lower()
+                country = next((key for key in SALES_COUNTRY_KEYS if key.lower() in destination), "")
+            if not country:
+                continue
+            country_item = result.setdefault(country, {"country": country, "periods": {}})
+            item = country_item["periods"].setdefault(range_key, empty_sales_country_period())
+            item["quoted"] += 1
+            try:
+                item["quoteAmount"] += float(quote.get("total") or 0)
+            except (TypeError, ValueError):
+                pass
+            increment_sales_group(item["models"], quote.get("model"))
+            activity = sales_record_date(quote)
+            if activity > item["latestActivity"]:
+                item["latestActivity"] = activity
+    return result
+
+
+def merge_sales_country_aggregates(target: dict, source: dict) -> None:
+    additive_keys = (
+        "leads", "pending", "customers", "contactable", "quoted", "completed",
+        "quoteAmount", "overdue", "missingContact",
+    )
+    for country, source_country in source.items():
+        target_country = target.setdefault(country, {"country": country, "periods": {}})
+        for range_key, source_period in source_country.get("periods", {}).items():
+            target_period = target_country["periods"].setdefault(range_key, empty_sales_country_period())
+            for key in additive_keys:
+                target_period[key] += source_period.get(key, 0)
+            for group_key in ("sources", "models", "owners"):
+                for label, count in source_period.get(group_key, {}).items():
+                    increment_sales_group(target_period[group_key], label, count)
+            if source_period.get("latestActivity", "") > target_period["latestActivity"]:
+                target_period["latestActivity"] = source_period["latestActivity"]
+
+
 def load_admin_kpi_summary() -> dict:
     users = list_users()
     rows = []
+    country_aggregates = {}
     totals = {
         "pending": 0,
         "verified": 0,
@@ -1644,6 +1832,10 @@ def load_admin_kpi_summary() -> dict:
         username = user.get("username", "")
         workspace = load_workspace_state(username)
         metrics = summarize_workspace_for_kpi(workspace.get("state", {}))
+        merge_sales_country_aggregates(
+            country_aggregates,
+            summarize_workspace_by_country(workspace.get("state", {}), username),
+        )
         for key in totals:
             totals[key] += int(metrics.get(key, 0))
         rows.append({
@@ -1657,7 +1849,7 @@ def load_admin_kpi_summary() -> dict:
             **metrics,
         })
     rows.sort(key=lambda item: (item["customers"] + item["pending"] + item["quotes"]), reverse=True)
-    return {"users": rows, "totals": totals}
+    return {"users": rows, "totals": totals, "countryAggregates": country_aggregates}
 
 
 def save_workspace_state(workspace_key: str, payload: dict, expected_version: int | None = None) -> dict:

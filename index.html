@@ -6,7 +6,8 @@
   <title>华为系新能源汽车海外获客工作台</title>
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
-  <link rel="stylesheet" href="./styles.css?v=20260716-lead-url-parser">
+  <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
+  <link rel="stylesheet" href="./styles.css?v=20260717-global-sales-map">
 </head>
 <body>
   <aside class="sidebar">
@@ -78,105 +79,73 @@
 
   <main class="main">
     <section class="section active" id="overview">
-      <header class="topbar">
+      <header class="topbar overview-topbar">
         <div>
-          <p class="eyebrow">Sales workspace</p>
-          <h1>海外获客工作台</h1>
+          <p class="eyebrow">Global sales intelligence</p>
+          <h1>全球销售总览</h1>
+          <p>查看团队在各国家的线索、报价、成交和待跟进情况。</p>
         </div>
-        <div class="topbar-status" id="cloudSyncStatus"><i></i><span>正在读取云端数据</span></div>
+        <div class="overview-head-actions">
+          <label class="overview-range-label">统计范围
+            <select id="overviewRange">
+              <option value="all">全部时间</option>
+              <option value="30">最近 30 天</option>
+              <option value="7">最近 7 天</option>
+            </select>
+          </label>
+          <div class="topbar-status" id="cloudSyncStatus"><i></i><span>正在读取云端数据</span></div>
+        </div>
       </header>
-      <div class="overview-welcome">
-        <div class="welcome-copy">
-          <span class="status-pill"><i></i> <span id="beijingDate">今日工作台</span></span>
-          <h2><span id="timeGreeting">你好</span>，今天从<br><em>高价值客户</em>开始。</h2>
-          <p>系统已整理好你的获客流程。完成下面的优先任务，就能持续推进海外订单。</p>
-          <div class="welcome-actions">
-            <button class="primary action-main" type="button" data-section="lead-finder">开始自动找客户 <span>→</span></button>
-            <button class="ghost" type="button" data-section="review">审核现有线索</button>
-          </div>
-        </div>
-        <div class="daily-focus">
-          <div class="focus-head">
-            <span>今日优先事项</span>
-            <strong>3 项</strong>
-          </div>
-          <button type="button" data-section="review">
-            <span class="task-check">01</span>
-            <span><strong>审核新增线索</strong><small>筛选值得联系的真实车商</small></span>
-            <b>→</b>
-          </button>
-          <button type="button" data-section="email">
-            <span class="task-check">02</span>
-            <span><strong>生成首轮开发信</strong><small>针对 A 级客户定制英文话术</small></span>
-            <b>→</b>
-          </button>
-          <button type="button" data-section="follow">
-            <span class="task-check">03</span>
-            <span><strong>处理今日跟进</strong><small>推进已联系客户进入报价阶段</small></span>
-            <b>→</b>
-          </button>
-        </div>
+
+      <div class="global-kpis" aria-label="全球销售关键指标">
+        <button type="button" data-section="review"><span>全部线索</span><strong id="globalLeadCount">0</strong><small>待审核与客户池合计</small></button>
+        <button type="button" data-section="crm"><span>可联系客户</span><strong id="globalContactableCount">0</strong><small>至少有一种联系方式</small></button>
+        <button type="button" data-section="quote"><span>已报价</span><strong id="globalQuotedCount">0</strong><small>已生成 CIF 报价</small></button>
+        <button type="button" data-section="risk"><span>已成交</span><strong id="globalCompletedCount">0</strong><small>销售阶段为已成交</small></button>
+        <button type="button" data-section="quote"><span>报价金额</span><strong id="globalQuoteAmount">$0</strong><small>全部报价版本合计</small></button>
       </div>
 
-      <div class="metric-strip">
-        <button type="button" data-section="review">
-          <span class="metric-icon amber">⌁</span>
-          <span><small>待审核线索</small><strong id="heroPending">0</strong><em>等待判断质量</em></span>
-          <b>→</b>
-        </button>
-        <button type="button" data-section="crm">
-          <span class="metric-icon blue">◎</span>
-          <span><small>客户池客户</small><strong id="heroCustomers">0</strong><em>已进入客户池</em></span>
-          <b>→</b>
-        </button>
-        <button type="button" data-section="email">
-          <span class="metric-icon green">◇</span>
-          <span><small>A 级客户</small><strong id="heroGradeA">0</strong><em>建议优先触达</em></span>
-          <b>→</b>
-        </button>
+      <div class="sales-map-layout">
+        <section class="sales-map-panel" aria-labelledby="salesMapTitle">
+          <div class="sales-map-toolbar">
+            <div>
+              <p class="eyebrow">Market distribution</p>
+              <h2 id="salesMapTitle">全球市场分布</h2>
+            </div>
+            <div class="map-metric-tabs" role="group" aria-label="地图指标">
+              <button class="active" type="button" data-map-metric="leads">线索</button>
+              <button type="button" data-map-metric="quoted">报价</button>
+              <button type="button" data-map-metric="completed">成交</button>
+            </div>
+          </div>
+          <div id="salesWorldMap" aria-label="各国家销售数据地图"></div>
+          <div class="sales-map-legend">
+            <span><i class="lead"></i>线索积累</span>
+            <span><i class="quote"></i>已有报价</span>
+            <span><i class="sale"></i>已有成交</span>
+            <span>圆点大小代表当前指标数量</span>
+          </div>
+        </section>
+
+        <aside class="sales-country-panel" id="salesCountryPanel" aria-live="polite">
+          <div class="country-panel-empty">
+            <span>选择市场</span>
+            <h2>点击地图上的国家</h2>
+            <p>这里会显示该国家的线索质量、来源、车型、负责人和下一步动作。</p>
+          </div>
+        </aside>
       </div>
 
-      <div class="overview-block">
-        <div class="block-head">
+      <section class="sales-alerts" aria-labelledby="salesAlertsTitle">
+        <div class="sales-alerts-head">
           <div>
-            <p class="eyebrow">Sales pipeline</p>
-            <h3>从发现客户到完成报价</h3>
+            <p class="eyebrow">Action required</p>
+            <h2 id="salesAlertsTitle">需要处理</h2>
           </div>
-          <span>按顺序推进，每一步都有明确产出</span>
+          <button type="button" data-section="follow">查看全部跟进</button>
         </div>
-        <div class="workflow">
-          <button type="button" data-section="market">
-            <span class="workflow-num">01</span>
-            <div class="workflow-icon">⌖</div>
-            <h3>选择市场</h3>
-            <p>确定国家与主推车型</p>
-          </button>
-          <button type="button" data-section="lead-finder">
-            <span class="workflow-num">02</span>
-            <div class="workflow-icon">⌕</div>
-            <h3>发现车商</h3>
-            <p>自动搜索真实商业客户</p>
-          </button>
-          <button type="button" data-section="review">
-            <span class="workflow-num">03</span>
-            <div class="workflow-icon">✓</div>
-            <h3>审核评分</h3>
-            <p>过滤低质量与重复线索</p>
-          </button>
-          <button type="button" data-section="email">
-            <span class="workflow-num">04</span>
-            <div class="workflow-icon">↗</div>
-            <h3>智能触达</h3>
-            <p>生成个性化英文开发信</p>
-          </button>
-          <button type="button" data-section="quote">
-            <span class="workflow-num">05</span>
-            <div class="workflow-icon">$</div>
-            <h3>跟进报价</h3>
-            <p>持续跟进并生成 CIF 报价</p>
-          </button>
-        </div>
-      </div>
+        <div class="sales-alert-list" id="salesAlertList"></div>
+      </section>
     </section>
 
     <section class="section" id="market">
@@ -1285,6 +1254,7 @@
     </section>
   </main>
 
-  <script src="./script.js?v=20260716-website-lead-source"></script>
+  <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
+  <script src="./script.js?v=20260717-global-sales-map"></script>
 </body>
 </html>
