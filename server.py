@@ -8648,12 +8648,11 @@ def social_search_variants(
             instagram_places = list(dict.fromkeys([market, *markets[:4]]))
             for place in instagram_places[:2]:
                 queries.extend([
+                    f"{place} cars",
+                    f"{place} auto",
                     f"{place} car dealer",
-                    f"{place} used cars",
                 ])
             queries.extend(localized_terms[:2])
-            for place in instagram_places[2:4]:
-                queries.append(f"{place} car dealer")
         elif platform == "tiktok":
             # TikTok user search favors short local-business phrases. Lead
             # with country and major-city terms before the longer web queries.
