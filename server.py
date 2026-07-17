@@ -5251,6 +5251,29 @@ ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES = (
 )
 
 
+REGIONAL_AUTOMOTIVE_DIRECTORY_PAGES = {
+    "ae": (
+        "DubiCars",
+        tuple(
+            "https://www.dubicars.com/dealers"
+            + (f"?page={page}" if page > 1 else "")
+            for page in range(1, 7)
+        ),
+        r"/dealers/[^/?#]+-\d+$",
+    ),
+    "sa": (
+        "SaudiSale",
+        ("https://cars.saudisale.com/en/showroom/list",),
+        r"/en/showroom/\d+/[^/?#]+$",
+    ),
+    "qa": (
+        "QMotor",
+        ("https://qmotor.com/dealers",),
+        r"/showrooms/[^/?#]+$",
+    ),
+}
+
+
 ALGERIA_DIRECTORY_OPERATOR_DOMAINS = (
     "pagesjaunes-dz.com",
     "blalgeria.com",
@@ -5279,9 +5302,13 @@ COUNTRY_CALLING_CODES = {
 
 
 def normalize_country_phone(value: str, country: str) -> str:
-    digits = re.sub(r"\D", "", urllib.parse.unquote(html.unescape(value or "")))
+    decoded_value = urllib.parse.unquote(html.unescape(value or "")).strip()
+    explicit_international = decoded_value.startswith("+") or decoded_value.startswith("00")
+    digits = re.sub(r"\D", "", decoded_value)
     if digits.startswith("00"):
         digits = digits[2:]
+    if explicit_international:
+        return f"+{digits}" if 8 <= len(digits) <= 15 else ""
     calling_code = COUNTRY_CALLING_CODES.get(country_search_meta(country).get("code", ""), "")
     if not calling_code:
         return f"+{digits}" if 8 <= len(digits) <= 15 else ""
@@ -5720,10 +5747,33 @@ def enrich_local_directory_results(items: list[dict], country: str, limit: int =
 
     for item in candidates:
         detail = details.get(id(item), {})
-        contacts = detail.get("contacts") if isinstance(detail.get("contacts"), dict) else {}
+        listing_contacts = (
+            item.get("directory_public_contacts")
+            if isinstance(item.get("directory_public_contacts"), dict)
+            else {}
+        )
+        detail_contacts = detail.get("contacts") if isinstance(detail.get("contacts"), dict) else {}
+        contacts = merge_public_contacts(listing_contacts, detail_contacts)
         website = detail.get("website", "")
         address = detail.get("address", "")
         description = detail.get("description", "")
+        listing_verified = bool(
+            item.get("directory_listing_verified")
+            and (
+                contacts.get("emails")
+                or contacts.get("phones")
+                or contacts.get("whatsapps")
+            )
+        )
+        detail_fetched = bool(detail.get("fetched") or listing_verified)
+        sales_fit = (
+            bool(detail.get("sales_fit"))
+            if detail.get("fetched")
+            else local_directory_sales_fit(
+                clean_text(str(item.get("title") or "")),
+                clean_text(f"{item.get('snippet', '')} {item.get('listing_context', '')}"),
+            )
+        )
         contact_parts = [
             *(contacts.get("emails") or []),
             *(contacts.get("phones") or []),
@@ -5739,12 +5789,107 @@ def enrich_local_directory_results(items: list[dict], country: str, limit: int =
             )[:1400],
             "contact": " ".join([*contact_parts, website]),
             "directory_public_contacts": contacts,
-            "directory_detail_fetched": bool(detail.get("fetched")),
-            "directory_sales_fit": bool(detail.get("sales_fit", False)),
+            "directory_detail_fetched": detail_fetched,
+            "directory_sales_fit": sales_fit,
         })
-        if detail.get("fetched"):
+        if detail_fetched:
             item["skip_fetch"] = True
     return items
+
+
+def regional_directory_company_from_path(url: str) -> str:
+    path = safe_urlparse(url).path.rstrip("/")
+    slug = path.rsplit("/", 1)[-1]
+    slug = re.sub(r"-\d+$", "", slug)
+    return clean_text(urllib.parse.unquote(slug).replace("-", " ")).title()
+
+
+def search_regional_automotive_directories(country: str, limit: int = 90) -> list[dict]:
+    code = country_search_meta(country).get("code", "")
+    config = REGIONAL_AUTOMOTIVE_DIRECTORY_PAGES.get(code)
+    if not config:
+        return []
+    source_name, directory_urls, path_pattern = config
+    default_city = {"ae": "Dubai", "sa": "Riyadh", "qa": "Doha"}.get(code, country)
+    candidates: list[dict] = []
+    seen_urls: set[str] = set()
+
+    for directory_url in directory_urls:
+        try:
+            page, final_url = fetch_document(directory_url, timeout=25)
+        except (OSError, TimeoutError, UnicodeError, urllib.error.URLError, http.client.HTTPException):
+            continue
+        for anchor in re.finditer(
+            r'<a\b([^>]*)href=["\']([^"\']+)["\']([^>]*)>([\s\S]*?)</a>',
+            page,
+            re.I,
+        ):
+            before_attrs, href, after_attrs, body = anchor.groups()
+            absolute_url = normalize_public_url(urllib.parse.urljoin(final_url, html.unescape(href)))
+            if not absolute_url or not re.search(path_pattern, safe_urlparse(absolute_url).path, re.I):
+                continue
+            identity = absolute_url.lower().split("#", 1)[0].rstrip("/")
+            if identity in seen_urls:
+                continue
+            attrs = f"{before_attrs} {after_attrs}"
+            name_match = re.search(r'data-dealer-name=["\']([^"\']+)', attrs, re.I)
+            company = clean_text(html.unescape(name_match.group(1))) if name_match else clean_text(body)
+            company = re.split(r"\b(?:Phone\s*\d*|Tel(?:ephone)?|Ads?)\s*:", company, maxsplit=1, flags=re.I)[0].strip()
+            if not company or company.lower() in {"see all cars", "view showroom", "view dealer"} or len(company) > 140:
+                company = regional_directory_company_from_path(absolute_url)
+            if len(company) < 2:
+                continue
+
+            context_html = page[max(0, anchor.start() - 700): min(len(page), anchor.end() + 900)]
+            context = clean_text(context_html)
+            location_match = re.search(r'data-dealer-location=["\']([^"\']+)', attrs, re.I)
+            city = clean_text(html.unescape(location_match.group(1))) if location_match else default_city
+            raw_phones = re.findall(r'data-dealer-phone=["\']([^"\']+)', attrs, re.I)
+            if not raw_phones:
+                raw_phones = re.findall(
+                    r"(?:Phone\s*\d*|Tel(?:ephone)?)\s*:\s*<span[^>]*>([^<]+)</span>",
+                    body,
+                    re.I,
+                )
+            if not raw_phones:
+                raw_phones = re.findall(r"\+\d[\d\s().-]{6,18}\d", clean_text(body))
+            phones: list[str] = []
+            for raw_phone in raw_phones:
+                phone = normalize_country_phone(html.unescape(raw_phone), country)
+                if phone and phone not in phones:
+                    phones.append(phone)
+                if len(phones) >= 3:
+                    break
+            contacts = {
+                "email": "",
+                "emails": [],
+                "phone": phones[0] if phones else "",
+                "phones": phones,
+                "whatsapp": "",
+                "whatsapps": [],
+                "social_accounts": [],
+                "websites": [],
+            }
+            seen_urls.add(identity)
+            candidates.append({
+                "title": company,
+                "url": absolute_url,
+                "source_url": absolute_url,
+                "origin": source_name,
+                "source_type": "Local automotive business directory",
+                "snippet": f"{company} is listed as a car dealership or showroom in {city}, {country}. Local directory: {source_name}.",
+                "listing_context": context[:1200],
+                "contact": " ".join(phones),
+                "directory_public_contacts": contacts,
+                "directory_listing_verified": bool(phones),
+                "local_directory_candidate": True,
+                "directory_profile_page": True,
+            })
+            if len(candidates) >= limit:
+                break
+        if len(candidates) >= limit:
+            break
+    return candidates
 
 
 def search_algeria_automotive_directories(limit: int = 90) -> list[dict]:
@@ -11628,6 +11773,18 @@ def discover(params: dict[str, list[str]]) -> dict:
             raw_results += search_algeria_automotive_directories(limit=min(90, max(60, result_limit)))
         except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
             pass
+    if (
+        "dealer" in enabled_sources
+        and country_meta.get("code") in REGIONAL_AUTOMOTIVE_DIRECTORY_PAGES
+        and source_mode in ("all", "combined")
+    ):
+        try:
+            raw_results += search_regional_automotive_directories(
+                country,
+                limit=min(90, max(60, result_limit)),
+            )
+        except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+            pass
     if "dealer" in enabled_sources and (source_mode in ("all", "combined", "dealer") or include_support_sources):
         search_variants = list(dict.fromkeys(commercial_query_variants))
         if is_china_discovery and source_mode in ("all", "combined"):
@@ -12101,7 +12258,8 @@ def discover(params: dict[str, list[str]]) -> dict:
         if is_media_or_content_channel(combined) and not verified_local_youtube:
             reject_candidate("mediaOrContent")
             continue
-        if not is_social_result and is_brand_bound_chinese_dealer(combined):
+        brand_binding_text = item["title"] if item.get("local_directory_candidate") else combined
+        if not is_social_result and is_brand_bound_chinese_dealer(brand_binding_text):
             excluded_brand_bound_dealers += 1
             reject_candidate("brandBoundDealer")
             continue
