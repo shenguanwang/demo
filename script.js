@@ -5267,18 +5267,21 @@ function discoveryJobRawCount(job) {
   return Number(job?.result?.rawCount ?? job?.result?.count ?? job?.result?.leads?.length ?? 0);
 }
 
+function discoveryJobLinkedLeadCount(jobId) {
+  const normalizedJobId = String(jobId || "");
+  if (!normalizedJobId) return 0;
+  return [...reviewLeads, ...customers, ...rejectedLeads]
+    .filter((lead) => String(lead?.discoveryJobId || "") === normalizedJobId)
+    .length;
+}
+
 function discoveryJobImportedCount(job) {
+  const linkedCount = discoveryJobLinkedLeadCount(job?.id);
   const importedCount = job?.result?.importedCount;
   if (importedCount !== undefined && importedCount !== null && importedCount !== "") {
-    return Number(importedCount) || 0;
+    return Math.max(Number(importedCount) || 0, linkedCount);
   }
-  const jobId = String(job?.id || "");
-  if (jobId) {
-    const visibleCount = [...reviewLeads, ...customers]
-      .filter((lead) => String(lead.discoveryJobId || "") === jobId)
-      .length;
-    if (visibleCount) return visibleCount;
-  }
+  if (linkedCount) return linkedCount;
   return discoveryJobRawCount(job);
 }
 
@@ -5903,18 +5906,19 @@ async function importDiscoveryJob(jobId, options = {}) {
     const result = await response.json().catch(() => ({}));
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     const merged = mergeDiscoveryResult(result.job?.result || {}, result.job?.payload?.sourceMode || "", result.job);
+    const importedCount = Math.max(merged.fresh.length, discoveryJobLinkedLeadCount(jobId));
     await markDiscoveryImported(jobId, {
-      importedCount: merged.fresh.length,
+      importedCount,
       rawCount: merged.found.length,
-      skippedCount: Math.max(0, merged.found.length - merged.fresh.length)
+      skippedCount: Math.max(0, merged.found.length - importedCount)
     });
     setFinderProgress({
       percent: 100,
       stage: "done",
       state: "complete",
-      title: `${automatic ? "搜索完成，已自动导入" : "已导入"} ${merged.fresh.length} 条新线索`,
-      message: merged.fresh.length
-        ? "任务结果已自动进入线索审核，并已同步到云端数据。"
+      title: `${automatic ? "搜索完成，已自动导入" : "已导入"} ${importedCount} 条线索`,
+      message: importedCount
+        ? "任务结果已进入线索审核，并已同步任务统计。"
         : discoverySkippedMessage(merged)
     });
     finishButtonLoading("已导入", { disabled: true });
@@ -6193,6 +6197,7 @@ function bindForms() {
           }
         );
         const { found, fresh } = merged;
+        const importedCount = Math.max(fresh.length, discoveryJobLinkedLeadCount(result.__jobId));
         if (!found.length) {
           await markDiscoveryImported(result.__jobId, {
             importedCount: 0,
@@ -6216,9 +6221,9 @@ function bindForms() {
           stage: "verify",
           title: `已发现 ${found.length} 条线索`,
           elapsed: `搜索用时 ${elapsedSeconds} 秒`,
-          message: `${sourceLabel} · ${freshnessLabel}：其中 ${fresh.length} 条为新线索，开始自动全网核验。`
+          message: `${sourceLabel} · ${freshnessLabel}：${importedCount} 条已进入审核，正在同步任务统计。`
         });
-        if (!fresh.length) {
+        if (!importedCount) {
           await markDiscoveryImported(result.__jobId, {
             importedCount: 0,
             rawCount: found.length,
@@ -6235,15 +6240,15 @@ function bindForms() {
           return;
         }
         await markDiscoveryImported(result.__jobId, {
-          importedCount: fresh.length,
+          importedCount,
           rawCount: found.length,
-          skippedCount: Math.max(0, found.length - fresh.length)
+          skippedCount: Math.max(0, found.length - importedCount)
         });
         setFinderProgress({
           percent: 100,
           stage: "done",
           state: "complete",
-          title: `已新增 ${fresh.length} 条待审核线索`,
+          title: `已导入 ${importedCount} 条待审核线索`,
           elapsed: `总用时 ${elapsedSeconds} 秒`,
           message: `${sourceLabel} · ${freshnessLabel}：线索已保存。请进入“线索审核”，按评分从高到低查看；需要更完整的邮箱、联系人和多来源证据时，再执行全网核验。`
         });

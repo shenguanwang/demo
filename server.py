@@ -4095,11 +4095,18 @@ def mark_discovery_job_imported(
     job["imported"] = True
     result = job.get("result") if isinstance(job.get("result"), dict) else {}
     if imported_count is not None:
-        result["importedCount"] = max(0, int(imported_count))
+        result["importedCount"] = max(
+            max(0, int(result.get("importedCount") or 0)),
+            max(0, int(imported_count)),
+        )
     if raw_count is not None:
-        result["rawCount"] = max(0, int(raw_count))
+        result["rawCount"] = max(
+            max(0, int(result.get("rawCount") or result.get("count") or 0)),
+            max(0, int(raw_count)),
+        )
     if skipped_count is not None:
-        result["skippedCount"] = max(0, int(skipped_count))
+        maximum_skipped = max(0, int(result.get("rawCount") or 0) - int(result.get("importedCount") or 0))
+        result["skippedCount"] = min(maximum_skipped, max(0, int(skipped_count)))
     job["result"] = result
     job["updatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     save_discovery_job(job)
