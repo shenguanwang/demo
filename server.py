@@ -9296,6 +9296,110 @@ def search_apify_social(
     return results
 
 
+def instagram_market_hashtags(country: str, market: str, cities: list[str]) -> list[str]:
+    places = list(dict.fromkeys([market, *cities[:2]]))
+    hashtags: list[str] = []
+    for place in places:
+        normalized = unicodedata.normalize("NFKD", str(place or ""))
+        slug = re.sub(
+            r"[^a-z0-9]+",
+            "",
+            "".join(char for char in normalized if not unicodedata.combining(char)).lower(),
+        )
+        if slug:
+            hashtags.extend((f"{slug}cars", f"{slug}auto"))
+    local_terms = {
+        "ci": ("abidjancars", "abidjanauto", "autoabidjan", "voitureabidjan", "ventevoitureabidjan"),
+        "dz": ("algerieauto", "algerievoiture", "voiturealger", "autoalger"),
+        "kg": ("bishkekauto", "avtosalonbishkek"),
+        "uz": ("tashkentauto", "toshkentavto", "avtosalontashkent"),
+    }.get(country_search_meta(country).get("code", ""), ())
+    hashtags.extend(local_terms)
+    return list(dict.fromkeys(tag for tag in hashtags if tag))[:8]
+
+
+def search_apify_instagram_hashtag_accounts(
+    country: str,
+    market: str,
+    cities: list[str],
+    origin: str,
+    source_type: str,
+    limit: int = 30,
+) -> list[dict]:
+    token = get_apify_api_token()
+    hashtags = instagram_market_hashtags(country, market, cities)
+    if not token or not hashtags or limit <= 0:
+        return []
+    direct_urls = [
+        f"https://www.instagram.com/explore/tags/{urllib.parse.quote(tag, safe='')}/"
+        for tag in hashtags[:6]
+    ]
+    per_url_limit = max(2, (limit + len(direct_urls) - 1) // len(direct_urls))
+    payload = {
+        "directUrls": direct_urls,
+        "resultsType": "posts",
+        "resultsLimit": per_url_limit,
+        "skipPinnedPosts": True,
+    }
+    fields = (
+        "url", "inputUrl", "ownerUsername", "ownerFullName", "caption", "hashtags",
+        "mentions", "locationName", "timestamp", "type", "productType",
+    )
+    try:
+        items, run_status = run_apify_actor_dataset(
+            "apify/instagram-scraper",
+            payload,
+            token,
+            APIFY_RUN_TIMEOUT_SECONDS,
+            max(limit, len(direct_urls) * per_url_limit),
+            fields,
+        )
+    except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException, json.JSONDecodeError):
+        record_api_usage("apify:instagram", False, detail="apify/instagram-scraper:hashtag")
+        return []
+    record_api_usage(
+        "apify:instagram",
+        bool(items),
+        detail=f"apify/instagram-scraper:{run_status}:hashtag",
+    )
+    results: list[dict] = []
+    seen: set[str] = set()
+    for item in items if isinstance(items, list) else []:
+        if not isinstance(item, dict):
+            continue
+        username = first_text_value(item, ("ownerUsername", "username", "userName")).lstrip("@")
+        if not username:
+            continue
+        profile_url = f"https://www.instagram.com/{username}/"
+        identity = profile_url.lower()
+        if identity in seen:
+            continue
+        seen.add(identity)
+        title = first_text_value(item, ("ownerFullName", "fullName")) or username
+        snippet = clean_text(" ".join([
+            first_text_value(item, ("caption", "text")),
+            joined_apify_values(item, ("hashtags", "mentions")),
+            first_text_value(item, ("locationName",)),
+            first_text_value(item, ("inputUrl",)),
+        ]))
+        results.append({
+            "title": title[:180],
+            "url": profile_url,
+            "snippet": snippet or f"Instagram public post by @{username}",
+            "apiSource": "Apify",
+            "origin": origin,
+            "source_type": f"{source_type} · Apify 标签帖子",
+            "source_url": first_text_value(item, ("url",)) or profile_url,
+            "customer_website": "",
+            "structured_business_profile": False,
+            "skip_fetch": True,
+            "apifyPlatform": "instagram",
+        })
+        if len(results) >= limit:
+            break
+    return results
+
+
 def extract_published_at(text: str, url: str = "") -> str:
     value = f"{url} {text}"
     numeric = re.search(r"\b(20\d{2})[-/](0?[1-9]|1[0-2])[-/](0?[1-9]|[12]\d|3[01])\b", value)
@@ -12424,6 +12528,24 @@ def discover(params: dict[str, list[str]]) -> dict:
                 )
             except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
                 apify_results = []
+        if platform == "instagram" and source_mode == "instagram" and len(apify_results) < 6:
+            hashtag_results = search_apify_instagram_hashtag_accounts(
+                country,
+                market,
+                cities,
+                origin,
+                source_type,
+                limit=max(12, apify_result_limit),
+            )
+            seen_apify_urls = {
+                str(item.get("url") or "").lower().rstrip("/")
+                for item in apify_results
+            }
+            apify_results.extend(
+                item
+                for item in hashtag_results
+                if str(item.get("url") or "").lower().rstrip("/") not in seen_apify_urls
+            )
         if apify_results:
             social_search_stats["apifyResults"] += len(apify_results)
             social_search_stats["apifyByPlatform"][origin] = social_search_stats["apifyByPlatform"].get(origin, 0) + len(apify_results)
