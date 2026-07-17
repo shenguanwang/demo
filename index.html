@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260717-global-sales-map-v2">
+  <link rel="stylesheet" href="./styles.css?v=20260717-admin-distribution">
 </head>
 <body>
   <aside class="sidebar">
@@ -499,6 +499,21 @@
           <p>仅管理员可见。每位用户拥有独立的线索、客户、报价和云端获客任务数据。</p>
         </div>
       </div>
+      <section class="panel admin-distribution-panel">
+        <div class="panel-head">
+          <div>
+            <h3>管理员搜索结果分配</h3>
+            <span>读取 admin 和 123456 的已完成任务，按销售负责国家去重复制；销售确认后再手动导入。</span>
+          </div>
+          <div class="result-actions">
+            <button class="ghost" id="previewDiscoveryDistribution" type="button">预览分配</button>
+            <button class="primary" id="executeDiscoveryDistribution" type="button" disabled>确认复制分配</button>
+          </div>
+        </div>
+        <div class="admin-distribution-result" id="discoveryDistributionResult">
+          <p class="empty">请先预览。本操作只复制搜索任务，不会直接写入销售的待审核线索或客户池。</p>
+        </div>
+      </section>
       <div class="user-management-layout">
         <form class="panel user-form" id="userForm">
           <div class="panel-head"><h3>添加用户</h3><span>初始状态：启用</span></div>
@@ -1261,6 +1276,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260717-global-sales-map-v2"></script>
+  <script src="./script.js?v=20260717-admin-distribution"></script>
 </body>
 </html>

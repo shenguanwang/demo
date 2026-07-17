@@ -5732,7 +5732,9 @@ function renderDiscoveryHistory() {
         : "计划暂停"
     }));
   const jobCards = discoveryJobs.map((job) => ({
-    kind: isScheduledDiscoveryJob(job) ? "定时抓取" : "自动抓取",
+    kind: job.distributionType === "admin_search_copy"
+      ? "管理员搜索导入"
+      : isScheduledDiscoveryJob(job) ? "定时抓取" : "自动抓取",
     id: job.id || "",
     status: stateLabels[job.status] || job.status || "未知",
     state: job.status || "",
@@ -5831,7 +5833,7 @@ function renderDiscoveryJobs() {
       : isAutoImporting
         ? `自动导入中`
       : canImport
-        ? `等待自动导入`
+        ? (job.manualImportOnly ? "手动导入" : "等待自动导入")
         : canRetry
           ? "重新执行"
           : canCancel
@@ -5851,7 +5853,7 @@ function renderDiscoveryJobs() {
         <div class="discovery-job-main">
           <div class="discovery-job-title">
             <strong>${escapeHtml(job.country || "未指定市场")} · ${escapeHtml(job.model || "未指定车型")}</strong>
-            <span>${escapeHtml(discoverySourceLabel(job.sourceMode))}</span>
+            <span>${escapeHtml(job.distributionType === "admin_search_copy" ? "管理员搜索导入" : discoverySourceLabel(job.sourceMode))}</span>
           </div>
           <div class="discovery-job-meta">
             <span>${escapeHtml(formatJobTime(job.createdAt))}</span>
@@ -6193,7 +6195,8 @@ async function deleteDiscoveryJob(jobId) {
 
 function discoveryJobLabel(job) {
   if (!job) return "";
-  return `${job.country || "未指定市场"} · ${job.model || "未指定车型"} · ${formatJobTime(job.createdAt || job.updatedAt)}`;
+  const prefix = job.distributionType === "admin_search_copy" ? "管理员搜索导入 · " : "";
+  return `${prefix}${job.country || "未指定市场"} · ${job.model || "未指定车型"} · ${formatJobTime(job.createdAt || job.updatedAt)}`;
 }
 
 function backfillAiReviewsFromDiscoveryJobs() {
@@ -6289,6 +6292,7 @@ function autoImportCompletedDiscoveryJobs() {
   const completed = discoveryJobs.filter((job) =>
     job?.id &&
     job.status === "completed" &&
+    !job.manualImportOnly &&
     (
       !job.imported ||
       (
@@ -7179,6 +7183,8 @@ function bindForms() {
   $("#refreshUsers")?.addEventListener("click", () => loadUsers().catch((error) => {
     $("#userRows").innerHTML = `<tr><td colspan="8">${escapeHtml(error.message)}</td></tr>`;
   }));
+  $("#previewDiscoveryDistribution")?.addEventListener("click", previewDiscoveryDistribution);
+  $("#executeDiscoveryDistribution")?.addEventListener("click", executeDiscoveryDistribution);
 
   $("#cancelPasswordChange")?.addEventListener("click", resetAccountPasswordForm);
   $("#accountPasswordForm")?.addEventListener("submit", changeOwnPassword);
@@ -8556,6 +8562,86 @@ async function loadUsers() {
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
   renderUsers(Array.isArray(result.users) ? result.users : []);
+}
+
+function renderDiscoveryDistribution(data = {}) {
+  const box = $("#discoveryDistributionResult");
+  const executeButton = $("#executeDiscoveryDistribution");
+  if (!box) return;
+  const totals = data.totals || {};
+  const rows = Array.isArray(data.rows) ? data.rows : [];
+  const unassigned = Array.isArray(data.unassigned) ? data.unassigned : [];
+  if (executeButton) {
+    executeButton.disabled = Boolean(data.executed) || Number(totals.copyJobs || 0) <= 0;
+  }
+  box.innerHTML = `
+    <div class="admin-distribution-summary">
+      <span><b>${Number(totals.sourceJobs || 0)}</b>来源任务</span>
+      <span><b>${Number(totals.sourceLeads || 0)}</b>来源线索</span>
+      <span><b>${Number(totals.copyJobs || 0)}</b>待复制任务</span>
+      <span><b>${Number(totals.copyLeads || 0)}</b>${data.executed ? "已复制线索" : "待复制线索"}</span>
+      <span><b>${Number(totals.duplicates || 0)}</b>重复跳过</span>
+      <span><b>${Number(totals.unassignedJobs || 0)}</b>未分配地区</span>
+    </div>
+    <div class="admin-distribution-table">
+      <table>
+        <thead><tr><th>销售账号</th><th>负责区域</th><th>任务</th><th>新线索</th><th>重复</th><th>已分配过</th></tr></thead>
+        <tbody>${rows.length ? rows.map((row) => `
+          <tr>
+            <td><strong>${escapeHtml(row.username)}</strong></td>
+            <td>${escapeHtml(assignedCountrySummary(row.assignedCountries))}</td>
+            <td>${Number(row.jobs || 0)}</td>
+            <td><strong>${Number(row.leads || 0)}</strong></td>
+            <td>${Number(row.duplicates || 0)}</td>
+            <td>${Number(row.alreadyDistributed || 0)}</td>
+          </tr>`).join("") : `<tr><td colspan="6">没有配置明确负责国家的销售账号。</td></tr>`}</tbody>
+      </table>
+    </div>
+    ${unassigned.length ? `
+      <p class="admin-distribution-note">未找到地区负责人：${escapeHtml(
+        [...new Set(unassigned.map((item) => item.country || "未指定地区"))].join("、")
+      )}</p>` : ""}
+    <p class="form-status success">${data.executed
+      ? `复制完成。销售登录后会在搜索记录中看到“管理员搜索导入”，并自行点击“手动导入”。`
+      : `预览完成，尚未修改任何销售账号数据。`}</p>
+  `;
+}
+
+async function previewDiscoveryDistribution() {
+  const button = $("#previewDiscoveryDistribution");
+  const box = $("#discoveryDistributionResult");
+  const finish = startButtonLoading(button, "正在预览");
+  if (box) box.innerHTML = `<p class="empty">正在检查地区负责人、现有任务和客户数据并执行去重…</p>`;
+  try {
+    const response = await apiFetch("/api/admin/discovery-distribution-preview", { cache: "no-store" });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    renderDiscoveryDistribution(result);
+    finish("预览分配", { autoResetMs: 800 });
+  } catch (error) {
+    if (box) box.innerHTML = `<p class="form-status error">${escapeHtml(error.message || "分配预览失败")}</p>`;
+    finish("预览失败", { autoResetMs: 1600 });
+  }
+}
+
+async function executeDiscoveryDistribution() {
+  if (!confirm("确认按预览结果复制搜索任务吗？复制后销售可看到记录，但仍需销售手动导入线索。")) return;
+  const button = $("#executeDiscoveryDistribution");
+  const finish = startButtonLoading(button, "正在复制");
+  try {
+    const response = await apiFetch("/api/admin/distribute-discovery-jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: "DISTRIBUTE_ADMIN_SEARCHES" })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    renderDiscoveryDistribution(result);
+    finish("复制完成", { disabled: true });
+  } catch (error) {
+    window.alert(error.message || "复制分配失败");
+    finish("重新确认", { disabled: false, autoResetMs: 1600 });
+  }
 }
 
 async function updateUser(username, payload) {

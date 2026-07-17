@@ -3184,6 +3184,11 @@ def discovery_job_public(job: dict) -> dict:
         "sourceMode": str(payload.get("sourceMode", "")),
         "goal": str(payload.get("goal", "")),
         "reused": bool(job.get("reused", False)),
+        "manualImportOnly": bool(payload.get("manualImportOnly", False)),
+        "distributionType": str(payload.get("distributionType", "")),
+        "distributedBy": str(payload.get("distributedBy", "")),
+        "sourceOwnerUsername": str(payload.get("sourceOwnerUsername", "")),
+        "sourceJobId": str(payload.get("sourceJobId", "")),
     }
 
 
@@ -3635,6 +3640,237 @@ def list_all_discovery_jobs(limit: int = 200) -> list[dict]:
         job["ownerUsername"] = row[11] if len(row) > 11 else "admin"
         jobs.append(job)
     return jobs
+
+
+def distribution_lead_keys(lead: dict) -> set[str]:
+    if not isinstance(lead, dict):
+        return set()
+    keys = set()
+    record_id = clean_text(str(lead.get("id") or "")).lower()
+    if record_id:
+        keys.add(f"id:{record_id}")
+    for field in ("customerWebsite", "sourceUrl", "website", "profileUrl", "url"):
+        value = str(lead.get(field) or "").strip()
+        if not re.match(r"^https?://", value, re.I):
+            continue
+        parsed = urllib.parse.urlsplit(value)
+        normalized = urllib.parse.urlunsplit((
+            parsed.scheme.lower(),
+            parsed.netloc.lower().removeprefix("www."),
+            parsed.path.rstrip("/"),
+            "",
+            "",
+        ))
+        if normalized:
+            keys.add(f"url:{normalized}")
+    emails = [lead.get("email")]
+    emails.extend(
+        item.get("email") if isinstance(item, dict) else item
+        for item in (lead.get("emailSources") or [])
+    )
+    for email in emails:
+        normalized = clean_text(str(email or "")).lower()
+        if re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", normalized):
+            keys.add(f"email:{normalized}")
+    phones = [lead.get("phone"), lead.get("whatsapp")]
+    phones.extend(
+        item.get("value") if isinstance(item, dict) else item
+        for item in [*(lead.get("phoneSources") or []), *(lead.get("whatsappSources") or [])]
+    )
+    for phone in phones:
+        digits = re.sub(r"\D", "", str(phone or ""))
+        if len(digits) >= 7:
+            keys.add(f"phone:{digits}")
+    company = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(lead.get("company") or "").lower())
+    country = normalize_country_match_text(str(lead.get("country") or ""))
+    if company and country:
+        keys.add(f"company:{company}|{country}")
+    return keys
+
+
+def distribution_source_jobs(source_usernames: set[str]) -> list[dict]:
+    return [
+        job for job in list_all_discovery_jobs(1000)
+        if job.get("ownerUsername") in source_usernames
+        and job.get("status") == "completed"
+        and isinstance((job.get("result") or {}).get("leads"), list)
+        and (job.get("result") or {}).get("leads")
+        and not job.get("distributionType")
+    ]
+
+
+def discovery_distribution_recipients(source_usernames: set[str]) -> list[dict]:
+    recipients = []
+    for user in list_users():
+        username = str(user.get("username") or "")
+        assigned = normalize_assigned_countries(user.get("assignedCountries"))
+        if (
+            not username
+            or username in source_usernames
+            or user.get("role") == "admin"
+            or user.get("status") == "disabled"
+            or not assigned
+            or ASSIGNED_COUNTRY_NONE in assigned
+        ):
+            continue
+        recipients.append({**user, "assignedCountries": assigned})
+    return recipients
+
+
+def recipient_distribution_blocked_keys(username: str) -> set[str]:
+    keys = set()
+    workspace = load_workspace_state(username).get("state") or {}
+    for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+        for lead in workspace.get(bucket) or []:
+            keys.update(distribution_lead_keys(lead))
+    for job in list_discovery_jobs(username):
+        for lead in (job.get("result") or {}).get("leads") or []:
+            keys.update(distribution_lead_keys(lead))
+    return keys
+
+
+def prepare_discovery_distribution(
+    *,
+    execute: bool = False,
+    distributed_by: str = "admin",
+    source_usernames: set[str] | None = None,
+) -> dict:
+    sources = {
+        normalize_username(username)
+        for username in (source_usernames or {AUTH_USERNAME, "admin", "123456"})
+        if str(username or "").strip()
+    }
+    recipients = discovery_distribution_recipients(sources)
+    source_jobs = distribution_source_jobs(sources)
+    recipient_states = {
+        user["username"]: {
+            "user": user,
+            "blocked": recipient_distribution_blocked_keys(user["username"]),
+            "sourceJobs": {
+                str(job.get("sourceJobId") or "")
+                for job in list_discovery_jobs(user["username"])
+                if job.get("distributionType") == "admin_search_copy"
+            },
+            "jobs": 0,
+            "leads": 0,
+            "duplicates": 0,
+            "alreadyDistributed": 0,
+        }
+        for user in recipients
+    }
+    totals = {
+        "sourceJobs": len(source_jobs),
+        "sourceLeads": sum(len((job.get("result") or {}).get("leads") or []) for job in source_jobs),
+        "recipients": len(recipients),
+        "copyJobs": 0,
+        "copyLeads": 0,
+        "duplicates": 0,
+        "alreadyDistributed": 0,
+        "unassignedJobs": 0,
+    }
+    unassigned = []
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+    for source_job in source_jobs:
+        payload = {
+            "country": source_job.get("country", ""),
+            "model": source_job.get("model", ""),
+            "sourceMode": source_job.get("sourceMode", ""),
+            "goal": source_job.get("goal", ""),
+        }
+        country = str(source_job.get("country") or "")
+        matching = [
+            state for state in recipient_states.values()
+            if assigned_country_matches(state["user"]["assignedCountries"], country)
+        ]
+        if not matching:
+            totals["unassignedJobs"] += 1
+            unassigned.append({
+                "jobId": source_job.get("id", ""),
+                "country": country,
+                "sourceOwnerUsername": source_job.get("ownerUsername", ""),
+                "leads": len((source_job.get("result") or {}).get("leads") or []),
+            })
+            continue
+        for state in matching:
+            source_job_id = str(source_job.get("id") or "")
+            if source_job_id in state["sourceJobs"]:
+                state["alreadyDistributed"] += 1
+                totals["alreadyDistributed"] += 1
+                continue
+            fresh = []
+            for lead in (source_job.get("result") or {}).get("leads") or []:
+                keys = distribution_lead_keys(lead)
+                if keys and keys.intersection(state["blocked"]):
+                    state["duplicates"] += 1
+                    totals["duplicates"] += 1
+                    continue
+                fresh.append(lead)
+                state["blocked"].update(keys)
+            if not fresh:
+                continue
+            state["jobs"] += 1
+            state["leads"] += len(fresh)
+            totals["copyJobs"] += 1
+            totals["copyLeads"] += len(fresh)
+            if not execute:
+                continue
+            copied_payload = json.loads(json.dumps(payload, ensure_ascii=False))
+            copied_payload.update({
+                "manualImportOnly": True,
+                "distributionType": "admin_search_copy",
+                "distributedBy": distributed_by,
+                "sourceOwnerUsername": source_job.get("ownerUsername", ""),
+                "sourceJobId": source_job_id,
+            })
+            copied_result = json.loads(json.dumps(source_job.get("result") or {}, ensure_ascii=False))
+            copied_result.update({
+                "leads": fresh,
+                "count": len(fresh),
+                "rawCount": len(fresh),
+                "importedCount": 0,
+                "skippedCount": 0,
+                "skipBreakdown": {},
+                "distribution": {
+                    "type": "admin_search_copy",
+                    "distributedBy": distributed_by,
+                    "sourceOwnerUsername": source_job.get("ownerUsername", ""),
+                    "sourceJobId": source_job_id,
+                    "distributedAt": now,
+                },
+            })
+            save_discovery_job({
+                "id": uuid.uuid4().hex,
+                "payload": copied_payload,
+                "status": "completed",
+                "stage": "done",
+                "progress": 100,
+                "message": "管理员搜索导入，等待销售手动导入。",
+                "result": copied_result,
+                "error": "",
+                "imported": False,
+                "createdAt": now,
+                "updatedAt": now,
+                "ownerUsername": state["user"]["username"],
+            })
+            state["sourceJobs"].add(source_job_id)
+
+    rows = [{
+        "username": username,
+        "assignedCountries": state["user"]["assignedCountries"],
+        "jobs": state["jobs"],
+        "leads": state["leads"],
+        "duplicates": state["duplicates"],
+        "alreadyDistributed": state["alreadyDistributed"],
+    } for username, state in recipient_states.items()]
+    rows.sort(key=lambda row: (-row["leads"], row["username"]))
+    return {
+        "executed": execute,
+        "sourceUsernames": sorted(sources),
+        "totals": totals,
+        "rows": rows,
+        "unassigned": unassigned[:100],
+    }
 
 
 def admin_usage_summary() -> dict:
@@ -13560,6 +13796,20 @@ class Handler(SimpleHTTPRequestHandler):
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
+        if parsed.path == "/api/admin/discovery-distribution-preview":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                self.send_json(200, {
+                    "ok": True,
+                    **prepare_discovery_distribution(
+                        execute=False,
+                        distributed_by=self.current_user()["username"],
+                    ),
+                })
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
         if parsed.path == "/api/admin/settings":
             if not self.require_auth(api=True) or not self.require_admin():
                 return
@@ -13810,6 +14060,28 @@ class Handler(SimpleHTTPRequestHandler):
                 )
                 record_admin_audit(self.current_user()["username"], "创建用户", user["username"], self.client_ip())
                 self.send_json(201, {"ok": True, "user": user})
+            except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/admin/distribute-discovery-jobs":
+            if not self.require_admin():
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 16_384)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                if payload.get("confirm") != "DISTRIBUTE_ADMIN_SEARCHES":
+                    raise ValueError("请先预览并确认复制分配")
+                result = prepare_discovery_distribution(
+                    execute=True,
+                    distributed_by=self.current_user()["username"],
+                )
+                record_admin_audit(
+                    self.current_user()["username"],
+                    "分配管理员搜索结果",
+                    f"复制 {result['totals']['copyJobs']} 个任务、{result['totals']['copyLeads']} 条线索",
+                    self.client_ip(),
+                )
+                self.send_json(200, {"ok": True, **result})
             except (ValueError, json.JSONDecodeError, OSError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return

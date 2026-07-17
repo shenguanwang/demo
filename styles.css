@@ -8504,3 +8504,82 @@ td {
   .sales-map-legend { flex-wrap: wrap; gap: 8px 13px; }
   .country-panel-actions { grid-template-columns: 1fr; }
 }
+
+.admin-distribution-panel {
+  margin-bottom: 18px;
+}
+
+.admin-distribution-panel > .panel-head {
+  align-items: center;
+}
+
+.admin-distribution-result {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.admin-distribution-result > .empty {
+  margin: 0;
+  padding: 18px 0 2px;
+}
+
+.admin-distribution-summary {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 1px;
+  margin: 14px 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--line);
+}
+
+.admin-distribution-summary span {
+  padding: 11px 12px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.admin-distribution-summary b {
+  display: block;
+  margin-bottom: 3px;
+  color: #15212b;
+  font-size: 18px;
+}
+
+.admin-distribution-table {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.admin-distribution-table table {
+  min-width: 680px;
+}
+
+.admin-distribution-note {
+  margin: 10px 0 0;
+  color: #9b6721;
+  font-size: 12px;
+}
+
+:root[data-theme="dark"] .admin-distribution-summary span {
+  background: #171a20;
+}
+
+:root[data-theme="dark"] .admin-distribution-summary b {
+  color: #f4f6f8;
+}
+
+@media (max-width: 900px) {
+  .admin-distribution-panel > .panel-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-distribution-summary {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
