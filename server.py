@@ -4131,8 +4131,10 @@ COUNTRY_HINTS = {
         "Madina", "Ashaiman", "Tamale", "Cape Coast",
     ),
     "Algeria": (
-        "Algiers", "Oran", "Constantine", "Annaba", "Blida", "Setif",
-        "Batna", "Tlemcen", "Bejaia", "Hassi Messaoud",
+        "Alger", "Algiers", "Oran", "Constantine", "Annaba", "Blida",
+        "Setif", "Sétif", "Batna", "Tlemcen", "Bejaia", "Béjaïa",
+        "Tizi Ouzou", "Boumerdes", "Boumerdès", "Ouargla", "Chlef",
+        "Mostaganem", "Relizane", "Biskra", "Hassi Messaoud",
     ),
     "Côte d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouaké"),
     "Cote d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouaké"),
@@ -4416,7 +4418,10 @@ COUNTRY_SEARCH_META = {
         "code": "dz",
         "location": "Algeria",
         "google_domain": "google.dz",
-        "aliases": ("Algeria", "Algiers", "Oran", "Constantine", "Algérie"),
+        "aliases": (
+            "Algeria", "Algérie", "Algerie", "Alger", "Algiers", "Oran",
+            "Constantine", "الجزائر", "+213", ".dz",
+        ),
     },
     "Côte d'Ivoire": {
         "code": "ci",
@@ -4613,6 +4618,16 @@ LOCAL_DISCOVERY_SOURCES = {
     "Algeria": (
         ("Ouedkniss", "ouedkniss.com"),
         ("Autobip Algeria", "autobip.com"),
+        ("Pages Jaunes Algérie", "pagesjaunes-dz.com"),
+        ("El Mouchir CACI", "elmouchir.caci.dz"),
+        ("Tidjara Algérie", "tidjara.dz"),
+        ("Annuaires DZ", "annuairesdz.com"),
+        ("Go Africa Online Algérie", "goafricaonline.com"),
+        ("Vitamin DZ Annuaire", "vitaminedz.com"),
+        ("Algérie Annonces", "algerieannonces.com"),
+        ("ElSayara Algérie", "elsayara.com"),
+        ("Tonobiles", "tonobiles.com"),
+        ("Hanoutkoum", "hanoutkoum.com"),
         ("AutoDZ", "autodz.com"),
         ("AutoBeeb Algeria", "autobeeb.com"),
         ("OpenSooq Algeria", "dz.opensooq.com"),
@@ -4840,10 +4855,12 @@ LOCALIZED_DISCOVERY_TERMS = {
         "Tonaton cars dealer contact",
     ),
     "Algeria": (
-        "vente voiture Alger concessionnaire contact",
-        "concessionnaire automobile Algerie showroom",
-        "importateur automobile Algerie contact",
-        "سيارات للبيع الجزائر وكيل سيارات",
+        "vente voiture Alger concessionnaire téléphone contact",
+        "concessionnaire automobile Algérie showroom agent agréé",
+        "importateur distributeur automobile Algérie contact",
+        "annuaire entreprises automobile Algérie concessionnaire",
+        "voitures occasion professionnel vendeur Algérie",
+        "سيارات للبيع الجزائر وكيل سيارات معرض سيارات",
     ),
     "C么te d'Ivoire": (
         "vente voiture Abidjan concessionnaire contact",
@@ -4968,11 +4985,52 @@ def local_source_query_variants(
         "buying": ("car buyer", "used cars", "dealer", "showroom"),
         "individual": ("used cars", "luxury cars", "electric vehicles", "cars for sale"),
     }.get(target_type, ("car dealer", "car showroom", "cars for sale", "motors"))
+    if meta.get("code") == "dz":
+        intent_terms = {
+            "dealer": (
+                "concessionnaire automobile", "showroom automobile",
+                "agent automobile agréé", "vendeur professionnel voitures",
+            ),
+            "parallel": (
+                "importateur automobile", "vente voitures importées",
+                "distributeur automobile", "concessionnaire multimarque",
+            ),
+            "importer": (
+                "importateur distributeur automobile", "importation véhicules",
+                "grossiste automobile", "concessionnaire multimarque",
+            ),
+            "fleet": (
+                "gestionnaire de flotte automobile", "location voitures entreprise",
+                "parc automobile société", "fournisseur véhicules professionnels",
+            ),
+            "corporate": (
+                "fournisseur véhicules entreprise", "flotte automobile société",
+                "achat véhicules professionnels", "distributeur automobile",
+            ),
+            "government": (
+                "fournisseur véhicules", "marché véhicules flotte",
+                "entreprise automobile", "véhicules utilitaires",
+            ),
+            "buying": (
+                "achat vente voitures occasion", "vendeur professionnel automobile",
+                "concessionnaire", "showroom automobile",
+            ),
+            "individual": (
+                "voitures occasion professionnel", "voitures de luxe",
+                "véhicules électriques", "vente voitures",
+            ),
+        }.get(target_type, (
+            "concessionnaire automobile", "showroom automobile",
+            "importateur automobile", "vendeur professionnel voitures",
+        ))
     queries: list[str] = []
-    for source_name, domain in sources:
-        for place in market_terms[:4]:
-            for term in intent_terms[:3]:
+    # Rotate domains first so a query cap cannot let the first large marketplace
+    # consume the whole country-specific search budget.
+    for place in market_terms[:4]:
+        for term in intent_terms[:3]:
+            for source_name, domain in sources:
                 queries.append(f"site:{domain} {place} {term} contact phone WhatsApp {exclude_query}{cutoff_query}".strip())
+    for source_name, domain in sources:
         queries.append(f"site:{domain} {source_name} automotive dealer showroom contact {exclude_query}{cutoff_query}".strip())
     return list(dict.fromkeys(queries))
 
@@ -10631,14 +10689,9 @@ def discover(params: dict[str, list[str]]) -> dict:
         city_keyword_queries(cities, DISCOVERY_KEYWORD_TERMS, f"official website contact {exclude_query}{cutoff_query}")
     )
     commercial_query_variants.extend(localized_vehicle_listing_queries(country, cities))
+    local_queries: list[str] = []
     if source_mode in ("all", "combined"):
         local_queries = local_source_query_variants(country, cities, target_type, exclude_query, cutoff_query)
-        if local_queries:
-            commercial_query_variants = [
-                *commercial_query_variants[:7],
-                *local_queries,
-                *commercial_query_variants[7:],
-            ]
     ai_search_queries = ai_generate_search_queries(
         country=country,
         cities=cities,
@@ -10647,11 +10700,15 @@ def discover(params: dict[str, list[str]]) -> dict:
         goal=goal,
         limit=18,
     )
-    if ai_search_queries:
-        commercial_query_variants = [
-            *ai_search_queries,
+    if source_mode in ("all", "combined") and local_queries:
+        local_budget = 30 if country_meta.get("code") == "dz" else 12
+        commercial_query_variants = list(dict.fromkeys([
+            *local_queries[:local_budget],
+            *ai_search_queries[:6],
             *commercial_query_variants,
-        ]
+        ]))
+    elif ai_search_queries:
+        commercial_query_variants = [*ai_search_queries, *commercial_query_variants]
 
     raw_results = []
     google_primary_results: list[dict] = []
@@ -10749,18 +10806,28 @@ def discover(params: dict[str, list[str]]) -> dict:
         elif include_support_sources:
             max_web_queries = 4
         else:
-            max_web_queries = 24 if source_mode in ("all", "combined") else 16
+            max_web_queries = (
+                40
+                if source_mode in ("all", "combined") and country_meta.get("code") == "dz"
+                else 24 if source_mode in ("all", "combined") else 16
+            )
         search_variants = search_variants[:max_web_queries]
         per_query_limit = 5 if is_china_discovery and source_mode in ("all", "combined") else 4 if include_support_sources else 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
         if search_variants:
-            executor = ThreadPoolExecutor(max_workers=min(4, len(search_variants)))
+            worker_limit = 6 if country_meta.get("code") == "dz" and source_mode in ("all", "combined") else 4
+            executor = ThreadPoolExecutor(max_workers=min(worker_limit, len(search_variants)))
             futures = [
                 executor.submit(search_web, search_query, per_query_limit, None, country)
                 for search_query in search_variants
             ]
             try:
-                for future in as_completed(futures, timeout=max(20, DISCOVERY_SEARCH_TIMEOUT * 2)):
+                web_timeout = (
+                    max(30, DISCOVERY_SEARCH_TIMEOUT * 3)
+                    if country_meta.get("code") == "dz" and source_mode in ("all", "combined")
+                    else max(20, DISCOVERY_SEARCH_TIMEOUT * 2)
+                )
+                for future in as_completed(futures, timeout=web_timeout):
                     try:
                         web_results_by_query.append(future.result(timeout=1))
                     except (OSError, ValueError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
@@ -11112,6 +11179,8 @@ def discover(params: dict[str, list[str]]) -> dict:
     raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
     target_min = discovery_target_min()
     target_max = discovery_target_max()
+    if country_meta.get("code") == "dz" and source_mode in ("all", "combined"):
+        target_max = min(result_limit, max(target_max, 50))
     raw_results = raw_results[: max(target_max * 2, 60)]
     pipeline_stats["candidatePool"] = len(raw_results)
     if source_mode == "dealer":
