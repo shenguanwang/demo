@@ -5125,6 +5125,76 @@ def local_source_query_variants(
     return list(dict.fromkeys(queries))
 
 
+ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES = (
+    (
+        "Pages Jaunes Algérie",
+        "https://pagesjaunes-dz.com/companies/products/0161001/automobiles-Agents-concessionnaires-et-succursales-",
+        r"/companies/detail/",
+    ),
+    (
+        "Tidjara Algérie",
+        "https://tidjara.dz/directory-category/concessionnaire-automobile/",
+        r"/annuaire-algerie/",
+    ),
+    (
+        "Go Africa Online Algérie",
+        "https://www.goafricaonline.com/dz/annuaire/concessionnaires-automobiles-moto",
+        r"/dz/\d+-[^?#]+",
+    ),
+)
+
+
+def search_algeria_automotive_directories(limit: int = 90) -> list[dict]:
+    results: list[dict] = []
+    seen_urls: set[str] = set()
+    per_directory_limit = max(12, (max(1, limit) + len(ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES) - 1) // len(ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES))
+    for source_name, directory_url, path_pattern in ALGERIA_AUTOMOTIVE_DIRECTORY_PAGES:
+        try:
+            page, final_url = fetch_document(directory_url, timeout=20)
+        except (OSError, TimeoutError, UnicodeError, urllib.error.URLError, http.client.HTTPException):
+            continue
+        source_count = 0
+        for anchor in re.finditer(
+            r'<a[^>]+href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>',
+            page,
+            re.I,
+        ):
+            href, body = anchor.groups()
+            absolute_url = normalize_public_url(urllib.parse.urljoin(final_url, html.unescape(href)))
+            parsed = safe_urlparse(absolute_url)
+            if not absolute_url or not re.search(path_pattern, parsed.path, re.I):
+                continue
+            identity = absolute_url.lower().split("#", 1)[0].rstrip("/")
+            if identity in seen_urls:
+                continue
+            company = clean_text(body)
+            if not company or len(company) < 3 or len(company) > 140:
+                continue
+            seen_urls.add(identity)
+            context = clean_text(page[max(0, anchor.start() - 500): min(len(page), anchor.end() + 1200)])
+            contact = extract_contact(context)
+            results.append({
+                "title": company,
+                "url": absolute_url,
+                "source_url": absolute_url,
+                "customer_website": "",
+                "snippet": clean_text(
+                    f"{company} is listed as an automotive dealer, vehicle distributor or car showroom in Algeria. "
+                    f"Local directory: {source_name}. {context}"
+                )[:1200],
+                "contact": contact,
+                "origin": source_name,
+                "source_type": "Algeria local automotive business directory",
+                "skip_fetch": True,
+            })
+            source_count += 1
+            if len(results) >= limit or source_count >= per_directory_limit:
+                break
+        if len(results) >= limit:
+            break
+    return results[:limit]
+
+
 AUTOHOME_CITY_SLUGS = {
     "北京": "beijing",
     "天津": "tianjin",
@@ -5614,7 +5684,7 @@ def soften_dominant_discovery_sources(items: list[dict], source_mode: str, resul
     return kept + delayed
 
 
-def apply_configured_source_caps(items: list[dict]) -> list[dict]:
+def apply_configured_source_caps(items: list[dict], country: str = "", source_mode: str = "") -> list[dict]:
     counts: dict[str, int] = {}
     kept = []
     for item in items:
@@ -5632,8 +5702,15 @@ def apply_configured_source_caps(items: list[dict]) -> list[dict]:
         else:
             bucket = discovery_source_bucket(item)
             source = "dealer" if bucket == "web" else bucket
+        source_limit = discovery_source_cap(source)
+        if (
+            source == "dealer"
+            and country_search_meta(country).get("code") == "dz"
+            and source_mode in ("all", "combined")
+        ):
+            source_limit = max(source_limit, 70)
         counts[source] = counts.get(source, 0) + 1
-        if counts[source] <= discovery_source_cap(source):
+        if counts[source] <= source_limit:
             kept.append(item)
     return kept
 
@@ -10889,6 +10966,15 @@ def discover(params: dict[str, list[str]]) -> dict:
             notice = f"{notice} {exc}。本轮继续使用 Google Maps 与官网来源。".strip()
     if "dealer" in enabled_sources and is_china_discovery and source_mode in ("all", "combined", "dealer"):
         raw_results += search_autohome_dealers(cities, limit=min(24, max(8, result_limit // 2)))
+    if (
+        "dealer" in enabled_sources
+        and country_meta.get("code") == "dz"
+        and source_mode in ("all", "combined")
+    ):
+        try:
+            raw_results += search_algeria_automotive_directories(limit=min(90, max(60, result_limit)))
+        except (OSError, ValueError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException):
+            pass
     if "dealer" in enabled_sources and (source_mode in ("all", "combined", "dealer") or include_support_sources):
         search_variants = list(dict.fromkeys(commercial_query_variants))
         if is_china_discovery and source_mode in ("all", "combined"):
@@ -11246,7 +11332,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 )
             )
         ]
-    raw_results = apply_configured_source_caps(raw_results)
+    raw_results = apply_configured_source_caps(raw_results, country, source_mode)
     pipeline_stats = {
         "rawCollected": len(raw_results),
         "afterCountryDedup": 0,
