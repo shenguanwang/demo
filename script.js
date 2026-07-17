@@ -7974,7 +7974,7 @@ function renderUserActivity(data = {}) {
     <div class="panel-head">
       <div>
         <h3>${escapeHtml(user.username || presence.username || "账号")} 操作记录</h3>
-        <span>${presence.online ? "当前在线" : "当前离线"} · 最近 ${events.length} 条登录记录</span>
+        <span>${presence.online ? "当前在线" : "当前离线"} · 最近 ${events.length} 条操作记录</span>
       </div>
       <button class="ghost compact" type="button" data-close-user-activity>关闭</button>
     </div>
@@ -7984,18 +7984,16 @@ function renderUserActivity(data = {}) {
       <span><b>最近 IP</b>${escapeHtml(presence.ip || "unknown")}</span>
       <span><b>设备</b>${escapeHtml(compactUserAgent(presence.userAgent || ""))}</span>
     </div>
-    <div class="table-wrap"><table>
-      <thead><tr><th>时间</th><th>IP 地址</th><th>设备 / 浏览器</th></tr></thead>
-      <tbody>
-        ${events.length ? events.map((event) => `
-          <tr>
-            <td>${escapeHtml(formatJobTime(event.createdAt || ""))}</td>
-            <td>${escapeHtml(event.ip || "unknown")}</td>
-            <td title="${escapeHtml(event.userAgent || "")}">${escapeHtml(compactUserAgent(event.userAgent))}</td>
-          </tr>
-        `).join("") : `<tr><td colspan="3">暂无登录记录。</td></tr>`}
-      </tbody>
-    </table></div>
+    <div class="admin-audit-list user-operation-list">
+      ${events.length ? events.map((event) => `
+        <article>
+          <strong>${escapeHtml(event.action || "账号操作")}</strong>
+          <span>${escapeHtml(event.username || user.username || "账号")} · ${escapeHtml(formatJobTime(event.createdAt || ""))}</span>
+          <p title="${escapeHtml(event.userAgent || event.detail || "")}">${escapeHtml(event.kind === "login" ? compactUserAgent(event.userAgent || "") : (event.detail || "无补充信息"))}</p>
+          <small>${escapeHtml(event.ip || "")}</small>
+        </article>
+      `).join("") : `<p class="empty">暂无操作记录。</p>`}
+    </div>
   `;
 }
 

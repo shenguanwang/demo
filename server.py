@@ -1714,6 +1714,69 @@ def save_workspace_state(workspace_key: str, payload: dict, expected_version: in
     }
 
 
+def workspace_operation_events(previous: dict, current: dict) -> list[tuple[str, str]]:
+    previous = previous if isinstance(previous, dict) else empty_workspace_state()
+    current = current if isinstance(current, dict) else empty_workspace_state()
+
+    def record_key(record: dict, index: int) -> str:
+        if not isinstance(record, dict):
+            return f"row:{index}"
+        return clean_text(str(
+            record.get("id")
+            or record.get("leadId")
+            or record.get("customerWebsite")
+            or record.get("sourceUrl")
+            or f"{record.get('company', '')}|{record.get('country', '')}|{index}"
+        )).lower()
+
+    def records(bucket: str, state: dict) -> dict[str, dict]:
+        values = state.get(bucket, []) if isinstance(state.get(bucket, []), list) else []
+        return {record_key(record, index): record for index, record in enumerate(values) if isinstance(record, dict)}
+
+    def names(values: list[dict], fallback: str) -> str:
+        labels = [clean_text(str(item.get("company") or item.get("customer") or item.get("orderNo") or item.get("id") or "")) for item in values]
+        labels = [label for label in labels if label]
+        preview = "、".join(labels[:3]) or fallback
+        return f"{len(values)} 条：{preview}" + (" 等" if len(values) > 3 else "")
+
+    events: list[tuple[str, str]] = []
+    old_review, new_review = records("reviewLeads", previous), records("reviewLeads", current)
+    old_customers, new_customers = records("customers", previous), records("customers", current)
+    old_rejected, new_rejected = records("rejectedLeads", previous), records("rejectedLeads", current)
+
+    imported = [new_review[key] for key in new_review.keys() - old_review.keys()]
+    approved = [new_customers[key] for key in new_customers.keys() - old_customers.keys()]
+    rejected = [new_rejected[key] for key in new_rejected.keys() - old_rejected.keys()]
+    deleted_customers = [old_customers[key] for key in old_customers.keys() - new_customers.keys()]
+    if imported:
+        events.append(("导入待审核线索", names(imported, "新增线索")))
+    if approved:
+        events.append(("通过线索", names(approved, "新增客户")))
+    if rejected:
+        events.append(("拒绝线索", names(rejected, "已拒绝线索")))
+    if deleted_customers:
+        events.append(("删除客户", names(deleted_customers, "客户记录")))
+
+    changed_customers = []
+    for key in old_customers.keys() & new_customers.keys():
+        before, after = old_customers[key], new_customers[key]
+        tracked = ("stage", "lastContactAt", "nextFollowAt", "nextFollowTime", "assignedTo", "preferredChannel")
+        if any(before.get(field) != after.get(field) for field in tracked):
+            changed_customers.append(after)
+    if changed_customers:
+        events.append(("更新客户跟进", names(changed_customers, "客户状态")))
+
+    for bucket, action, fallback in (
+        ("quotes", "创建报价", "报价记录"),
+        ("afterSalesOrders", "新增售后单", "售后记录"),
+    ):
+        old_records, new_records = records(bucket, previous), records(bucket, current)
+        added = [new_records[key] for key in new_records.keys() - old_records.keys()]
+        if added:
+            events.append((action, names(added, fallback)))
+    return events[:8]
+
+
 def stable_record_key(record: dict, fallback_prefix: str, index: int) -> str:
     if not isinstance(record, dict):
         return f"{fallback_prefix}:{index}"
@@ -2268,21 +2331,48 @@ def record_admin_audit(username: str, action: str, detail: str = "", ip_address:
 def list_admin_audit_events(limit: int = 80) -> list[dict]:
     initialize_state_store()
     limit = max(1, min(200, int(limit or 80)))
+    admin_usernames = {
+        str(user.get("username") or "")
+        for user in list_users()
+        if user.get("role") == "admin" and not user.get("hidden")
+    }
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
                 cursor.execute(
                     "SELECT event_id, username, action, detail, ip_address, created_at FROM admin_audit_events WHERE username <> %s ORDER BY created_at DESC LIMIT %s",
-                    (HIDDEN_ADMIN_USERNAME, limit),
+                    (HIDDEN_ADMIN_USERNAME, min(1000, limit * 5)),
                 )
                 rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
             rows = connection.execute(
                 "SELECT event_id, username, action, detail, ip_address, created_at FROM admin_audit_events WHERE username <> ? ORDER BY created_at DESC LIMIT ?",
-                (HIDDEN_ADMIN_USERNAME, limit),
+                (HIDDEN_ADMIN_USERNAME, min(1000, limit * 5)),
             ).fetchall()
+    rows = [row for row in rows if str(row[1] or "") in admin_usernames][:limit]
     return [{"id": row[0], "username": row[1], "action": row[2], "detail": row[3], "ip": row[4], "createdAt": str(row[5])} for row in rows]
+
+
+def list_user_audit_events(username: str, limit: int = 80) -> list[dict]:
+    initialize_state_store()
+    username = clean_text(username)[:40]
+    limit = max(1, min(200, int(limit or 80)))
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT event_id, username, action, detail, ip_address, created_at FROM admin_audit_events WHERE username = %s ORDER BY created_at DESC LIMIT %s",
+                    (username, limit),
+                )
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute(
+                "SELECT event_id, username, action, detail, ip_address, created_at FROM admin_audit_events WHERE username = ? ORDER BY created_at DESC LIMIT ?",
+                (username, limit),
+            ).fetchall()
+    return [{"id": row[0], "username": row[1], "action": row[2], "detail": row[3], "ip": row[4], "createdAt": str(row[5]), "kind": "operation"} for row in rows]
 
 
 def create_session_token(username: str) -> str:
@@ -12327,11 +12417,27 @@ class Handler(SimpleHTTPRequestHandler):
                     return
                 purge_hidden_admin_tracking()
                 presence = presence_payload(username, user, presence_rows_by_user().get(username))
+                operation_events = list_user_audit_events(username, 80)
+                login_events = [{
+                    "id": f"login-{event.get('id', '')}",
+                    "username": username,
+                    "action": "登录系统",
+                    "detail": "账号登录",
+                    "ip": event.get("ip", ""),
+                    "userAgent": event.get("userAgent", ""),
+                    "createdAt": event.get("createdAt", ""),
+                    "kind": "login",
+                } for event in list_login_events(username, 80)]
+                events = sorted(
+                    [*operation_events, *login_events],
+                    key=lambda event: str(event.get("createdAt") or ""),
+                    reverse=True,
+                )[:80]
                 self.send_json(200, {
                     "ok": True,
                     "user": {key: value for key, value in user.items() if key != "passwordHash"},
                     "presence": presence,
-                    "events": list_login_events(username, 80),
+                    "events": events,
                 })
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
@@ -12779,10 +12885,14 @@ class Handler(SimpleHTTPRequestHandler):
                 expected_version = payload.get("expectedVersion")
                 if expected_version is not None:
                     expected_version = int(expected_version)
+                username = self.current_user()["username"]
+                previous_state = load_workspace_state(username).get("state", {})
                 result = save_workspace_state(
-                    self.current_user()["username"], payload.get("state", payload),
+                    username, payload.get("state", payload),
                     expected_version=expected_version,
                 )
+                for action, detail in workspace_operation_events(previous_state, result.get("state", {})):
+                    record_admin_audit(username, action, detail, self.client_ip())
                 self.send_json(200, {"ok": True, **result})
             except WorkspaceVersionConflict as exc:
                 self.send_json(
@@ -12804,7 +12914,14 @@ class Handler(SimpleHTTPRequestHandler):
                 if not isinstance(payload, dict):
                     raise ValueError("请求格式无效")
                 ensure_user_can_use_discovery_payload(self.current_user(), payload)
-                job = create_discovery_job(payload, self.current_user()["username"])
+                username = self.current_user()["username"]
+                job = create_discovery_job(payload, username)
+                detail_parts = [
+                    clean_text(str(payload.get("country") or payload.get("targetCountry") or "未知地区")),
+                    clean_text(str(payload.get("sourceMode") or payload.get("source") or "综合搜索")),
+                    clean_text(str(payload.get("model") or "")),
+                ]
+                record_admin_audit(username, "启动一键获客", " · ".join(part for part in detail_parts if part), self.client_ip())
                 self.send_json(202, {"ok": True, "job": job})
             except PermissionError as exc:
                 self.send_json(403, {"ok": False, "error": str(exc)})
