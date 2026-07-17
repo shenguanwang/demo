@@ -4668,12 +4668,18 @@ COUNTRY_HINTS = {
         "Tizi Ouzou", "Boumerdes", "Boumerdès", "Ouargla", "Chlef",
         "Mostaganem", "Relizane", "Biskra", "Hassi Messaoud",
     ),
-    "Côte d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouaké"),
-    "Cote d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouaké"),
-    "Ivory Coast": ("Abidjan", "Yamoussoukro", "Bouaké"),
-    "C么te d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouake", "Bouak茅", "San Pedro", "Daloa", "Korhogo"),
-    "Cote d'Ivoire": ("Abidjan", "Yamoussoukro", "Bouake", "Bouak茅", "San Pedro", "Daloa", "Korhogo"),
-    "Ivory Coast": ("Abidjan", "Yamoussoukro", "Bouake", "Bouak茅", "San Pedro", "Daloa", "Korhogo"),
+    "Côte d'Ivoire": (
+        "Abidjan", "Yamoussoukro", "Bouaké", "Bouake",
+        "San Pedro", "Daloa", "Korhogo",
+    ),
+    "Cote d'Ivoire": (
+        "Abidjan", "Yamoussoukro", "Bouaké", "Bouake",
+        "San Pedro", "Daloa", "Korhogo",
+    ),
+    "Ivory Coast": (
+        "Abidjan", "Yamoussoukro", "Bouaké", "Bouake",
+        "San Pedro", "Daloa", "Korhogo",
+    ),
     "Egypt": (
         "Cairo", "Alexandria", "Giza", "6th of October City",
         "New Cairo", "Nasr City", "Mansoura", "Tanta",
@@ -5165,7 +5171,7 @@ LOCAL_DISCOVERY_SOURCES = {
         ("OpenSooq Algeria", "dz.opensooq.com"),
         ("DZ Auto Market", "dz-auto.store"),
     ),
-    "C么te d'Ivoire": (
+    "Côte d'Ivoire": (
         ("Auto24 Cote d'Ivoire", "auto24.ci"),
         ("CoinAfrique Cote d'Ivoire", "ci.coinafrique.com"),
         ("Afribaba Cote d'Ivoire", "afribaba.ci"),
@@ -5491,7 +5497,7 @@ LOCALIZED_DISCOVERY_TERMS = {
         "voitures occasion professionnel vendeur Algérie",
         "سيارات للبيع الجزائر وكيل سيارات معرض سيارات",
     ),
-    "C么te d'Ivoire": (
+    "Côte d'Ivoire": (
         "vente voiture Abidjan concessionnaire contact",
         "concessionnaire automobile Cote d'Ivoire showroom",
         "importateur automobile Abidjan contact",
@@ -8637,14 +8643,17 @@ def social_search_variants(
             queries.append(f"{market} car dealer used cars auto dealership")
         elif platform == "instagram":
             # Profile search is strongest with short location + business terms.
-            # Put a country and the main cities first so the Apify plan can use
-            # broad regional coverage without paying for the long web queries.
+            # Keep the same plan for every country: full country name, primary
+            # city, localized commercial phrases, then additional major cities.
             instagram_places = list(dict.fromkeys([market, *markets[:4]]))
-            for place in instagram_places:
+            for place in instagram_places[:2]:
                 queries.extend([
                     f"{place} car dealer",
                     f"{place} used cars",
                 ])
+            queries.extend(localized_terms[:2])
+            for place in instagram_places[2:4]:
+                queries.append(f"{place} car dealer")
         elif platform == "tiktok":
             # TikTok user search favors short local-business phrases. Lead
             # with country and major-city terms before the longer web queries.
@@ -12030,7 +12039,11 @@ def discover(params: dict[str, list[str]]) -> dict:
     ).strip()
     cities = discovery_cities(country, city_focus, domestic_region)
     country_meta = country_search_meta(country)
-    market = city_focus or (domestic_region if country_meta.get("code") == "cn" and domestic_region else country.split(" ")[0])
+    market = city_focus or (
+        domestic_region
+        if country_meta.get("code") == "cn" and domestic_region
+        else country_meta.get("location") or country.split(" ")[0]
+    )
     broad_business_query = (
         f"{market} automotive importer vehicle distributor car dealer showroom "
         f"parallel import auto trading official website contact contacts about email phone {exclude_query}{cutoff_query}"
