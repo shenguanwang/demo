@@ -4778,6 +4778,103 @@ LOCAL_DISCOVERY_SOURCES = {
         ("MyAuto Armenia", "myauto.am"),
         ("Autopapa Caucasus", "autopapa.com"),
     ),
+    "Bahrain": (
+        ("Bahrain Auto Trader Dealers", "bahrainautotrader.com"),
+        ("Click Bahrain Car Dealers", "clickbahrain.com"),
+        ("Motors Souq Bahrain", "motorssouq.com"),
+        ("Bahrain Cars BH", "bahraincarsbh.com"),
+        ("OpenSooq Bahrain", "bh.opensooq.com"),
+    ),
+    "Jordan": (
+        ("Ordon Auto", "ordonauto.com"),
+        ("AutoBeeb Jordan Dealers", "autobeeb.com"),
+        ("MotorX Jordan", "motorx.app"),
+        ("OpenSooq Jordan", "jo.opensooq.com"),
+    ),
+    "Georgia": (
+        ("MyAuto Georgia", "myauto.ge"),
+        ("AutoPapa Georgia", "autopapa.ge"),
+        ("Manqanebi Georgia", "manqanebi.ge"),
+        ("Auto.ge", "auto.ge"),
+    ),
+    "Vietnam": (
+        ("Vucar Showroom Directory", "vucar.vn"),
+        ("Oto.com.vn Showrooms", "oto.com.vn"),
+        ("Bonbanh", "bonbanh.com"),
+        ("Cho Tot Xe", "chotot.com"),
+    ),
+    "Philippines": (
+        ("Philippines Auto Dealers Directory", "philippines.tv"),
+        ("AutoDeal Philippines", "autodeal.com.ph"),
+        ("Philkotse", "philkotse.com"),
+        ("Philmotors", "philmotors.com"),
+        ("Manila Carlist", "manilacarlist.com"),
+    ),
+    "Mexico": (
+        ("Zona Auto Dealer Directory", "zonaauto.com.mx"),
+        ("Autocosmos Mexico", "autocosmos.com.mx"),
+        ("Seminuevos Mexico", "seminuevos.com"),
+        ("SoloAutos Mexico", "soloautos.mx"),
+        ("Kavak Mexico", "kavak.com"),
+    ),
+    "Brazil": (
+        ("Webmotors", "webmotors.com.br"),
+        ("iCarros", "icarros.com.br"),
+        ("Autoscar Lojas", "autoscar.com.br"),
+        ("Seminovos Brazil", "seminovos.com.br"),
+        ("SoCarrao", "socarrao.com.br"),
+    ),
+    "Chile": (
+        ("Chileautos", "chileautos.cl"),
+        ("Automotores Chile", "automotores.cl"),
+        ("Yapo Autos", "yapo.cl"),
+        ("Autocosmos Chile", "autocosmos.cl"),
+        ("Mercado Libre Chile", "mercadolibre.cl"),
+    ),
+    "Colombia": (
+        ("TuCarro Colombia", "tucarro.com.co"),
+        ("CarroYa", "carroya.com"),
+        ("Autocosmos Colombia", "autocosmos.com.co"),
+        ("Mercado Libre Colombia", "mercadolibre.com.co"),
+    ),
+    "Morocco": (
+        ("O'Voiture Dealer Directory", "ovoiture.ma"),
+        ("Wandaloo Dealers", "wandaloo.com"),
+        ("Moteur.ma", "moteur.ma"),
+        ("Avito Morocco", "avito.ma"),
+        ("Autera Morocco", "autera.ma"),
+    ),
+}
+
+
+LOCAL_AUTOMOTIVE_INTENT_TERMS = {
+    "ae": ("car dealer showroom", "معرض سيارات", "تجارة السيارات"),
+    "sa": ("car dealer showroom", "معرض سيارات", "بيع سيارات مستعملة"),
+    "kz": ("автосалон", "автодилер", "продажа автомобилей"),
+    "ru": ("автосалон", "автодилер", "автомобили в продаже"),
+    "qa": ("car dealer showroom", "معرض سيارات", "بيع وشراء السيارات"),
+    "kw": ("car dealer showroom", "معرض سيارات", "سيارات للبيع"),
+    "uz": ("avtosalon", "avtomobil sotish", "автосалон"),
+    "az": ("avtosalon", "avtomobil satışı", "avtomobil dileri"),
+    "ng": ("car dealer showroom", "tokunbo car dealer", "vehicle importer"),
+    "gh": ("car dealer showroom", "home used cars dealer", "vehicle importer"),
+    "dz": ("concessionnaire automobile", "showroom automobile", "vente voitures occasion"),
+    "ci": ("concessionnaire automobile", "vente voiture", "importateur automobile"),
+    "eg": ("car dealer showroom", "معرض سيارات", "تجارة السيارات"),
+    "kg": ("автосалон", "автодилер", "продажа автомобилей"),
+    "et": ("car dealer Addis Ababa", "vehicle importer", "automotive trading company"),
+    "om": ("car dealer showroom", "معرض سيارات", "تجارة السيارات"),
+    "am": ("ավտոսրահ", "ավտոմեքենաների վաճառք", "автосалон"),
+    "bh": ("car dealer showroom", "معرض سيارات", "بيع السيارات"),
+    "jo": ("car dealer showroom", "معرض سيارات", "تجارة السيارات"),
+    "ge": ("ავტოსალონი", "ავტომობილების გაყიდვა", "car dealer Tbilisi"),
+    "vn": ("đại lý ô tô", "showroom ô tô", "mua bán xe ô tô"),
+    "ph": ("car dealer showroom", "used car dealership", "vehicle importer"),
+    "mx": ("agencia de autos", "concesionario de automóviles", "venta de autos usados"),
+    "br": ("concessionária de veículos", "loja de carros", "revenda de seminovos"),
+    "cl": ("automotora", "concesionario de autos", "venta de autos usados"),
+    "co": ("concesionario de carros", "compraventa de vehículos", "venta de carros usados"),
+    "ma": ("concessionnaire automobile", "vente voiture occasion", "معرض سيارات"),
 }
 
 FOREIGN_LOCATION_BLOCKERS = (
@@ -5113,6 +5210,9 @@ def local_source_query_variants(
             "concessionnaire automobile", "showroom automobile",
             "importateur automobile", "vendeur professionnel voitures",
         ))
+    localized_intents = LOCAL_AUTOMOTIVE_INTENT_TERMS.get(meta.get("code", ""), ())
+    if localized_intents:
+        intent_terms = tuple(dict.fromkeys([*localized_intents, *intent_terms]))
     queries: list[str] = []
     # Rotate domains first so a query cap cannot let the first large marketplace
     # consume the whole country-specific search budget.
@@ -5162,17 +5262,32 @@ ALGERIA_DIRECTORY_OPERATOR_DOMAINS = (
 )
 
 
-def normalize_algeria_phone(value: str) -> str:
+COUNTRY_CALLING_CODES = {
+    "ae": "971", "sa": "966", "kz": "7", "ru": "7", "qa": "974", "kw": "965",
+    "uz": "998", "az": "994", "ng": "234", "gh": "233", "dz": "213", "ci": "225",
+    "eg": "20", "kg": "996", "et": "251", "om": "968", "am": "374", "bh": "973",
+    "jo": "962", "ge": "995", "vn": "84", "ph": "63", "mx": "52", "br": "55",
+    "cl": "56", "co": "57", "ma": "212", "cn": "86",
+}
+
+
+def normalize_country_phone(value: str, country: str) -> str:
     digits = re.sub(r"\D", "", urllib.parse.unquote(html.unescape(value or "")))
-    if digits.startswith("00213"):
+    if digits.startswith("00"):
         digits = digits[2:]
-    if digits.startswith("213") and 11 <= len(digits) <= 12:
+    calling_code = COUNTRY_CALLING_CODES.get(country_search_meta(country).get("code", ""), "")
+    if not calling_code:
+        return f"+{digits}" if 8 <= len(digits) <= 15 else ""
+    if digits.startswith(calling_code) and 8 <= len(digits) <= 15:
         return f"+{digits}"
-    if digits.startswith("0") and 9 <= len(digits) <= 10:
-        return f"+213{digits[1:]}"
-    if 8 <= len(digits) <= 9:
-        return f"+213{digits}"
+    national_number = digits.lstrip("0")
+    if 7 <= len(national_number) <= 12 and len(calling_code + national_number) <= 15:
+        return f"+{calling_code}{national_number}"
     return ""
+
+
+def normalize_algeria_phone(value: str) -> str:
+    return normalize_country_phone(value, "Algeria")
 
 
 def algeria_directory_local_business(document: str) -> dict:
@@ -5312,6 +5427,319 @@ def algeria_directory_detail(source_name: str, company: str, detail_url: str) ->
     }
 
 
+DIRECTORY_TECHNICAL_DOMAINS = {
+    "schema.org", "wordpress.org", "gmpg.org", "google.com", "googleapis.com",
+    "gstatic.com", "doubleclick.net", "googletagmanager.com", "openstreetmap.org",
+    "leafletjs.com", "apple.com", "microsoft.com", "bunny.net", "cloudflare.com",
+    "cloudfront.net", "jsdelivr.net", "bootstrapcdn.com", "fontawesome.com",
+    "facebook.com", "instagram.com", "linkedin.com", "tiktok.com", "youtube.com",
+    "twitter.com", "x.com", "whatsapp.com", "wa.me", "telegram.me", "t.me", "zalo.me",
+}
+
+LOCAL_DIRECTORY_CITY_ALIASES = {
+    "vn": ("Hồ Chí Minh", "TP HCM", "Hà Nội", "Đà Nẵng", "Hải Phòng", "Cần Thơ"),
+    "ru": ("Москва", "Санкт-Петербург", "Казань", "Екатеринбург"),
+    "kz": ("Алматы", "Астана", "Шымкент", "Караганда"),
+    "uz": ("Toshkent", "Samarqand", "Buxoro", "Farg'ona"),
+}
+
+
+def local_directory_source_for_url(url: str, country: str) -> tuple[str, str] | None:
+    domain = safe_urlparse(normalize_public_url(url)).netloc.lower().removeprefix("www.")
+    for source_name, source_domain in local_discovery_sources(country):
+        normalized_source_domain = source_domain.lower().removeprefix("www.")
+        if domain == normalized_source_domain or domain.endswith(f".{normalized_source_domain}"):
+            return source_name, normalized_source_domain
+    return None
+
+
+def local_directory_profile_url(url: str) -> bool:
+    parsed = safe_urlparse(normalize_public_url(url))
+    path = parsed.path.strip("/").lower()
+    if not path:
+        return bool(re.search(r"(?:dealer|salon|showroom|company|listing|profile|id)=", parsed.query, re.I))
+    generic_paths = {
+        "cars", "car", "autos", "auto", "vehicles", "dealers", "dealer", "showrooms",
+        "salons", "directory", "annuaire", "automotive", "used-cars", "new-cars",
+        "marketplace", "search", "listings", "voitures", "carros", "showroom-oto",
+        "dealers-list", "auto-dealers", "agencias", "concessionnaires",
+    }
+    segments = [segment for segment in path.split("/") if segment]
+    if path in generic_paths or re.fullmatch(r"(?:en|fr|ar|es|pt|vi)(?:/)?", path):
+        return False
+    if len(segments) <= 2 and all(
+        segment in generic_paths or segment in {"en", "fr", "ar", "es", "pt", "vi"}
+        for segment in segments
+    ):
+        return False
+    return True
+
+
+def directory_official_websites(document: str, detail_url: str, country: str, company: str) -> list[str]:
+    detail_domain = safe_urlparse(detail_url).netloc.lower().removeprefix("www.")
+    blocked_domains = {
+        *DIRECTORY_TECHNICAL_DOMAINS,
+        *(domain.lower().removeprefix("www.") for _, domain in local_discovery_sources(country)),
+    }
+    generic_company_words = {
+        "auto", "autos", "automotive", "automobile", "car", "cars", "vehicle", "vehicles",
+        "motor", "motors", "dealer", "dealership", "showroom", "company", "group", "ltd",
+        "llc", "sa", "sarl", "spa", "the", "and",
+    }
+    raw_company_words = [
+        word for word in re.findall(r"[a-z0-9]+", normalize_country_match_text(company))
+        if len(word) >= 3 and word not in {"the", "and", "ltd", "llc", "sarl", "spa"}
+    ]
+    company_words = [
+        word for word in raw_company_words
+        if len(word) >= 3 and word not in generic_company_words
+    ]
+    company_acronym = "".join(word[0] for word in raw_company_words if word)
+    websites: list[str] = []
+    for anchor in re.finditer(r'<a\b[^>]*href=["\']([^"\']+)["\'][^>]*>([\s\S]*?)</a>', document, re.I):
+        raw_url, anchor_body = anchor.groups()
+        decoded_url = html.unescape(raw_url).strip()
+        if re.match(r"^(?:mailto|tel|javascript|data):", decoded_url, re.I):
+            continue
+        candidates = [normalize_public_url(urllib.parse.urljoin(detail_url, decoded_url))]
+        parsed_candidate = safe_urlparse(candidates[0])
+        for values in urllib.parse.parse_qs(parsed_candidate.query).values():
+            candidates.extend(normalize_public_url(value) for value in values)
+        for candidate in candidates:
+            domain = safe_urlparse(candidate).netloc.lower().removeprefix("www.")
+            domain_label = domain.split(".")[0]
+            anchor_text = clean_text(anchor_body).lower()
+            explicit_website_link = bool(re.search(
+                r"\b(website|official site|site web|sitio web|trang web|web)\b|官网|الموقع",
+                anchor_text,
+                re.I,
+            ))
+            company_related_domain = bool(
+                any(word in domain_label for word in company_words)
+                or (len(company_acronym) >= 2 and company_acronym in domain_label)
+            )
+            if (
+                not candidate
+                or domain == detail_domain
+                or not re.search(r"[a-z]", domain, re.I)
+                or any(domain == blocked or domain.endswith(f".{blocked}") for blocked in blocked_domains)
+                or not is_business_website_url(candidate)
+                or not (explicit_website_link or company_related_domain)
+            ):
+                continue
+            if candidate not in websites:
+                websites.append(candidate)
+    return websites[:4]
+
+
+def local_directory_sales_fit(company: str, description: str) -> bool:
+    value = clean_text(f"{company} {description}").lower()
+    sales_signal = bool(re.search(
+        r"\b(car dealer|auto dealer|vehicle dealer|dealership|showroom|"
+        r"used cars|new cars|pre-owned|concessionnaire|concesionario|automotora|concessionária|"
+        r"revenda|loja de carros|avtosalon|автосалон)\b|"
+        r"(đại lý ô tô|showroom ô tô|mua bán xe|معرض سيارات|تجارة السيارات|ավտոսրահ|ავტოსალონი)",
+        value,
+        re.I,
+    ))
+    non_sales_signal = bool(re.search(
+        r"\b(spare parts?|auto parts?|parts supplier|tyres?|tires?|garage|repair|workshop|"
+        r"maintenance|car wash|detailing|body shop|equipment|equipements?|scrapyard|salvage)\b|"
+        r"(pièces détachées|réparation|pneus?|lavage|repuestos|refacciones|taller mecánico|"
+        r"peças|oficina mecânica|sửa chữa|phụ tùng|ремонт|запчасти)",
+        value,
+        re.I,
+    ))
+    truck_signal = bool(re.search(
+        r"\b(trucks?|heavy trucks?|commercial trucks?|camions?|poids lourds|camiones?|caminhões|"
+        r"xe tải|грузовик|грузовые автомобили)\b",
+        value,
+        re.I,
+    ))
+    passenger_signal = bool(re.search(
+        r"\b(cars?|automobiles?|suv|sedan|passenger vehicles?|voitures?|autos?|carros?)\b|"
+        r"(xe ô tô|легковые автомобили)",
+        value,
+        re.I,
+    ))
+    return not (truck_signal and not passenger_signal) and not (non_sales_signal and not sales_signal)
+
+
+def local_directory_detail(source_name: str, country: str, company: str, detail_url: str) -> dict:
+    try:
+        document, final_url = fetch_document(detail_url, timeout=12)
+    except (OSError, TimeoutError, UnicodeError, urllib.error.URLError, http.client.HTTPException):
+        return {"detail_url": detail_url, "fetched": False}
+
+    relevant_document = re.split(r"<footer\b", document, maxsplit=1, flags=re.I)[0]
+    local_business = algeria_directory_local_business(document)
+    contacts = extract_public_contacts(relevant_document)
+    phones: list[str] = []
+    raw_phones = [
+        *re.findall(r'href=["\']tel:([^"\']+)["\']', relevant_document, re.I),
+        *(contacts.get("phones") or []),
+        str(local_business.get("telephone") or ""),
+    ]
+    for raw_phone in raw_phones:
+        phone = normalize_country_phone(str(raw_phone), country)
+        if phone and phone not in phones:
+            phones.append(phone)
+
+    operator_domains = {
+        domain.lower().removeprefix("www.")
+        for _, domain in local_discovery_sources(country)
+    }
+    emails = [
+        email for email in (contacts.get("emails") or [])
+        if not any(
+            email.split("@")[-1].lower() == domain
+            or email.split("@")[-1].lower().endswith(f".{domain}")
+            for domain in operator_domains
+        )
+    ]
+    local_email = clean_text(str(local_business.get("email") or "")).lower()
+    if local_email and "@" in local_email and all(
+        local_email.split("@")[-1] != domain
+        and not local_email.split("@")[-1].endswith(f".{domain}")
+        for domain in operator_domains
+    ):
+        emails.insert(0, local_email)
+    emails = list(dict.fromkeys(emails))[:8]
+
+    source_brand = safe_urlparse(final_url).netloc.lower().removeprefix("www.").split(".")[0]
+    social_accounts = [
+        account for account in (contacts.get("social_accounts") or [])
+        if source_brand not in account.lower()
+    ]
+    websites = directory_official_websites(relevant_document, final_url, country, company)
+    address = ""
+    local_address = local_business.get("address")
+    if isinstance(local_address, dict):
+        address = clean_text(" ".join(
+            str(local_address.get(key) or "")
+            for key in ("streetAddress", "addressLocality", "addressRegion", "postalCode", "addressCountry")
+        ))
+    if not address:
+        address_match = re.search(r"<address[^>]*>([\s\S]*?)</address>", relevant_document, re.I)
+        if address_match:
+            address = clean_text(address_match.group(1))[:240]
+    page_text = clean_text(relevant_document)
+    visible_address_match = re.search(
+        r"(?:Adresse|Address|Dirección|Endereço|Địa chỉ|العنوان)\s*[:：]?\s*(.{5,220}?)"
+        r"(?=(?:Téléphone|Telephone|Tél\.?|Phone|Teléfono|Telefone|Điện thoại|Email|E-mail|Website|Site web|$))",
+        page_text,
+        re.I,
+    )
+    if visible_address_match:
+        visible_address = clean_text(visible_address_match.group(1))[:240]
+        if visible_address and (not address or len(visible_address) < len(address)):
+            address = visible_address
+    city_occurrences: list[tuple[int, str]] = []
+    country_code = country_search_meta(country).get("code", "")
+    city_names = [
+        *COUNTRY_HINTS.get(country_search_meta(country).get("location", ""), ()),
+        *LOCAL_DIRECTORY_CITY_ALIASES.get(country_code, ()),
+    ]
+    for city_name in city_names:
+        match = re.search(re.escape(city_name), address, re.I)
+        if match:
+            city_occurrences.append((match.start(), normalize_country_match_text(city_name)))
+    city_occurrences.sort()
+    if len({name for _, name in city_occurrences}) >= 2:
+        first_city = city_occurrences[0][1]
+        conflicting_city = next((position for position, name in city_occurrences[1:] if name != first_city), None)
+        if conflicting_city and conflicting_city >= 20:
+            address = address[:conflicting_city].strip(" ,;-" )
+
+    contacts.update({
+        "email": emails[0] if emails else "",
+        "emails": emails,
+        "phone": phones[0] if phones else "",
+        "phones": phones,
+        "social_accounts": social_accounts[:8],
+        "websites": websites,
+    })
+    description = clean_text(str(local_business.get("description") or "")) or extract_meta(relevant_document)
+    return {
+        "detail_url": normalize_public_url(final_url) or detail_url,
+        "fetched": True,
+        "contacts": contacts,
+        "website": websites[0] if websites else "",
+        "address": address,
+        "description": description[:700],
+        "sales_fit": local_directory_sales_fit(company, description),
+    }
+
+
+def enrich_local_directory_results(items: list[dict], country: str, limit: int = 60) -> list[dict]:
+    candidates: list[dict] = []
+    for item in items:
+        source = local_directory_source_for_url(item.get("source_url") or item.get("url") or "", country)
+        if not source or item.get("directory_detail_fetched"):
+            continue
+        source_name, _ = source
+        item["origin"] = source_name
+        item["source_type"] = "本地汽车商业目录"
+        item["local_directory_candidate"] = True
+        item["directory_profile_page"] = local_directory_profile_url(item.get("url", ""))
+        candidates.append(item)
+        if len(candidates) >= limit:
+            break
+    if not candidates:
+        return items
+
+    details: dict[int, dict] = {}
+    executor = ThreadPoolExecutor(max_workers=min(8, len(candidates)))
+    futures = {
+        executor.submit(
+            local_directory_detail,
+            item["origin"],
+            country,
+            clean_text(str(item.get("title") or "")),
+            item.get("url", ""),
+        ): id(item)
+        for item in candidates
+    }
+    try:
+        for future in as_completed(futures, timeout=max(45, min(180, len(candidates) * 3))):
+            try:
+                details[futures[future]] = future.result()
+            except (OSError, ValueError, RuntimeError, TimeoutError):
+                details[futures[future]] = {"fetched": False}
+    except FuturesTimeoutError:
+        pass
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+    for item in candidates:
+        detail = details.get(id(item), {})
+        contacts = detail.get("contacts") if isinstance(detail.get("contacts"), dict) else {}
+        website = detail.get("website", "")
+        address = detail.get("address", "")
+        description = detail.get("description", "")
+        contact_parts = [
+            *(contacts.get("emails") or []),
+            *(contacts.get("phones") or []),
+            *(contacts.get("social_accounts") or []),
+        ]
+        item.update({
+            "url": detail.get("detail_url") or item.get("url", ""),
+            "source_url": detail.get("detail_url") or item.get("source_url") or item.get("url", ""),
+            "customer_website": website,
+            "snippet": clean_text(
+                f"{item.get('snippet', '')} Local automotive directory in {country}: {item.get('origin', '')}. "
+                f"Address: {address}. {description}"
+            )[:1400],
+            "contact": " ".join([*contact_parts, website]),
+            "directory_public_contacts": contacts,
+            "directory_detail_fetched": bool(detail.get("fetched")),
+            "directory_sales_fit": bool(detail.get("sales_fit", False)),
+        })
+        if detail.get("fetched"):
+            item["skip_fetch"] = True
+    return items
+
+
 def search_algeria_automotive_directories(limit: int = 90) -> list[dict]:
     candidates: list[dict] = []
     seen_urls: set[str] = set()
@@ -5395,9 +5823,12 @@ def search_algeria_automotive_directories(limit: int = 90) -> list[dict]:
             "contact": " ".join([*contact_parts, website]),
             "directory_public_contacts": contacts,
             "directory_detail_fetched": bool(detail.get("fetched")),
-            "directory_sales_fit": bool(detail.get("sales_fit", True)),
-            "skip_fetch": True,
+            "directory_sales_fit": bool(detail.get("sales_fit", False)),
+            "local_directory_candidate": True,
+            "directory_profile_page": True,
         })
+        if detail.get("fetched"):
+            item["skip_fetch"] = True
         item.pop("listing_context", None)
         results.append(item)
 
@@ -5920,11 +6351,7 @@ def apply_configured_source_caps(items: list[dict], country: str = "", source_mo
             bucket = discovery_source_bucket(item)
             source = "dealer" if bucket == "web" else bucket
         source_limit = discovery_source_cap(source)
-        if (
-            source == "dealer"
-            and country_search_meta(country).get("code") == "dz"
-            and source_mode in ("all", "combined")
-        ):
+        if source == "dealer" and source_mode in ("all", "combined"):
             source_limit = max(source_limit, 70)
         counts[source] = counts.get(source, 0) + 1
         if counts[source] <= source_limit:
@@ -11087,7 +11514,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         limit=18,
     )
     if source_mode in ("all", "combined") and local_queries:
-        local_budget = 30 if country_meta.get("code") == "dz" else 12
+        local_budget = 40
         commercial_query_variants = list(dict.fromkeys([
             *local_queries[:local_budget],
             *ai_search_queries[:6],
@@ -11201,27 +11628,19 @@ def discover(params: dict[str, list[str]]) -> dict:
         elif include_support_sources:
             max_web_queries = 4
         else:
-            max_web_queries = (
-                40
-                if source_mode in ("all", "combined") and country_meta.get("code") == "dz"
-                else 24 if source_mode in ("all", "combined") else 16
-            )
+            max_web_queries = 40 if source_mode in ("all", "combined") and local_queries else 24 if source_mode in ("all", "combined") else 16
         search_variants = search_variants[:max_web_queries]
         per_query_limit = 5 if is_china_discovery and source_mode in ("all", "combined") else 4 if include_support_sources else 8 if source_mode in ("all", "combined") else 6
         web_results_by_query: list[list[dict]] = []
         if search_variants:
-            worker_limit = 6 if country_meta.get("code") == "dz" and source_mode in ("all", "combined") else 4
+            worker_limit = 6 if source_mode in ("all", "combined") and local_queries else 4
             executor = ThreadPoolExecutor(max_workers=min(worker_limit, len(search_variants)))
             futures = [
                 executor.submit(search_web, search_query, per_query_limit, None, country)
                 for search_query in search_variants
             ]
             try:
-                web_timeout = (
-                    max(30, DISCOVERY_SEARCH_TIMEOUT * 3)
-                    if country_meta.get("code") == "dz" and source_mode in ("all", "combined")
-                    else max(20, DISCOVERY_SEARCH_TIMEOUT * 2)
-                )
+                web_timeout = max(30, DISCOVERY_SEARCH_TIMEOUT * 3) if source_mode in ("all", "combined") and local_queries else max(20, DISCOVERY_SEARCH_TIMEOUT * 2)
                 for future in as_completed(futures, timeout=web_timeout):
                     try:
                         web_results_by_query.append(future.result(timeout=1))
@@ -11318,9 +11737,7 @@ def discover(params: dict[str, list[str]]) -> dict:
         "officialWebsiteProfiles": 0,
     }
     reverse_platforms = set(selected_platforms)
-    if source_mode in ("all", "social") and (
-        not is_china_discovery or source_mode == "social"
-    ):
+    if source_mode == "social":
         if "youtube" in enabled_sources:
             reverse_platforms.add("youtube")
     if reverse_platforms:
@@ -11461,7 +11878,7 @@ def discover(params: dict[str, list[str]]) -> dict:
                 item["account_type"],
             )
             raw_results.append(item)
-    if "youtube" in enabled_sources and source_mode in ("all", "youtube", "social") and (
+    if "youtube" in enabled_sources and source_mode in ("youtube", "social") and (
         not is_china_discovery or source_mode in ("social", "youtube")
     ):
         youtube_searches = youtube_discovery_searches(country, cities, account_scope)
@@ -11551,6 +11968,8 @@ def discover(params: dict[str, list[str]]) -> dict:
                 )
             )
         ]
+    if "dealer" in enabled_sources and source_mode in ("all", "combined"):
+        raw_results = enrich_local_directory_results(raw_results, country, limit=min(70, max(50, result_limit)))
     raw_results = apply_configured_source_caps(raw_results, country, source_mode)
     pipeline_stats = {
         "rawCollected": len(raw_results),
@@ -11574,7 +11993,7 @@ def discover(params: dict[str, list[str]]) -> dict:
     raw_results = filter_raw_results_for_country_and_duplicates(raw_results, country)
     target_min = discovery_target_min()
     target_max = discovery_target_max()
-    if country_meta.get("code") == "dz" and source_mode in ("all", "combined"):
+    if source_mode in ("all", "combined") and local_discovery_sources(country):
         target_max = min(result_limit, max(target_max, 50))
     raw_results = raw_results[: max(target_max * 2, 60)]
     pipeline_stats["candidatePool"] = len(raw_results)
@@ -11868,7 +12287,8 @@ def discover(params: dict[str, list[str]]) -> dict:
             and item.get("origin") != "OpenStreetMap"
             and not is_social_result
             and not (
-                source_type == "Algeria local automotive business directory"
+                item.get("local_directory_candidate")
+                and item.get("directory_detail_fetched")
                 and any(
                     (item.get("directory_public_contacts") or {}).get(key)
                     for key in ("email", "phone", "whatsapp")
@@ -12214,9 +12634,10 @@ def discover(params: dict[str, list[str]]) -> dict:
             and country_match
             and score >= int(quality_policy.get("minimumAutoImportScore") or 0)
             and (
-                source_type != "Algeria local automotive business directory"
+                not item.get("local_directory_candidate")
                 or (
                     item.get("directory_detail_fetched")
+                    and item.get("directory_profile_page")
                     and item.get("directory_sales_fit")
                     and (contactable or customer_website)
                 )
