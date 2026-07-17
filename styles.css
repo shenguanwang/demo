@@ -7981,8 +7981,8 @@ td {
 
 /* Global sales overview */
 .overview-topbar {
-  align-items: flex-end;
-  margin-bottom: 22px;
+  align-items: center;
+  margin-bottom: 14px;
 }
 
 .overview-topbar > div:first-child > p:last-child {
@@ -7991,22 +7991,53 @@ td {
 }
 
 .overview-head-actions {
+  display: grid;
+  justify-items: end;
+  gap: 8px;
+  min-width: 390px;
+}
+
+.overview-greeting {
   display: flex;
-  align-items: flex-end;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 10px;
+  width: 100%;
+}
+
+.overview-greeting strong {
+  color: #121c26;
+  font-size: 22px;
+  letter-spacing: 0;
+}
+
+.overview-greeting span {
+  color: #74808e;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.overview-head-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: 12px;
+  width: 100%;
 }
 
 .overview-range-label {
-  display: grid;
-  gap: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: #687587;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .overview-range-label select {
-  min-width: 142px;
-  height: 40px;
+  min-width: 126px;
+  height: 34px;
   margin: 0;
   padding: 0 34px 0 12px;
 }
@@ -8014,14 +8045,14 @@ td {
 .global-kpis {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 12px;
-  margin-bottom: 16px;
+  gap: 10px;
+  margin-bottom: 12px;
 }
 
 .global-kpis button {
   min-width: 0;
-  min-height: 116px;
-  padding: 17px 18px;
+  min-height: 88px;
+  padding: 13px 16px;
   border: 1px solid #e3e8ee;
   border-radius: 8px;
   background: #fff;
@@ -8044,28 +8075,29 @@ td {
 }
 
 .global-kpis span {
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
 }
 
 .global-kpis strong {
   display: block;
-  margin: 8px 0 5px;
+  margin: 6px 0 4px;
   overflow-wrap: anywhere;
-  font-size: 27px;
+  font-size: 24px;
   line-height: 1;
   letter-spacing: 0;
 }
 
 .global-kpis small {
-  font-size: 11px;
+  font-size: 10px;
   line-height: 1.4;
 }
 
 .sales-map-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.75fr) minmax(290px, .75fr);
-  min-height: 556px;
+  height: min(500px, calc(100vh - 365px));
+  min-height: 430px;
   border: 1px solid #e1e7ed;
   border-radius: 8px;
   background: #fff;
@@ -8073,7 +8105,10 @@ td {
 }
 
 .sales-map-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   min-width: 0;
+  min-height: 0;
   border-right: 1px solid #e1e7ed;
 }
 
@@ -8086,14 +8121,14 @@ td {
 }
 
 .sales-map-toolbar {
-  padding: 20px 22px 15px;
+  padding: 14px 18px 11px;
 }
 
 .sales-map-toolbar h2,
 .sales-alerts h2,
 .sales-country-panel h2 {
   margin: 3px 0 0;
-  font-size: 20px;
+  font-size: 18px;
   letter-spacing: 0;
 }
 
@@ -8124,7 +8159,8 @@ td {
 
 #salesWorldMap {
   width: 100%;
-  height: 446px;
+  height: 100%;
+  min-height: 0;
   border-top: 1px solid #edf0f3;
   border-bottom: 1px solid #edf0f3;
   background: #eef2f4;
@@ -8161,13 +8197,16 @@ td {
 }
 
 .sales-map-label {
-  border: 0 !important;
-  border-radius: 5px !important;
-  background: rgba(17, 28, 38, .9) !important;
-  color: #fff !important;
-  box-shadow: none !important;
-  font-size: 11px;
-  font-weight: 700;
+  padding: 4px 7px !important;
+  border: 1px solid rgba(172, 183, 193, .8) !important;
+  border-radius: 4px !important;
+  background: rgba(255, 255, 255, .94) !important;
+  color: #16232e !important;
+  box-shadow: 0 3px 10px rgba(25, 37, 48, .12) !important;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .sales-map-label::before {
@@ -8178,8 +8217,8 @@ td {
   display: flex;
   align-items: center;
   gap: 18px;
-  min-height: 47px;
-  padding: 10px 20px;
+  min-height: 38px;
+  padding: 7px 16px;
   color: #6d7887;
   font-size: 11px;
 }
@@ -8202,7 +8241,11 @@ td {
 
 .sales-country-panel {
   min-width: 0;
-  padding: 22px;
+  min-height: 0;
+  padding: 17px 18px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .country-panel-empty {
@@ -8226,7 +8269,7 @@ td {
 }
 
 .country-panel-head {
-  padding-bottom: 16px;
+  padding-bottom: 11px;
   border-bottom: 1px solid #e8edf1;
 }
 
@@ -8237,7 +8280,7 @@ td {
 }
 
 .country-panel-head p {
-  margin: 7px 0 0;
+  margin: 5px 0 0;
   color: #718090;
   font-size: 12px;
 }
@@ -8246,12 +8289,12 @@ td {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 1px;
-  margin: 18px 0;
+  margin: 12px 0;
   background: #e8edf1;
 }
 
 .country-stat-grid div {
-  padding: 12px;
+  padding: 9px 11px;
   background: #fff;
 }
 
@@ -8266,18 +8309,18 @@ td {
 }
 
 .country-stat-grid strong {
-  margin-top: 4px;
-  font-size: 19px;
+  margin-top: 3px;
+  font-size: 17px;
 }
 
 .country-detail-block {
-  padding: 14px 0;
+  padding: 10px 0;
   border-top: 1px solid #e8edf1;
 }
 
 .country-detail-block h3 {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0 0 7px;
+  font-size: 12px;
 }
 
 .country-source-row {
@@ -8285,7 +8328,7 @@ td {
   grid-template-columns: minmax(80px, 1fr) 2fr auto;
   align-items: center;
   gap: 8px;
-  margin: 8px 0;
+  margin: 6px 0;
   color: #596675;
   font-size: 11px;
 }
@@ -8305,7 +8348,7 @@ td {
 
 .country-models span,
 .country-owners span {
-  padding: 5px 8px;
+  padding: 4px 7px;
   border: 1px solid #dfe5ea;
   border-radius: 5px;
   background: #f7f9fa;
@@ -8317,11 +8360,11 @@ td {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  margin-top: 16px;
+  margin-top: 10px;
 }
 
 .country-panel-actions button {
-  min-height: 39px;
+  min-height: 34px;
   border: 1px solid #dce3e9;
   border-radius: 6px;
   background: #fff;
@@ -8337,8 +8380,8 @@ td {
 }
 
 .sales-alerts {
-  margin-top: 16px;
-  padding: 20px 22px;
+  margin-top: 12px;
+  padding: 11px 16px;
   border: 1px solid #e1e7ed;
   border-radius: 8px;
   background: #fff;
@@ -8350,19 +8393,20 @@ td {
   color: #8f6b21;
   font-weight: 700;
   cursor: pointer;
+  font-size: 11px;
 }
 
 .sales-alert-list {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
-  margin-top: 17px;
+  margin-top: 8px;
   border-top: 1px solid #e9edf1;
 }
 
 .sales-alert-item {
   min-width: 0;
-  padding: 16px 18px 6px 0;
+  padding: 9px 14px 2px 0;
 }
 
 .sales-alert-item + .sales-alert-item {
@@ -8377,14 +8421,18 @@ td {
 
 .sales-alert-item strong {
   overflow-wrap: anywhere;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .sales-alert-item span {
-  margin-top: 5px;
+  display: -webkit-box;
+  margin-top: 3px;
+  overflow: hidden;
   color: #74808e;
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: 10px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }
 
 .sales-alert-item b {
@@ -8403,6 +8451,12 @@ td {
 }
 
 :root[data-theme="dark"] #salesWorldMap { background: #11151b; }
+:root[data-theme="dark"] .overview-greeting strong { color: #f4f6f8; }
+:root[data-theme="dark"] .sales-map-label {
+  border-color: #46505c !important;
+  background: rgba(23, 26, 32, .94) !important;
+  color: #f4f6f8 !important;
+}
 :root[data-theme="dark"] .map-metric-tabs,
 :root[data-theme="dark"] .country-models span,
 :root[data-theme="dark"] .country-owners span {
@@ -8427,16 +8481,19 @@ td {
 
   .global-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .global-kpis button { min-height: 104px; }
-  .sales-map-layout { grid-template-columns: 1fr; }
+  .sales-map-layout { grid-template-columns: 1fr; height: auto; min-height: 0; }
   .sales-map-panel { border-right: 0; border-bottom: 1px solid #e1e7ed; }
   #salesWorldMap { height: 360px; }
-  .sales-country-panel { min-height: auto; }
+  .sales-country-panel { max-height: none; min-height: auto; overflow: visible; }
   .country-panel-empty { min-height: 240px; }
   .sales-alert-list { grid-template-columns: 1fr; }
   .sales-alert-item + .sales-alert-item { padding-left: 0; border-top: 1px solid #e9edf1; border-left: 0; }
 }
 
 @media (max-width: 520px) {
+  .overview-head-actions { min-width: 0; width: 100%; justify-items: start; }
+  .overview-greeting,
+  .overview-head-controls { justify-content: flex-start; flex-wrap: wrap; }
   .global-kpis { grid-template-columns: 1fr 1fr; gap: 8px; }
   .global-kpis button { padding: 14px; }
   .global-kpis strong { font-size: 23px; }

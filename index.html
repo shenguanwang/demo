@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260717-global-sales-map">
+  <link rel="stylesheet" href="./styles.css?v=20260717-global-sales-map-v2">
 </head>
 <body>
   <aside class="sidebar">
@@ -86,14 +86,20 @@
           <p>查看团队在各国家的线索、报价、成交和待跟进情况。</p>
         </div>
         <div class="overview-head-actions">
-          <label class="overview-range-label">统计范围
-            <select id="overviewRange">
-              <option value="all">全部时间</option>
-              <option value="30">最近 30 天</option>
-              <option value="7">最近 7 天</option>
-            </select>
-          </label>
-          <div class="topbar-status" id="cloudSyncStatus"><i></i><span>正在读取云端数据</span></div>
+          <div class="overview-greeting">
+            <strong id="timeGreeting">你好</strong>
+            <span id="beijingDate">正在读取北京时间</span>
+          </div>
+          <div class="overview-head-controls">
+            <label class="overview-range-label"><span>统计范围</span>
+              <select id="overviewRange">
+                <option value="all">全部时间</option>
+                <option value="30">最近 30 天</option>
+                <option value="7">最近 7 天</option>
+              </select>
+            </label>
+            <div class="topbar-status" id="cloudSyncStatus"><i></i><span>正在读取云端数据</span></div>
+          </div>
         </div>
       </header>
 
@@ -1255,6 +1261,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260717-global-sales-map"></script>
+  <script src="./script.js?v=20260717-global-sales-map-v2"></script>
 </body>
 </html>

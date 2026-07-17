@@ -5278,8 +5278,25 @@ function renderSalesMap(aggregates) {
       fillColor: salesMarkerColor(item),
       fillOpacity: .88
     }).addTo(salesMap.salesLayers);
+    const labelLayout = {
+      UAE: { direction: "right", offset: [20, 17] },
+      Qatar: { direction: "left", offset: [-18, -17] },
+      Kuwait: { direction: "top", offset: [0, -22] },
+      Bahrain: { direction: "right", offset: [32, -12] },
+      Oman: { direction: "bottom", offset: [20, 24] },
+      Jordan: { direction: "left", offset: [-16, -10] },
+      "Saudi Arabia": { direction: "right", offset: [25, 55] },
+      Uzbekistan: { direction: "right", offset: [7, 0] },
+      Azerbaijan: { direction: "left", offset: [-7, 0] }
+    }[country] || {
+      direction: index % 2 ? "right" : "top",
+      offset: index % 2 ? [7, 0] : [0, -7]
+    };
     marker.bindTooltip(`${salesCountryLabel(country)} · ${value}`, {
-      permanent: index < 7, direction: "top", className: "sales-map-label", offset: [0, -7]
+      permanent: true,
+      direction: labelLayout.direction,
+      className: "sales-map-label",
+      offset: labelLayout.offset
     });
     marker.on("click", () => {
       selectedSalesCountry = country;
