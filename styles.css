@@ -2121,7 +2121,57 @@ textarea {
 
 .schedule-list {
   display: grid;
+  gap: 18px;
+}
+
+.schedule-sales-group {
+  display: grid;
   gap: 10px;
+}
+
+.schedule-sales-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.schedule-sales-group > header strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.schedule-sales-group > header span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.schedule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#scheduleList .schedule-item {
+  grid-template-columns: 1fr;
+  align-content: space-between;
+  align-items: stretch;
+  min-height: 164px;
+}
+
+#scheduleList .schedule-item small {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.55;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+#scheduleList .schedule-actions {
+  justify-content: flex-end;
 }
 
 .schedule-item {
@@ -2209,46 +2259,15 @@ textarea {
 
 .scheduled-run-list {
   display: grid;
-  gap: 18px;
-}
-
-.scheduled-run-sales-group {
-  display: grid;
-  gap: 10px;
-}
-
-.scheduled-run-sales-group > header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 8px;
-  border-bottom: 1px solid var(--line);
-}
-
-.scheduled-run-sales-group > header strong {
-  color: var(--ink);
-  font-size: 13px;
-}
-
-.scheduled-run-sales-group > header span {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.scheduled-run-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 .scheduled-run-item {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
-  align-content: start;
-  min-height: 132px;
+  grid-template-columns: 105px minmax(0, 1fr) minmax(130px, 180px);
+  gap: 18px;
+  align-items: center;
+  min-height: 74px;
   padding: 12px 14px;
   border: 1px solid var(--line);
   border-left: 3px solid #98a2ad;
@@ -2271,41 +2290,33 @@ textarea {
 }
 
 .scheduled-run-state,
-.scheduled-run-main {
+.scheduled-run-main,
+.scheduled-run-owner {
   display: grid;
   gap: 4px;
   min-width: 0;
 }
 
-.scheduled-run-state {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .scheduled-run-state span,
-.scheduled-run-main strong {
+.scheduled-run-main strong,
+.scheduled-run-owner strong {
   color: var(--ink);
   font-size: 12px;
 }
 
 .scheduled-run-state small,
-.scheduled-run-main small {
+.scheduled-run-owner span {
   color: var(--muted);
   font-size: 10px;
 }
 
 .scheduled-run-main p {
-  display: -webkit-box;
   margin: 0;
   overflow: hidden;
   color: #5b6672;
   font-size: 11px;
-  line-height: 1.55;
-  white-space: normal;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .scheduled-run-pager {
@@ -2325,7 +2336,7 @@ textarea {
 }
 
 @media (max-width: 1100px) {
-  .scheduled-run-grid {
+  .schedule-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -2346,12 +2357,22 @@ textarea {
     text-align: left;
   }
 
-  .scheduled-run-grid {
+  .schedule-grid {
     grid-template-columns: 1fr;
   }
 
   .scheduled-run-item {
-    min-height: 0;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+
+  .scheduled-run-main {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .scheduled-run-owner {
+    text-align: right;
   }
 }
 

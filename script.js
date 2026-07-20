@@ -618,7 +618,7 @@ const autoImportingDiscoveryJobs = new Set();
 const hiddenDiscoveryJobIds = new Set(JSON.parse(localStorage.getItem(`${STORAGE_KEY}:hidden-discovery-jobs`) || "[]"));
 let discoverySchedules = [];
 let discoverySchedulePage = 1;
-const DISCOVERY_SCHEDULES_PAGE_SIZE = 4;
+const DISCOVERY_SCHEDULES_PAGE_SIZE = 9;
 let scheduledDiscoveryJobs = [];
 let scheduledRunPage = 1;
 const SCHEDULED_RUNS_PAGE_SIZE = 12;
@@ -6363,23 +6363,39 @@ function renderDiscoverySchedules() {
   const nextPage = $("#scheduleNextPage");
   if (prevPage) prevPage.disabled = discoverySchedulePage <= 1;
   if (nextPage) nextPage.disabled = discoverySchedulePage >= pageCount;
-  if (box) box.innerHTML = visibleSchedules.length ? visibleSchedules.map((schedule) => `
-    <article class="schedule-item">
-      <div>
-        <div class="schedule-title">
-          <strong>${escapeHtml(schedule.payload?.planName || `${schedule.country || "未指定市场"} · ${discoverySourceLabel(schedule.sourceMode)}`)}</strong>
-          <span class="${schedule.enabled ? "enabled" : "paused"}">${schedule.enabled ? "已启用" : "已暂停"}</span>
-        </div>
-        <p>接收销售：${escapeHtml(schedule.targetUsername || "未指定")} · ${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleTimingLabel(schedule))}</p>
-        <small>下次执行：${escapeHtml(formatJobTime(schedule.nextRunAt))}${schedule.lastRunAt ? ` · 上次执行：${escapeHtml(formatJobTime(schedule.lastRunAt))}` : ""}${schedule.lastJobStatus ? ` · 最近状态：${escapeHtml(discoveryJobStateLabels()[schedule.lastJobStatus] || schedule.lastJobStatus)}${schedule.lastImportedCount !== undefined ? `，导入 ${Number(schedule.lastImportedCount || 0)} 条` : ""}` : ""}</small>
+  const groupedSchedules = new Map();
+  visibleSchedules.forEach((schedule) => {
+    const username = schedule.targetUsername || "未指定销售";
+    if (!groupedSchedules.has(username)) groupedSchedules.set(username, []);
+    groupedSchedules.get(username).push(schedule);
+  });
+  if (box) box.innerHTML = visibleSchedules.length ? Array.from(groupedSchedules.entries()).map(([username, schedules]) => `
+    <section class="schedule-sales-group">
+      <header>
+        <strong>${escapeHtml(username)}</strong>
+        <span>${schedules.length} 个计划</span>
+      </header>
+      <div class="schedule-grid">
+        ${schedules.map((schedule) => `
+          <article class="schedule-item">
+            <div>
+              <div class="schedule-title">
+                <strong>${escapeHtml(schedule.country || "未指定市场")}</strong>
+                <span class="${schedule.enabled ? "enabled" : "paused"}">${schedule.enabled ? "已启用" : "已暂停"}</span>
+              </div>
+              <p>${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleTimingLabel(schedule))}</p>
+              <small>下次执行：${escapeHtml(formatJobTime(schedule.nextRunAt))}${schedule.lastRunAt ? ` · 上次执行：${escapeHtml(formatJobTime(schedule.lastRunAt))}` : ""}${schedule.lastJobStatus ? ` · 最近状态：${escapeHtml(discoveryJobStateLabels()[schedule.lastJobStatus] || schedule.lastJobStatus)}${schedule.lastImportedCount !== undefined ? `，导入 ${Number(schedule.lastImportedCount || 0)} 条` : ""}` : ""}</small>
+            </div>
+            <div class="schedule-actions">
+              <button class="ghost compact" type="button" data-toggle-schedule="${escapeHtml(schedule.id)}">
+                ${schedule.enabled ? "暂停" : "启用"}
+              </button>
+              <button class="danger-button compact" type="button" data-delete-schedule="${escapeHtml(schedule.id)}">删除</button>
+            </div>
+          </article>
+        `).join("")}
       </div>
-      <div class="schedule-actions">
-        <button class="ghost compact" type="button" data-toggle-schedule="${escapeHtml(schedule.id)}">
-          ${schedule.enabled ? "暂停" : "启用"}
-        </button>
-        <button class="danger-button compact" type="button" data-delete-schedule="${escapeHtml(schedule.id)}">删除</button>
-      </div>
-    </article>
+    </section>
   `).join("") : `<p class="empty">暂无后台抓取计划。请在上方设置国家、来源和频率后保存。</p>`;
   renderPersonalDiscoverySchedules();
   renderScheduledDiscoveryRuns();
@@ -6428,44 +6444,32 @@ function renderScheduledDiscoveryRuns() {
   const next = $("#scheduledRunNext");
   if (prev) prev.disabled = scheduledRunPage <= 1;
   if (next) next.disabled = scheduledRunPage >= pageCount;
-  const grouped = new Map();
-  visible.forEach((job) => {
+  box.innerHTML = visible.length ? visible.map((job) => {
     const username = job.targetUsername || job.ownerUsername || "未指定销售";
-    if (!grouped.has(username)) grouped.set(username, []);
-    grouped.get(username).push(job);
-  });
-  box.innerHTML = visible.length ? Array.from(grouped.entries()).map(([username, jobs]) => `
-    <section class="scheduled-run-sales-group">
-      <header>
-        <strong>${escapeHtml(username)}</strong>
-        <span>${jobs.length} 条任务</span>
-      </header>
-      <div class="scheduled-run-grid">
-        ${jobs.map((job) => {
-          const importedCount = Number(job.result?.importedCount || 0);
-          const rawCount = discoveryJobRawCount(job);
-          const resultText = ["queued", "running"].includes(job.status)
-            ? `${Number(job.progress || 0)}% · ${job.message || "后台执行中"}`
-            : job.status === "failed"
-              ? job.error || job.message || "执行失败"
-              : `发现 ${rawCount} 条 · 导入 ${importedCount} 条`;
-          return `
-            <article class="scheduled-run-item ${escapeHtml(job.status || "")}">
-              <div class="scheduled-run-state">
-                <span>${escapeHtml(stateLabels[job.status] || job.status || "未知")}</span>
-                <small>${escapeHtml(formatJobTime(job.updatedAt || job.createdAt))}</small>
-              </div>
-              <div class="scheduled-run-main">
-                <strong>${escapeHtml(job.country || "未指定国家")}</strong>
-                <small>${escapeHtml(discoverySourceLabel(job.sourceMode))}</small>
-                <p title="${escapeHtml(resultText)}">${escapeHtml(resultText)}</p>
-              </div>
-            </article>
-          `;
-        }).join("")}
-      </div>
-    </section>
-  `).join("") : `<p class="empty">当前筛选下没有 2.0 执行记录。</p>`;
+    const importedCount = Number(job.result?.importedCount || 0);
+    const rawCount = discoveryJobRawCount(job);
+    const resultText = ["queued", "running"].includes(job.status)
+      ? `${Number(job.progress || 0)}% · ${job.message || "后台执行中"}`
+      : job.status === "failed"
+        ? job.error || job.message || "执行失败"
+        : `发现 ${rawCount} 条 · 导入 ${importedCount} 条`;
+    return `
+      <article class="scheduled-run-item ${escapeHtml(job.status || "")}">
+        <div class="scheduled-run-state">
+          <span>${escapeHtml(stateLabels[job.status] || job.status || "未知")}</span>
+          <small>${escapeHtml(formatJobTime(job.updatedAt || job.createdAt))}</small>
+        </div>
+        <div class="scheduled-run-main">
+          <strong>${escapeHtml(job.country || "未指定国家")} · ${escapeHtml(discoverySourceLabel(job.sourceMode))}</strong>
+          <p>${escapeHtml(resultText)}</p>
+        </div>
+        <div class="scheduled-run-owner">
+          <span>接收销售</span>
+          <strong>${escapeHtml(username)}</strong>
+        </div>
+      </article>
+    `;
+  }).join("") : `<p class="empty">当前筛选下没有 2.0 执行记录。</p>`;
 }
 
 function renderPersonalDiscoverySchedules() {
