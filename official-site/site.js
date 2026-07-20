@@ -1550,7 +1550,7 @@ function initializeShowroomMotion() {
       <span class="showroom-beam beam-b"></span>
       <span class="showroom-horizon"></span>
     `;
-    hero.prepend(lightField);
+    hero.append(lightField);
 
     animate(".showroom-light-field .beam-a", {
       x: ["-10%", "13%"],
