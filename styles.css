@@ -7981,6 +7981,8 @@ td {
 
 /* Global sales overview */
 .overview-topbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   margin-bottom: 14px;
 }
@@ -7992,6 +7994,7 @@ td {
 
 .overview-head-actions {
   display: grid;
+  justify-self: end;
   justify-items: end;
   gap: 8px;
   min-width: 390px;
@@ -8000,9 +8003,10 @@ td {
 .overview-greeting {
   display: flex;
   align-items: baseline;
-  justify-content: flex-end;
+  justify-content: center;
   gap: 10px;
-  width: 100%;
+  min-width: 0;
+  text-align: center;
 }
 
 .overview-greeting strong {
@@ -8645,7 +8649,7 @@ textarea:focus-visible,
 
   .mobile-app-bar {
     position: fixed;
-    z-index: 45;
+    z-index: 1100;
     top: 0;
     right: 0;
     left: 0;
@@ -8710,7 +8714,7 @@ textarea:focus-visible,
 
   .mobile-nav-backdrop {
     position: fixed;
-    z-index: 50;
+    z-index: 1200;
     inset: 0;
     display: block;
     width: 100%;
@@ -8729,7 +8733,7 @@ textarea:focus-visible,
 
   .sidebar {
     position: fixed;
-    z-index: 60;
+    z-index: 1300;
     top: 0;
     bottom: 0;
     left: 0;
@@ -8839,7 +8843,7 @@ textarea:focus-visible,
   }
 
   .app-settings {
-    z-index: 47;
+    z-index: 1110;
     top: calc(8px + env(safe-area-inset-top));
     right: 8px;
   }
@@ -8863,6 +8867,22 @@ textarea:focus-visible,
   .review-toolbar,
   .crm-toolbar {
     gap: 12px;
+  }
+
+  .overview-topbar {
+    display: flex;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .overview-greeting {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    text-align: left;
+  }
+
+  body.mobile-nav-open #salesWorldMap {
+    pointer-events: none;
   }
 
   .topbar h1,

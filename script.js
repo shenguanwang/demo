@@ -5606,6 +5606,9 @@ function setMobileNavigation(open) {
     toggle.setAttribute("aria-label", isOpen ? "关闭主菜单" : "打开主菜单");
   }
   if (backdrop) backdrop.hidden = !isOpen;
+  if (!isOpen) {
+    window.requestAnimationFrame(() => salesMap?.invalidateSize());
+  }
 }
 
 function updateMobileSectionTitle(id) {
@@ -8734,7 +8737,8 @@ function renderBeijingGreeting() {
   else if (hour >= 13 && hour < 18) greeting = "下午好";
   const greetingBox = $("#timeGreeting");
   const dateBox = $("#beijingDate");
-  if (greetingBox) greetingBox.textContent = greeting;
+  const accountName = String(currentSession?.username || "").trim();
+  if (greetingBox) greetingBox.textContent = accountName ? `${accountName}，${greeting}` : greeting;
   if (dateBox) {
     dateBox.textContent =
       `${parts.year}年${parts.month}月${parts.day}日 · ${weekday} · ` +

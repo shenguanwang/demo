@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-mobile-workbench">
+  <link rel="stylesheet" href="./styles.css?v=20260720-mobile-greeting">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -99,11 +99,11 @@
           <h1>全球销售总览</h1>
           <p>查看团队在各国家的线索、报价、成交和待跟进情况。</p>
         </div>
+        <div class="overview-greeting">
+          <strong id="timeGreeting">你好</strong>
+          <span id="beijingDate">正在读取北京时间</span>
+        </div>
         <div class="overview-head-actions">
-          <div class="overview-greeting">
-            <strong id="timeGreeting">你好</strong>
-            <span id="beijingDate">正在读取北京时间</span>
-          </div>
           <div class="overview-head-controls">
             <label class="overview-range-label"><span>统计范围</span>
               <select id="overviewRange">
@@ -1290,6 +1290,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-mobile-workbench"></script>
+  <script src="./script.js?v=20260720-mobile-greeting"></script>
 </body>
 </html>
