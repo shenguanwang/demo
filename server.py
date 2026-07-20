@@ -3839,6 +3839,37 @@ def list_all_discovery_jobs(limit: int = 200) -> list[dict]:
     return jobs
 
 
+def list_scheduled_delivery_jobs(limit: int = 500) -> list[dict]:
+    initialize_state_store()
+    limit = max(1, min(1000, int(limit or 500)))
+    columns = (
+        "SELECT job_id, payload, status, stage, progress, message, result, error, "
+        "imported, created_at, updated_at, owner_username FROM discovery_jobs "
+    )
+    if DATABASE_URL:
+        with postgres_connection() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    columns
+                    + "WHERE payload->>'distributionType' = %s ORDER BY updated_at DESC LIMIT %s",
+                    ("scheduled_sales_delivery", limit),
+                )
+                rows = cursor.fetchall()
+    else:
+        with sqlite3.connect(SQLITE_STATE_FILE) as connection:
+            rows = connection.execute(
+                columns
+                + "WHERE json_extract(payload, '$.distributionType') = ? ORDER BY updated_at DESC LIMIT ?",
+                ("scheduled_sales_delivery", limit),
+            ).fetchall()
+    jobs = []
+    for row in rows:
+        job = discovery_job_public(row_to_discovery_job(row))
+        job["ownerUsername"] = row[11] if len(row) > 11 else ""
+        jobs.append(job)
+    return jobs
+
+
 def distribution_lead_keys(lead: dict) -> set[str]:
     if not isinstance(lead, dict):
         return set()
@@ -14338,6 +14369,14 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             try:
                 self.send_json(200, {"ok": True, "jobs": list_discovery_jobs(self.current_user()["username"])})
+            except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
+                self.send_json(500, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/discover/scheduled-jobs":
+            if not self.require_auth(api=True) or not self.require_admin():
+                return
+            try:
+                self.send_json(200, {"ok": True, "jobs": list_scheduled_delivery_jobs(500)})
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return

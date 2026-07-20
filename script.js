@@ -619,6 +619,10 @@ const hiddenDiscoveryJobIds = new Set(JSON.parse(localStorage.getItem(`${STORAGE
 let discoverySchedules = [];
 let discoverySchedulePage = 1;
 const DISCOVERY_SCHEDULES_PAGE_SIZE = 4;
+let scheduledDiscoveryJobs = [];
+let scheduledRunPage = 1;
+const SCHEDULED_RUNS_PAGE_SIZE = 12;
+let scheduledRunPollTick = 0;
 let adminUsers = [];
 let finderHistoryPage = 1;
 const FINDER_HISTORY_PAGE_SIZE = 24;
@@ -6059,6 +6063,18 @@ function isScheduledDiscoveryJob(job) {
     || discoverySchedules.some((schedule) => schedule.lastJobId && schedule.lastJobId === job.id);
 }
 
+function isAllSalesSchedule(schedule) {
+  return schedule?.payload?.scheduleMode === "all_sales";
+}
+
+function isFinderV2Job(job) {
+  if (job?.distributionType === "scheduled_sales_delivery") return true;
+  return discoverySchedules.some((schedule) =>
+    isAllSalesSchedule(schedule)
+    && String(schedule.id || "") === String(job?.scheduleId || "")
+  );
+}
+
 function discoveryJobRawCount(job) {
   return Number(job?.result?.rawCount ?? job?.result?.count ?? job?.result?.leads?.length ?? 0);
 }
@@ -6127,7 +6143,7 @@ function renderDiscoveryHistory() {
   const countLabel = $("#finderHistoryCount");
   const stateLabels = discoveryJobStateLabels();
   const scheduleCards = discoverySchedules
-    .filter((schedule) => !schedule.lastJobId)
+    .filter((schedule) => !isAllSalesSchedule(schedule) && !schedule.lastJobId)
     .map((schedule) => ({
       kind: "定时抓取",
       id: "",
@@ -6140,7 +6156,9 @@ function renderDiscoveryHistory() {
         ? `下次 ${formatJobTime(schedule.nextRunAt)}`
         : "计划暂停"
     }));
-  const jobCards = discoveryJobs.map((job) => ({
+  const jobCards = discoveryJobs
+    .filter((job) => currentSession?.role !== "admin" || !isFinderV2Job(job))
+    .map((job) => ({
     kind: job.distributionType === "admin_search_copy"
       ? "管理员搜索导入"
       : job.distributionType === "scheduled_sales_delivery"
@@ -6364,7 +6382,78 @@ function renderDiscoverySchedules() {
     </article>
   `).join("") : `<p class="empty">暂无后台抓取计划。请在上方设置国家、来源和频率后保存。</p>`;
   renderPersonalDiscoverySchedules();
+  renderScheduledDiscoveryRuns();
   renderDiscoveryHistory();
+}
+
+function scheduledRunMatchesStatus(job, filter) {
+  if (filter === "all") return true;
+  if (filter === "running") return ["queued", "running"].includes(job.status);
+  return job.status === filter;
+}
+
+function renderScheduledDiscoveryRuns() {
+  const box = $("#scheduledRunList");
+  if (!box) return;
+  const statusFilter = $("#scheduledRunStatusFilter")?.value || "all";
+  const salesFilter = $("#scheduledRunSalesFilter");
+  const currentSales = salesFilter?.value || "all";
+  const salesNames = Array.from(new Set(
+    scheduledDiscoveryJobs
+      .map((job) => job.targetUsername || job.ownerUsername)
+      .filter(Boolean)
+  )).sort((a, b) => a.localeCompare(b, "zh-CN"));
+  if (salesFilter) {
+    salesFilter.innerHTML = `<option value="all">全部销售</option>${salesNames
+      .map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+      .join("")}`;
+    salesFilter.value = salesNames.includes(currentSales) ? currentSales : "all";
+  }
+  const selectedSales = salesFilter?.value || "all";
+  const filtered = scheduledDiscoveryJobs.filter((job) => {
+    const username = job.targetUsername || job.ownerUsername || "";
+    return scheduledRunMatchesStatus(job, statusFilter)
+      && (selectedSales === "all" || username === selectedSales);
+  });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / SCHEDULED_RUNS_PAGE_SIZE));
+  scheduledRunPage = Math.max(1, Math.min(scheduledRunPage, pageCount));
+  const start = (scheduledRunPage - 1) * SCHEDULED_RUNS_PAGE_SIZE;
+  const visible = filtered.slice(start, start + SCHEDULED_RUNS_PAGE_SIZE);
+  const stateLabels = discoveryJobStateLabels();
+  const count = $("#scheduledRunCount");
+  if (count) count.textContent = `${filtered.length} 条`;
+  const pageLabel = $("#scheduledRunPageLabel");
+  if (pageLabel) pageLabel.textContent = `${scheduledRunPage} / ${pageCount}`;
+  const prev = $("#scheduledRunPrev");
+  const next = $("#scheduledRunNext");
+  if (prev) prev.disabled = scheduledRunPage <= 1;
+  if (next) next.disabled = scheduledRunPage >= pageCount;
+  box.innerHTML = visible.length ? visible.map((job) => {
+    const username = job.targetUsername || job.ownerUsername || "未指定销售";
+    const importedCount = Number(job.result?.importedCount || 0);
+    const rawCount = discoveryJobRawCount(job);
+    const resultText = ["queued", "running"].includes(job.status)
+      ? `${Number(job.progress || 0)}% · ${job.message || "后台执行中"}`
+      : job.status === "failed"
+        ? job.error || job.message || "执行失败"
+        : `发现 ${rawCount} 条 · 导入 ${importedCount} 条`;
+    return `
+      <article class="scheduled-run-item ${escapeHtml(job.status || "")}">
+        <div class="scheduled-run-state">
+          <span>${escapeHtml(stateLabels[job.status] || job.status || "未知")}</span>
+          <small>${escapeHtml(formatJobTime(job.updatedAt || job.createdAt))}</small>
+        </div>
+        <div class="scheduled-run-main">
+          <strong>${escapeHtml(job.country || "未指定国家")} · ${escapeHtml(discoverySourceLabel(job.sourceMode))}</strong>
+          <p>${escapeHtml(resultText)}</p>
+        </div>
+        <div class="scheduled-run-owner">
+          <span>接收销售</span>
+          <strong>${escapeHtml(username)}</strong>
+        </div>
+      </article>
+    `;
+  }).join("") : `<p class="empty">当前筛选下没有 2.0 执行记录。</p>`;
 }
 
 function renderPersonalDiscoverySchedules() {
@@ -6442,6 +6531,19 @@ async function loadDiscoverySchedules() {
   return discoverySchedules;
 }
 
+async function loadScheduledDiscoveryJobs() {
+  if (currentSession?.role !== "admin") {
+    scheduledDiscoveryJobs = [];
+    return scheduledDiscoveryJobs;
+  }
+  const response = await apiFetch("/api/discover/scheduled-jobs", { cache: "no-store" });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  scheduledDiscoveryJobs = Array.isArray(result.jobs) ? result.jobs : [];
+  renderScheduledDiscoveryRuns();
+  return scheduledDiscoveryJobs;
+}
+
 async function saveAllSalesDiscoverySchedule(event) {
   event.preventDefault();
   const form = event.currentTarget;
@@ -6467,6 +6569,7 @@ async function saveAllSalesDiscoverySchedule(event) {
     if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
     discoverySchedulePage = 1;
     await loadDiscoverySchedules();
+    await loadScheduledDiscoveryJobs().catch(() => undefined);
     await loadDiscoveryJobs().catch(() => undefined);
     renderScheduleTargetOptions();
     const status = $("#scheduleStatus");
@@ -6991,7 +7094,11 @@ function bindForms() {
   });
 
   $("#finderHistoryNext")?.addEventListener("click", () => {
-    const historyCount = discoveryJobs.length + discoverySchedules.filter((schedule) => !schedule.lastJobId).length;
+    const historyCount = discoveryJobs.filter((job) =>
+      currentSession?.role !== "admin" || !isFinderV2Job(job)
+    ).length + discoverySchedules.filter((schedule) =>
+      !isAllSalesSchedule(schedule) && !schedule.lastJobId
+    ).length;
     const pageCount = Math.max(1, Math.ceil(historyCount / FINDER_HISTORY_PAGE_SIZE));
     finderHistoryPage = Math.min(pageCount, finderHistoryPage + 1);
     renderDiscoveryHistory();
@@ -7018,6 +7125,26 @@ function bindForms() {
     const pageCount = Math.max(1, Math.ceil(allSalesCount / DISCOVERY_SCHEDULES_PAGE_SIZE));
     discoverySchedulePage = Math.min(pageCount, discoverySchedulePage + 1);
     renderDiscoverySchedules();
+  });
+
+  $("#scheduledRunPrev")?.addEventListener("click", () => {
+    scheduledRunPage = Math.max(1, scheduledRunPage - 1);
+    renderScheduledDiscoveryRuns();
+  });
+
+  $("#scheduledRunNext")?.addEventListener("click", () => {
+    scheduledRunPage += 1;
+    renderScheduledDiscoveryRuns();
+  });
+
+  $("#scheduledRunStatusFilter")?.addEventListener("change", () => {
+    scheduledRunPage = 1;
+    renderScheduledDiscoveryRuns();
+  });
+
+  $("#scheduledRunSalesFilter")?.addEventListener("change", () => {
+    scheduledRunPage = 1;
+    renderScheduledDiscoveryRuns();
   });
 
   $("#refreshDiscoveryJobs")?.addEventListener("click", async (event) => {
@@ -7456,7 +7583,11 @@ function bindForms() {
     const button = event.currentTarget;
     const finishButtonLoading = startButtonLoading(button, "刷新中");
     try {
-      await Promise.all([loadDiscoverySchedules(), loadDiscoveryJobs({ autoImport: false })]);
+      await Promise.all([
+        loadDiscoverySchedules(),
+        loadScheduledDiscoveryJobs(),
+        loadDiscoveryJobs({ autoImport: false })
+      ]);
       finishButtonLoading("刷新成功", { autoResetMs: 1600 });
       const status = $("#scheduleStatus");
       if (status) status.textContent = "刷新成功，计划和任务状态已更新";
@@ -9348,9 +9479,20 @@ async function init() {
       $("#scheduleList").innerHTML = `<p class="empty">定时计划读取失败：${escapeHtml(error.message)}</p>`;
     }
   });
+  if (currentSession?.role === "admin") {
+    loadScheduledDiscoveryJobs().catch((error) => {
+      if ($("#scheduledRunList")) {
+        $("#scheduledRunList").innerHTML = `<p class="empty">2.0 执行记录读取失败：${escapeHtml(error.message)}</p>`;
+      }
+    });
+  }
   discoveryJobsTimer = window.setInterval(() => {
     loadDiscoveryJobs().catch(() => undefined);
     loadDiscoverySchedules().catch(() => undefined);
+    scheduledRunPollTick += 1;
+    if (currentSession?.role === "admin" && scheduledRunPollTick % 3 === 0) {
+      loadScheduledDiscoveryJobs().catch(() => undefined);
+    }
   }, 5_000);
   window.addEventListener("online", () => {
     hydrateCloudState(true).catch(() => undefined);

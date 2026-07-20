@@ -2180,6 +2180,142 @@ textarea {
   align-items: center;
 }
 
+.finder-v2-run-toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.finder-v2-run-toolbar label {
+  min-width: 130px;
+  font-size: 11px;
+}
+
+.finder-v2-run-toolbar select {
+  min-height: 36px;
+  padding: 6px 30px 6px 10px;
+}
+
+.finder-v2-run-toolbar > span {
+  min-width: 48px;
+  padding-bottom: 9px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.scheduled-run-list {
+  display: grid;
+  gap: 8px;
+}
+
+.scheduled-run-item {
+  display: grid;
+  grid-template-columns: 105px minmax(0, 1fr) minmax(130px, 180px);
+  gap: 18px;
+  align-items: center;
+  min-height: 74px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid #98a2ad;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.scheduled-run-item.running,
+.scheduled-run-item.queued {
+  border-left-color: #b98220;
+}
+
+.scheduled-run-item.completed {
+  border-left-color: #198754;
+}
+
+.scheduled-run-item.failed,
+.scheduled-run-item.canceled {
+  border-left-color: #c4493d;
+}
+
+.scheduled-run-state,
+.scheduled-run-main,
+.scheduled-run-owner {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.scheduled-run-state span,
+.scheduled-run-main strong,
+.scheduled-run-owner strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.scheduled-run-state small,
+.scheduled-run-owner span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.scheduled-run-main p {
+  margin: 0;
+  overflow: hidden;
+  color: #5b6672;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scheduled-run-pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.scheduled-run-pager span {
+  min-width: 54px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+@media (max-width: 760px) {
+  .finder-v2-run-toolbar {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .finder-v2-run-toolbar label {
+    flex: 1 1 140px;
+  }
+
+  .finder-v2-run-toolbar > span {
+    flex: 0 0 100%;
+    padding-bottom: 0;
+    text-align: left;
+  }
+
+  .scheduled-run-item {
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+  }
+
+  .scheduled-run-main {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .scheduled-run-owner {
+    text-align: right;
+  }
+}
+
 .discovery-job {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
