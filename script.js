@@ -6428,32 +6428,44 @@ function renderScheduledDiscoveryRuns() {
   const next = $("#scheduledRunNext");
   if (prev) prev.disabled = scheduledRunPage <= 1;
   if (next) next.disabled = scheduledRunPage >= pageCount;
-  box.innerHTML = visible.length ? visible.map((job) => {
+  const grouped = new Map();
+  visible.forEach((job) => {
     const username = job.targetUsername || job.ownerUsername || "未指定销售";
-    const importedCount = Number(job.result?.importedCount || 0);
-    const rawCount = discoveryJobRawCount(job);
-    const resultText = ["queued", "running"].includes(job.status)
-      ? `${Number(job.progress || 0)}% · ${job.message || "后台执行中"}`
-      : job.status === "failed"
-        ? job.error || job.message || "执行失败"
-        : `发现 ${rawCount} 条 · 导入 ${importedCount} 条`;
-    return `
-      <article class="scheduled-run-item ${escapeHtml(job.status || "")}">
-        <div class="scheduled-run-state">
-          <span>${escapeHtml(stateLabels[job.status] || job.status || "未知")}</span>
-          <small>${escapeHtml(formatJobTime(job.updatedAt || job.createdAt))}</small>
-        </div>
-        <div class="scheduled-run-main">
-          <strong>${escapeHtml(job.country || "未指定国家")} · ${escapeHtml(discoverySourceLabel(job.sourceMode))}</strong>
-          <p>${escapeHtml(resultText)}</p>
-        </div>
-        <div class="scheduled-run-owner">
-          <span>接收销售</span>
-          <strong>${escapeHtml(username)}</strong>
-        </div>
-      </article>
-    `;
-  }).join("") : `<p class="empty">当前筛选下没有 2.0 执行记录。</p>`;
+    if (!grouped.has(username)) grouped.set(username, []);
+    grouped.get(username).push(job);
+  });
+  box.innerHTML = visible.length ? Array.from(grouped.entries()).map(([username, jobs]) => `
+    <section class="scheduled-run-sales-group">
+      <header>
+        <strong>${escapeHtml(username)}</strong>
+        <span>${jobs.length} 条任务</span>
+      </header>
+      <div class="scheduled-run-grid">
+        ${jobs.map((job) => {
+          const importedCount = Number(job.result?.importedCount || 0);
+          const rawCount = discoveryJobRawCount(job);
+          const resultText = ["queued", "running"].includes(job.status)
+            ? `${Number(job.progress || 0)}% · ${job.message || "后台执行中"}`
+            : job.status === "failed"
+              ? job.error || job.message || "执行失败"
+              : `发现 ${rawCount} 条 · 导入 ${importedCount} 条`;
+          return `
+            <article class="scheduled-run-item ${escapeHtml(job.status || "")}">
+              <div class="scheduled-run-state">
+                <span>${escapeHtml(stateLabels[job.status] || job.status || "未知")}</span>
+                <small>${escapeHtml(formatJobTime(job.updatedAt || job.createdAt))}</small>
+              </div>
+              <div class="scheduled-run-main">
+                <strong>${escapeHtml(job.country || "未指定国家")}</strong>
+                <small>${escapeHtml(discoverySourceLabel(job.sourceMode))}</small>
+                <p title="${escapeHtml(resultText)}">${escapeHtml(resultText)}</p>
+              </div>
+            </article>
+          `;
+        }).join("")}
+      </div>
+    </section>
+  `).join("") : `<p class="empty">当前筛选下没有 2.0 执行记录。</p>`;
 }
 
 function renderPersonalDiscoverySchedules() {
