@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-sales">
+  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-layout">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -416,97 +416,123 @@
       </div>
 
       <div class="finder-v2-kpis" aria-label="自动找客户2.0运行概况">
-        <div><span>启用计划</span><strong id="scheduleEnabledCount">0</strong><small>服务器后台持续调度</small></div>
-        <div><span>运行中任务</span><strong id="scheduleRunningCount">0</strong><small>排队与执行中的任务</small></div>
-        <div><span>最近完成</span><strong id="scheduleCompletedCount">0</strong><small>最近任务记录</small></div>
-        <div><span>最近失败</span><strong id="scheduleFailedCount">0</strong><small>可在任务中心重新执行</small></div>
+        <div><span>启用计划</span><strong id="scheduleEnabledCount">0</strong></div>
+        <div><span>运行中</span><strong id="scheduleRunningCount">0</strong></div>
+        <div><span>最近完成</span><strong id="scheduleCompletedCount">0</strong></div>
+        <div><span>最近失败</span><strong id="scheduleFailedCount">0</strong></div>
       </div>
 
       <form class="panel finder-v2-form" id="scheduleForm">
-        <div class="panel-head">
+        <div class="finder-v2-form-head">
           <div>
             <h3>新建后台抓取计划</h3>
-            <p>先选接收销售，再从其负责区域中选择国家。每个销售、国家和平台建议单独建立计划。</p>
+            <p>按顺序完成分配、搜索和执行设置。</p>
           </div>
           <label class="toggle-line finder-v2-toggle">
             <input type="checkbox" name="enabled" id="scheduleEnabled" checked>
-            <span>保存后启用</span>
+            <span>立即启用</span>
           </label>
         </div>
-        <div class="finder-v2-form-grid">
-          <label>计划名称
-            <input name="planName" maxlength="60" placeholder="例如：尼日利亚 Instagram 每日车商">
-          </label>
-          <label>接收销售
-            <select name="targetUsername" id="scheduleTargetUsername" required>
-              <option value="">正在读取销售账号…</option>
-            </select>
-            <small id="scheduleTargetRegions">计划只能选择该销售负责的国家。</small>
-          </label>
-          <label>目标国家
-            <select name="country" id="scheduleCountry" required></select>
-          </label>
-          <label>客户来源
-            <select name="sourceMode" id="scheduleSourceMode">
-              <option value="combined">综合搜索（地图 + 官网）</option>
-              <option value="google">Google Maps 企业数据</option>
-              <option value="dealer">车商官网 / 汽车行业目录</option>
-              <option value="instagram">Instagram 公开账号</option>
-              <option value="facebook">Facebook 公开主页</option>
-              <option value="tiktok">TikTok 公开账号</option>
-              <option value="youtube">YouTube 公开频道</option>
-              <option value="linkedin">LinkedIn 公司 / 个人主页</option>
-            </select>
-          </label>
-          <label>账号对象
-            <select name="accountScope">
-              <option value="both">公司账号 + 个人决策人</option>
-              <option value="company">仅公司官方账号</option>
-              <option value="person">仅公开个人 / 经营者账号</option>
-            </select>
-          </label>
-          <label>线索时效
-            <select name="freshness">
-              <option value="all">不限时间</option>
-              <option value="3">最近 3 天</option>
-              <option value="7">最近 7 天</option>
-              <option value="30">最近 30 天</option>
-            </select>
-          </label>
-          <label>搜索深度
-            <select name="searchDepth">
-              <option value="standard">标准搜索</option>
-              <option value="deep">深度搜索</option>
-            </select>
-          </label>
-          <label>单次目标数量
-            <select name="resultLimit">
-              <option value="30">30 条</option>
-              <option value="60">60 条</option>
-              <option value="90" selected>90 条</option>
-            </select>
-          </label>
-          <label>执行频率
-            <select name="intervalMinutes" id="scheduleInterval">
-              <option value="360">每 6 小时</option>
-              <option value="720">每 12 小时</option>
-              <option value="1440" selected>每天</option>
-              <option value="4320">每 3 天</option>
-              <option value="10080">每周</option>
-            </select>
-          </label>
-          <label>首次执行
-            <select name="startMode" id="scheduleStartMode">
-              <option value="now">保存后立即执行一次</option>
-              <option value="delay">按频率等待后执行</option>
-            </select>
-          </label>
-          <label class="finder-v2-goal">目标描述
-            <textarea name="goal" rows="3" placeholder="留空时系统会按国家、平台和汽车经销商规则自动生成。"></textarea>
-          </label>
-        </div>
+
+        <section class="finder-v2-step" aria-labelledby="finderV2AssignmentTitle">
+          <div class="finder-v2-step-title">
+            <span>01</span>
+            <div><h4 id="finderV2AssignmentTitle">分配对象</h4><p>确定计划名称、接收销售和负责国家。</p></div>
+          </div>
+          <div class="finder-v2-step-grid three">
+            <label>计划名称
+              <input name="planName" maxlength="60" placeholder="例如：尼日利亚 Instagram 每日车商">
+            </label>
+            <label>接收销售
+              <select name="targetUsername" id="scheduleTargetUsername" required>
+                <option value="">正在读取销售账号…</option>
+              </select>
+              <small id="scheduleTargetRegions">计划只能选择该销售负责的国家。</small>
+            </label>
+            <label>目标国家
+              <select name="country" id="scheduleCountry" required></select>
+            </label>
+          </div>
+        </section>
+
+        <section class="finder-v2-step" aria-labelledby="finderV2SearchTitle">
+          <div class="finder-v2-step-title">
+            <span>02</span>
+            <div><h4 id="finderV2SearchTitle">搜索策略</h4><p>选择数据来源和线索范围。</p></div>
+          </div>
+          <div class="finder-v2-step-grid four">
+            <label>客户来源
+              <select name="sourceMode" id="scheduleSourceMode">
+                <option value="combined">综合搜索（地图 + 官网）</option>
+                <option value="google">Google Maps 企业数据</option>
+                <option value="dealer">车商官网 / 汽车行业目录</option>
+                <option value="instagram">Instagram 公开账号</option>
+                <option value="facebook">Facebook 公开主页</option>
+                <option value="tiktok">TikTok 公开账号</option>
+                <option value="youtube">YouTube 公开频道</option>
+                <option value="linkedin">LinkedIn 公司 / 个人主页</option>
+              </select>
+            </label>
+            <label>账号对象
+              <select name="accountScope">
+                <option value="both">公司账号 + 个人决策人</option>
+                <option value="company">仅公司官方账号</option>
+                <option value="person">仅公开个人 / 经营者账号</option>
+              </select>
+            </label>
+            <label>线索时效
+              <select name="freshness">
+                <option value="all">不限时间</option>
+                <option value="3">最近 3 天</option>
+                <option value="7">最近 7 天</option>
+                <option value="30">最近 30 天</option>
+              </select>
+            </label>
+            <label>搜索深度
+              <select name="searchDepth">
+                <option value="standard">标准搜索</option>
+                <option value="deep">深度搜索</option>
+              </select>
+            </label>
+            <label class="finder-v2-goal">目标描述
+              <textarea name="goal" rows="2" placeholder="可留空，系统会自动生成汽车经销商和进口商搜索规则。"></textarea>
+            </label>
+          </div>
+        </section>
+
+        <section class="finder-v2-step" aria-labelledby="finderV2TimingTitle">
+          <div class="finder-v2-step-title">
+            <span>03</span>
+            <div><h4 id="finderV2TimingTitle">执行计划</h4><p>控制单次数量和后台运行节奏。</p></div>
+          </div>
+          <div class="finder-v2-step-grid three">
+            <label>单次目标数量
+              <select name="resultLimit">
+                <option value="30">30 条</option>
+                <option value="60">60 条</option>
+                <option value="90" selected>90 条</option>
+              </select>
+            </label>
+            <label>执行频率
+              <select name="intervalMinutes" id="scheduleInterval">
+                <option value="360">每 6 小时</option>
+                <option value="720">每 12 小时</option>
+                <option value="1440" selected>每天</option>
+                <option value="4320">每 3 天</option>
+                <option value="10080">每周</option>
+              </select>
+            </label>
+            <label>首次执行
+              <select name="startMode" id="scheduleStartMode">
+                <option value="now">保存后立即执行一次</option>
+                <option value="delay">按频率等待后执行</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
         <div class="finder-v2-form-actions">
-          <p>服务器会按最低40分、地区匹配、汽车企业身份和跨客户池去重规则直接导入该销售的待审核线索；上一轮未结束时自动跳过。</p>
+          <p><strong>自动入库规则</strong><span>最低40分 · 地区匹配 · 汽车企业 · 跨客户池去重</span></p>
           <button class="primary" type="submit">保存并启动计划</button>
         </div>
       </form>
@@ -1381,6 +1407,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-finder-v2-sales"></script>
+  <script src="./script.js?v=20260720-finder-v2-layout"></script>
 </body>
 </html>
