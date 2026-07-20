@@ -909,8 +909,71 @@ const optimizationTranslations = {
   }
 };
 
+const mobileUiTranslations = {
+  en: {
+    mobileMenuOpen: "Open menu",
+    mobileMenuClose: "Close menu",
+    mobileModels: "Models",
+    mobileQuote: "Request quote",
+    mobileActions: "Quick actions",
+    tableSwipe: "Swipe to compare specifications"
+  },
+  zh: {
+    mobileMenuOpen: "打开菜单",
+    mobileMenuClose: "关闭菜单",
+    mobileModels: "查看车型",
+    mobileQuote: "提交询价",
+    mobileActions: "快捷操作",
+    tableSwipe: "左右滑动查看完整参数"
+  },
+  ar: {
+    mobileMenuOpen: "فتح القائمة",
+    mobileMenuClose: "إغلاق القائمة",
+    mobileModels: "الطرازات",
+    mobileQuote: "طلب عرض سعر",
+    mobileActions: "إجراءات سريعة",
+    tableSwipe: "اسحب لمقارنة المواصفات"
+  },
+  es: {
+    mobileMenuOpen: "Abrir menú",
+    mobileMenuClose: "Cerrar menú",
+    mobileModels: "Modelos",
+    mobileQuote: "Solicitar cotización",
+    mobileActions: "Acciones rápidas",
+    tableSwipe: "Deslice para comparar especificaciones"
+  },
+  ru: {
+    mobileMenuOpen: "Открыть меню",
+    mobileMenuClose: "Закрыть меню",
+    mobileModels: "Модели",
+    mobileQuote: "Запросить цену",
+    mobileActions: "Быстрые действия",
+    tableSwipe: "Проведите, чтобы сравнить характеристики"
+  },
+  fr: {
+    mobileMenuOpen: "Ouvrir le menu",
+    mobileMenuClose: "Fermer le menu",
+    mobileModels: "Modèles",
+    mobileQuote: "Demander un devis",
+    mobileActions: "Actions rapides",
+    tableSwipe: "Balayez pour comparer les caractéristiques"
+  }
+};
+
 Object.entries(translations).forEach(([lang, dict]) => {
-  Object.assign(dict, aitoPageTranslations.en, r7PageTranslations.en, portfolioPageTranslations.en, optimizationTranslations.en, aitoPageTranslations[lang] || {}, r7PageTranslations[lang] || {}, portfolioPageTranslations[lang] || {}, optimizationTranslations[lang] || {});
+  Object.assign(
+    dict,
+    aitoPageTranslations.en,
+    r7PageTranslations.en,
+    portfolioPageTranslations.en,
+    optimizationTranslations.en,
+    mobileUiTranslations.en,
+    aitoPageTranslations[lang] || {},
+    r7PageTranslations[lang] || {},
+    portfolioPageTranslations[lang] || {},
+    optimizationTranslations[lang] || {},
+    mobileUiTranslations[lang] || {}
+  );
 });
 
 const statusMessages = {
@@ -1058,6 +1121,10 @@ function applyLanguage(lang, { persist = true, source = "" } = {}) {
     const value = dict[node.dataset.i18n] || translations.en[node.dataset.i18n];
     if (value) node.textContent = value;
   });
+  document.querySelectorAll("[data-i18n-aria-label]").forEach((node) => {
+    const value = dict[node.dataset.i18nAriaLabel] || translations.en[node.dataset.i18nAriaLabel];
+    if (value) node.setAttribute("aria-label", value);
+  });
   document.querySelectorAll(".js-language-switcher").forEach((select) => {
     select.value = lang;
   });
@@ -1145,7 +1212,97 @@ function enhanceGlobalChrome() {
   });
 }
 
+function initializeMobileChrome() {
+  const header = document.querySelector(".site-header");
+  const nav = header?.querySelector(":scope > nav");
+
+  if (header && nav && !header.querySelector(".mobile-menu-toggle")) {
+    if (!nav.id) nav.id = "primary-navigation";
+
+    const menuButton = document.createElement("button");
+    menuButton.className = "mobile-menu-toggle";
+    menuButton.type = "button";
+    menuButton.setAttribute("aria-controls", nav.id);
+    menuButton.setAttribute("aria-expanded", "false");
+    menuButton.dataset.i18nAriaLabel = "mobileMenuOpen";
+    menuButton.setAttribute("aria-label", "Open menu");
+    menuButton.innerHTML = "<span></span><span></span><span></span>";
+    header.insertBefore(menuButton, nav);
+
+    const scrim = document.createElement("button");
+    scrim.className = "mobile-nav-scrim";
+    scrim.type = "button";
+    scrim.tabIndex = -1;
+    scrim.setAttribute("aria-hidden", "true");
+    document.body.appendChild(scrim);
+
+    const closeMenu = () => {
+      header.classList.remove("mobile-nav-open");
+      document.body.classList.remove("mobile-nav-open");
+      menuButton.setAttribute("aria-expanded", "false");
+      menuButton.dataset.i18nAriaLabel = "mobileMenuOpen";
+      applyLanguage(currentLanguage(), { persist: false });
+    };
+
+    const openMenu = () => {
+      header.classList.add("mobile-nav-open");
+      document.body.classList.add("mobile-nav-open");
+      menuButton.setAttribute("aria-expanded", "true");
+      menuButton.dataset.i18nAriaLabel = "mobileMenuClose";
+      applyLanguage(currentLanguage(), { persist: false });
+    };
+
+    menuButton.addEventListener("click", () => {
+      if (header.classList.contains("mobile-nav-open")) closeMenu();
+      else openMenu();
+    });
+    scrim.addEventListener("click", closeMenu);
+    nav.querySelectorAll("a").forEach((link) => link.addEventListener("click", closeMenu));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") closeMenu();
+    });
+    window.addEventListener("resize", () => {
+      if (window.innerWidth > 760) closeMenu();
+    });
+  }
+
+  if (!document.body.classList.contains("legal-page") && !document.querySelector(".mobile-action-bar")) {
+    const isHome = document.body.classList.contains("home-page");
+    document.body.insertAdjacentHTML("beforeend", `
+      <nav class="mobile-action-bar" data-i18n-aria-label="mobileActions" aria-label="Quick actions">
+        <a href="${isHome ? "#models" : "./index.html#models"}" data-i18n="mobileModels">Models</a>
+        <a class="mobile-action-primary" href="${isHome ? "#contact" : "./index.html#contact"}" data-i18n="mobileQuote">Request quote</a>
+      </nav>
+    `);
+  }
+}
+
+function initializeTableScrollHints() {
+  document.querySelectorAll(".spec-table-wrap").forEach((wrap) => {
+    if (wrap.previousElementSibling?.classList.contains("table-scroll-hint")) return;
+
+    const hint = document.createElement("div");
+    hint.className = "table-scroll-hint";
+    hint.setAttribute("aria-hidden", "true");
+    hint.innerHTML = '<span data-i18n="tableSwipe">Swipe to compare specifications</span><b aria-hidden="true">↔</b>';
+    wrap.before(hint);
+
+    const update = () => {
+      const scrollable = wrap.scrollWidth - wrap.clientWidth > 8;
+      wrap.classList.toggle("is-scrollable", scrollable);
+      hint.hidden = !scrollable;
+      if (!scrollable || wrap.scrollLeft > 16) hint.classList.add("is-dismissed");
+    };
+
+    wrap.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update, { passive: true });
+    requestAnimationFrame(update);
+  });
+}
+
 enhanceGlobalChrome();
+initializeMobileChrome();
+initializeTableScrollHints();
 initializeVisitorLanguage();
 document.querySelectorAll(".js-language-switcher").forEach((select) => {
   select.addEventListener("change", (event) => applyLanguage(event.target.value, { source: "manual" }));
