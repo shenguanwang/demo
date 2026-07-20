@@ -1909,10 +1909,11 @@ function renderScheduleTargetOptions() {
   }
   const coverage = $("#scheduleCoverageList");
   if (coverage) {
+    coverage.classList.toggle("warning", Boolean(excludedUsers.length));
     coverage.textContent = !users.length
       ? "请先在用户管理中创建销售账号并分配负责地区。"
       : excludedUsers.length
-      ? `${excludedUsers.map((user) => user.username).join("、")} 未分配明确地区，本次不会创建任务。`
+      ? `已跳过 ${excludedUsers.length} 名未分配地区的销售：${excludedUsers.map((user) => user.username).join("、")}。系统不会为其创建或执行任务。`
       : "所有启用销售都已纳入自动任务。";
   }
   const submit = $("#scheduleForm button[type='submit']");
@@ -1920,6 +1921,12 @@ function renderScheduleTargetOptions() {
     submit.disabled = !assignments.length;
     submit.title = assignments.length ? "" : "请先在用户管理中为销售分配明确负责国家";
   }
+}
+
+function updateAllSalesScheduleTimeLabel() {
+  const value = String($("#scheduleRunTime")?.value || "06:00");
+  const label = $("#scheduleDailyTime");
+  if (label) label.textContent = `每天 ${value} 开始`;
 }
 
 function leadRegionVerification(lead) {
@@ -6298,6 +6305,13 @@ function scheduleIntervalLabel(minutes) {
   return `每 ${value} 分钟`;
 }
 
+function scheduleTimingLabel(schedule) {
+  const runTime = String(schedule?.payload?.scheduleRunTime || "");
+  return runTime && /^\d{2}:\d{2}$/.test(runTime)
+    ? `每天 ${runTime}`
+    : scheduleIntervalLabel(schedule?.intervalMinutes);
+}
+
 function renderDiscoverySchedules() {
   const box = $("#scheduleList");
   if (!box) return;
@@ -6331,7 +6345,7 @@ function renderDiscoverySchedules() {
           <strong>${escapeHtml(schedule.payload?.planName || `${schedule.country || "未指定市场"} · ${discoverySourceLabel(schedule.sourceMode)}`)}</strong>
           <span class="${schedule.enabled ? "enabled" : "paused"}">${schedule.enabled ? "已启用" : "已暂停"}</span>
         </div>
-        <p>接收销售：${escapeHtml(schedule.targetUsername || "未指定")} · ${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleIntervalLabel(schedule.intervalMinutes))}</p>
+        <p>接收销售：${escapeHtml(schedule.targetUsername || "未指定")} · ${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleTimingLabel(schedule))}</p>
         <small>下次执行：${escapeHtml(formatJobTime(schedule.nextRunAt))}${schedule.lastRunAt ? ` · 上次执行：${escapeHtml(formatJobTime(schedule.lastRunAt))}` : ""}${schedule.lastJobStatus ? ` · 最近状态：${escapeHtml(discoveryJobStateLabels()[schedule.lastJobStatus] || schedule.lastJobStatus)}${schedule.lastImportedCount !== undefined ? `，导入 ${Number(schedule.lastImportedCount || 0)} 条` : ""}` : ""}</small>
       </div>
       <div class="schedule-actions">
@@ -6398,6 +6412,7 @@ async function saveDiscoverySchedule(event) {
       body: JSON.stringify({
         action: "save_all_sales",
         sourceMode: String(formData.sourceMode || "combined"),
+        runTime: String(formData.runTime || "06:00"),
         intervalMinutes: 1440,
         enabled: true
       })
@@ -6945,6 +6960,7 @@ function bindForms() {
   });
 
   $("#scheduleForm")?.addEventListener("submit", saveDiscoverySchedule);
+  $("#scheduleRunTime")?.addEventListener("input", updateAllSalesScheduleTimeLabel);
   $("#showTodayScheduledLeads")?.addEventListener("click", () => {
     if ($("#reviewStatusFilter")) $("#reviewStatusFilter").value = "pending";
     if ($("#reviewTimeFilter")) $("#reviewTimeFilter").value = "today";

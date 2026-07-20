@@ -1922,9 +1922,13 @@ textarea {
 
 .finder-v2-bulk-control {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto;
+  grid-template-columns: minmax(260px, 1fr) 150px auto;
   gap: 12px;
   align-items: end;
+}
+
+.finder-v2-time-field input {
+  min-width: 0;
 }
 
 .finder-v2-bulk-control button {
@@ -2043,6 +2047,16 @@ textarea {
   color: var(--muted);
   font-size: 11px;
   text-align: right;
+}
+
+.finder-v2-form-actions > span.warning {
+  max-width: 520px;
+  padding: 7px 9px;
+  border: 1px solid #efd9aa;
+  border-radius: 6px;
+  background: #fff9ec;
+  color: #8a5b00;
+  font-weight: 700;
 }
 
 .finder-v2-form-actions button {

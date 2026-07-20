@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-sales-search-fix">
+  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-time">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -428,7 +428,7 @@
             <h3>全体销售自动获客</h3>
             <p>系统按销售负责地区自动拆分任务，线索直接进入对应销售的线索审核。</p>
           </div>
-          <span class="finder-v2-daily-time">每天 06:00 开始</span>
+          <span class="finder-v2-daily-time" id="scheduleDailyTime">每天 06:00 开始</span>
         </div>
 
         <section class="finder-v2-bulk-setup" aria-labelledby="finderV2BulkTitle">
@@ -451,6 +451,9 @@
                 <option value="youtube">YouTube 公开频道</option>
                 <option value="linkedin">LinkedIn 公司 / 个人主页</option>
               </select>
+            </label>
+            <label class="finder-v2-time-field">每日开始时间
+              <input name="runTime" id="scheduleRunTime" type="time" value="06:00" required>
             </label>
             <button class="primary" type="submit">一键开启全员定时获客</button>
           </div>
@@ -1338,6 +1341,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-sales-search-fix"></script>
+  <script src="./script.js?v=20260720-finder-v2-time"></script>
 </body>
 </html>

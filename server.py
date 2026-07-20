@@ -3282,10 +3282,19 @@ def next_schedule_time(interval_minutes: int, start_mode: str = "delay") -> date
     return now + timedelta(minutes=interval_minutes)
 
 
-def next_all_sales_schedule_time(position: int = 0) -> datetime:
+def normalize_daily_run_time(value) -> str:
+    text = str(value or "06:00").strip()
+    match = re.fullmatch(r"([01]\d|2[0-3]):([0-5]\d)", text)
+    if not match:
+        raise ValueError("每日执行时间格式无效")
+    return f"{match.group(1)}:{match.group(2)}"
+
+
+def next_all_sales_schedule_time(position: int = 0, run_time: str = "06:00") -> datetime:
+    hour, minute = (int(part) for part in normalize_daily_run_time(run_time).split(":"))
     beijing_tz = timezone(timedelta(hours=8))
     now_local = datetime.now(beijing_tz)
-    next_run = now_local.replace(hour=6, minute=0, second=0, microsecond=0)
+    next_run = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if next_run <= now_local:
         next_run += timedelta(days=1)
     return (next_run + timedelta(minutes=max(0, position) * 5)).astimezone(timezone.utc)
@@ -3458,6 +3467,7 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
     interval_minutes = schedule_interval_minutes(payload.get("intervalMinutes") or 1440)
     if interval_minutes != 1440:
         raise ValueError("全体销售自动任务当前仅支持每天执行")
+    run_time = normalize_daily_run_time(payload.get("runTime"))
 
     assignments = []
     excluded_users = []
@@ -3517,6 +3527,7 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
         }
         schedule_payload = normalize_schedule_payload(raw_schedule_payload)
         schedule_payload["scheduleMode"] = "all_sales"
+        schedule_payload["scheduleRunTime"] = run_time
         validate_schedule_target(schedule_payload)
         key = (target_username.lower(), normalize_country_match_text(country), source_mode)
         schedule = existing_by_key.get(key)
@@ -3535,7 +3546,7 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
             "payload": schedule_payload,
             "intervalMinutes": interval_minutes,
             "enabled": True,
-            "nextRunAt": next_all_sales_schedule_time(position).isoformat(timespec="seconds"),
+            "nextRunAt": next_all_sales_schedule_time(position, run_time).isoformat(timespec="seconds"),
             "updatedAt": now.isoformat(timespec="seconds"),
         })
         save_discovery_schedule(schedule)
@@ -3549,6 +3560,7 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
         "createdCount": created_count,
         "updatedCount": updated_count,
         "excludedUsers": excluded_users,
+        "runTime": run_time,
         "firstRunAt": saved[0]["nextRunAt"] if saved else "",
     }
 
@@ -14726,7 +14738,7 @@ class Handler(SimpleHTTPRequestHandler):
                     record_admin_audit(
                         user["username"],
                         "开启全体销售定时获客",
-                        f"{payload.get('sourceMode', 'combined')} · {result['salesCount']} 名销售 · {result['scheduleCount']} 个地区任务",
+                        f"{payload.get('sourceMode', 'combined')} · 每天 {result['runTime']} · {result['salesCount']} 名销售 · {result['scheduleCount']} 个地区任务",
                         self.client_ip(),
                     )
                     self.send_json(200, {"ok": True, **result})
