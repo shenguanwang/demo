@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-mobile-greeting">
+  <link rel="stylesheet" href="./styles.css?v=20260720-customer-import">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -867,8 +867,12 @@
       </div>
       <div class="split-actions section-gap">
         <button class="primary" id="exportCustomerTable" type="button">导出客户表格 CSV</button>
+        <button class="ghost" id="downloadCustomerImportTemplate" type="button">下载导入模板</button>
+        <button class="ghost" id="importCustomersButton" type="button">导入客户 CSV</button>
+        <input id="customerImportFile" type="file" accept=".csv,text/csv" hidden>
         <button class="ghost" id="exportData" type="button">导出完整备份 JSON</button>
         <button class="ghost" id="clearSavedData" type="button">清空当前账号数据</button>
+        <span class="crm-import-status" id="customerImportStatus" aria-live="polite"></span>
       </div>
       <div class="crm-workbench" aria-label="客户池工作视图">
         <div class="crm-view-tabs" id="crmViewTabs">
@@ -1290,6 +1294,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-mobile-greeting"></script>
+  <script src="./script.js?v=20260720-customer-import"></script>
 </body>
 </html>

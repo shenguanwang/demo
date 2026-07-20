@@ -652,6 +652,43 @@ button {
   flex-wrap: wrap;
 }
 
+.crm-import-status {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.crm-import-status:empty {
+  display: none;
+}
+
+.crm-import-status[data-state="success"] {
+  color: #157347;
+}
+
+.crm-import-status[data-state="warning"] {
+  color: #8a6420;
+}
+
+.crm-import-status[data-state="error"] {
+  color: #b33a2f;
+}
+
+.imported-lead-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border: 1px solid #8cc9b1;
+  border-radius: 999px;
+  background: #edf9f3;
+  color: #16724d;
+  font-size: 10px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .inline-actions {
   display: flex;
   align-items: center;
@@ -8575,6 +8612,12 @@ td {
 
 :root[data-theme="dark"] .admin-distribution-summary b {
   color: #f4f6f8;
+}
+
+:root[data-theme="dark"] .imported-lead-badge {
+  border-color: #2e6b4b;
+  background: #183326;
+  color: #84ddb0;
 }
 
 @media (max-width: 900px) {
