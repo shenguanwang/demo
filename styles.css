@@ -1922,7 +1922,7 @@ textarea {
 
 .finder-v2-bulk-control {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 150px auto;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.2fr) 145px auto;
   gap: 12px;
   align-items: end;
 }
@@ -1932,7 +1932,7 @@ textarea {
 }
 
 .finder-v2-bulk-control button {
-  min-width: 190px;
+  min-width: 170px;
 }
 
 .finder-v2-toggle {
@@ -2070,6 +2070,14 @@ textarea {
   .finder-v2-bulk-setup {
     grid-template-columns: 1fr;
     gap: 18px;
+  }
+
+  .finder-v2-bulk-control {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .finder-v2-bulk-control button {
+    width: 100%;
   }
 
   .finder-v2-step {

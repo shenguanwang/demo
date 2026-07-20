@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-plans-grouped">
+  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-sales-batches">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -459,21 +459,26 @@
       <form class="panel finder-v2-form" id="scheduleForm">
         <div class="finder-v2-form-head">
           <div>
-            <h3>全体销售自动获客</h3>
-            <p>系统按销售负责地区自动拆分任务，线索直接进入对应销售的线索审核。</p>
+            <h3>销售自动获客</h3>
+            <p>选择全部或指定销售后，系统按其负责地区拆分任务，线索直接进入对应销售的线索审核。</p>
           </div>
           <span class="finder-v2-daily-time" id="scheduleDailyTime">每天 06:00 开始</span>
         </div>
 
         <section class="finder-v2-bulk-setup" aria-labelledby="finderV2BulkTitle">
           <div class="finder-v2-bulk-scope">
-            <span class="finder-v2-bulk-icon">全</span>
+            <span class="finder-v2-bulk-icon">销</span>
             <div>
               <h4 id="finderV2BulkTitle">全部启用销售</h4>
               <p id="scheduleCoverageSummary">正在读取销售负责地区…</p>
             </div>
           </div>
           <div class="finder-v2-bulk-control">
+            <label>选择销售
+              <select name="targetUsername" id="scheduleTargetUsername">
+                <option value="">全部销售</option>
+              </select>
+            </label>
             <label>选择获客来源
               <select name="sourceMode" id="scheduleSourceMode">
                 <option value="combined">综合搜索（地图 + 官网）</option>
@@ -489,12 +494,12 @@
             <label class="finder-v2-time-field">每日开始时间
               <input name="runTime" id="scheduleRunTime" type="time" value="06:00" required>
             </label>
-            <button class="primary" type="submit">一键开启全员定时获客</button>
+            <button class="primary" type="submit">创建定时获客计划</button>
           </div>
         </section>
 
         <div class="finder-v2-form-actions">
-          <p><strong>自动执行规则</strong><span>全部销售 · 按负责地区分配 · 每天执行 · 最低40分 · 跨客户池去重</span></p>
+          <p><strong>自动执行规则</strong><span>按负责地区分配 · 每批最多3个任务 · 批次间隔30分钟 · 每天执行 · 最低40分 · 跨客户池去重</span></p>
           <span id="scheduleCoverageList">未分配明确地区的销售不会创建任务。</span>
         </div>
       </form>
@@ -1408,6 +1413,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-finder-v2-plans-grouped"></script>
+  <script src="./script.js?v=20260720-finder-v2-sales-batches"></script>
 </body>
 </html>

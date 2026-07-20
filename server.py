@@ -3290,6 +3290,10 @@ def normalize_daily_run_time(value) -> str:
     return f"{match.group(1)}:{match.group(2)}"
 
 
+ALL_SALES_SCHEDULE_BATCH_SIZE = 3
+ALL_SALES_SCHEDULE_BATCH_INTERVAL_MINUTES = 30
+
+
 def next_all_sales_schedule_time(position: int = 0, run_time: str = "06:00") -> datetime:
     hour, minute = (int(part) for part in normalize_daily_run_time(run_time).split(":"))
     beijing_tz = timezone(timedelta(hours=8))
@@ -3297,7 +3301,10 @@ def next_all_sales_schedule_time(position: int = 0, run_time: str = "06:00") -> 
     next_run = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if next_run <= now_local:
         next_run += timedelta(days=1)
-    return (next_run + timedelta(minutes=max(0, position) * 5)).astimezone(timezone.utc)
+    batch_index = max(0, position) // ALL_SALES_SCHEDULE_BATCH_SIZE
+    return (
+        next_run + timedelta(minutes=batch_index * ALL_SALES_SCHEDULE_BATCH_INTERVAL_MINUTES)
+    ).astimezone(timezone.utc)
 
 
 def row_to_discovery_schedule(row) -> dict:
@@ -3487,11 +3494,14 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
     if interval_minutes != 1440:
         raise ValueError("全体销售自动任务当前仅支持每天执行")
     run_time = normalize_daily_run_time(payload.get("runTime"))
+    requested_target = normalize_username(payload.get("targetUsername")) if payload.get("targetUsername") else ""
 
     assignments = []
     excluded_users = []
     for user in list_users():
         username = str(user.get("username") or "")
+        if requested_target and username != requested_target:
+            continue
         assigned = normalize_assigned_countries(user.get("assignedCountries"))
         if user.get("role") != "user" or user.get("status") == "disabled" or user.get("builtIn"):
             continue
@@ -3500,6 +3510,8 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
             continue
         assignments.extend((username, country) for country in assigned)
     if not assignments:
+        if requested_target:
+            raise ValueError("所选销售不存在、已禁用或尚未分配负责国家")
         raise ValueError("暂无已明确分配负责国家的启用销售")
 
     existing_schedules = list_discovery_schedules(owner_username, limit=5000)
@@ -3579,7 +3591,10 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
         "createdCount": created_count,
         "updatedCount": updated_count,
         "excludedUsers": excluded_users,
+        "targetUsername": requested_target,
         "runTime": run_time,
+        "batchSize": ALL_SALES_SCHEDULE_BATCH_SIZE,
+        "batchIntervalMinutes": ALL_SALES_SCHEDULE_BATCH_INTERVAL_MINUTES,
         "firstRunAt": saved[0]["nextRunAt"] if saved else "",
     }
 

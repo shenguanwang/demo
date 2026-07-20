@@ -1892,8 +1892,10 @@ function scheduleSalesUsers() {
   );
 }
 
-function allSalesScheduleAssignments() {
+function allSalesScheduleAssignments(targetUsername = "") {
+  const selectedUsername = String(targetUsername || $("#scheduleTargetUsername")?.value || "").trim();
   return scheduleSalesUsers().flatMap((user) => {
+    if (selectedUsername && user.username !== selectedUsername) return [];
     const assigned = (Array.isArray(user.assignedCountries) ? user.assignedCountries : [])
       .map((country) => String(country || "").trim())
       .filter(Boolean);
@@ -1904,9 +1906,28 @@ function allSalesScheduleAssignments() {
 
 function renderScheduleTargetOptions() {
   const users = scheduleSalesUsers();
-  const assignments = allSalesScheduleAssignments();
+  const targetSelect = $("#scheduleTargetUsername");
+  const currentTarget = String(targetSelect?.value || "").trim();
+  if (targetSelect) {
+    targetSelect.innerHTML = [
+      `<option value="">全部销售</option>`,
+      ...users.map((user) => {
+        const assigned = (Array.isArray(user.assignedCountries) ? user.assignedCountries : [])
+          .map((country) => String(country || "").trim())
+          .filter(Boolean);
+        const unavailable = !assigned.length || assigned.includes(ASSIGNED_COUNTRY_NONE);
+        return `<option value="${escapeHtml(user.username)}"${unavailable ? " disabled" : ""}>${escapeHtml(user.username)}${unavailable ? "（未分配地区）" : ` · ${escapeHtml(assignedCountrySummary(assigned))}`}</option>`;
+      })
+    ].join("");
+    targetSelect.value = users.some((user) => user.username === currentTarget) ? currentTarget : "";
+  }
+  const selectedTarget = String(targetSelect?.value || "").trim();
+  const assignments = allSalesScheduleAssignments(selectedTarget);
   const coveredUsers = new Set(assignments.map((item) => item.username));
-  const excludedUsers = users.filter((user) => !coveredUsers.has(user.username));
+  const relevantUsers = selectedTarget ? users.filter((user) => user.username === selectedTarget) : users;
+  const excludedUsers = relevantUsers.filter((user) => !coveredUsers.has(user.username));
+  const title = $("#finderV2BulkTitle");
+  if (title) title.textContent = selectedTarget || "全部启用销售";
   const summary = $("#scheduleCoverageSummary");
   if (summary) {
     summary.textContent = assignments.length
@@ -1920,6 +1941,8 @@ function renderScheduleTargetOptions() {
       ? "请先在用户管理中创建销售账号并分配负责地区。"
       : excludedUsers.length
       ? `已跳过 ${excludedUsers.length} 名未分配地区的销售：${excludedUsers.map((user) => user.username).join("、")}。系统不会为其创建或执行任务。`
+      : selectedTarget
+      ? `${selectedTarget} 的 ${assignments.length} 个负责地区将创建定时任务。`
       : "所有启用销售都已纳入自动任务。";
   }
   const submit = $("#scheduleForm button[type='submit']");
@@ -1932,7 +1955,7 @@ function renderScheduleTargetOptions() {
 function updateAllSalesScheduleTimeLabel() {
   const value = String($("#scheduleRunTime")?.value || "06:00");
   const label = $("#scheduleDailyTime");
-  if (label) label.textContent = `每天 ${value} 开始`;
+  if (label) label.textContent = `每天 ${value} 开始 · 每批3个`;
 }
 
 function leadRegionVerification(lead) {
@@ -6566,7 +6589,7 @@ async function saveAllSalesDiscoverySchedule(event) {
   const submitButton = form.querySelector('button[type="submit"]');
   if (submitButton) {
     submitButton.disabled = true;
-    submitButton.textContent = "正在创建全员任务";
+    submitButton.textContent = "正在创建计划";
   }
   try {
     const formData = Object.fromEntries(new FormData(form).entries());
@@ -6575,6 +6598,7 @@ async function saveAllSalesDiscoverySchedule(event) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         action: "save_all_sales",
+        targetUsername: String(formData.targetUsername || "").trim(),
         sourceMode: String(formData.sourceMode || "combined"),
         runTime: String(formData.runTime || "06:00"),
         intervalMinutes: 1440,
@@ -6598,7 +6622,7 @@ async function saveAllSalesDiscoverySchedule(event) {
   } finally {
     if (submitButton) {
       submitButton.disabled = !allSalesScheduleAssignments().length;
-      submitButton.textContent = "一键开启全员定时获客";
+      submitButton.textContent = "创建定时获客计划";
     }
   }
 }
@@ -7189,6 +7213,7 @@ function bindForms() {
   $("#scheduleForm")?.addEventListener("submit", saveAllSalesDiscoverySchedule);
   $("#personalScheduleForm")?.addEventListener("submit", savePersonalDiscoverySchedule);
   $("#scheduleRunTime")?.addEventListener("input", updateAllSalesScheduleTimeLabel);
+  $("#scheduleTargetUsername")?.addEventListener("change", renderScheduleTargetOptions);
   $("#showTodayScheduledLeads")?.addEventListener("click", () => {
     if ($("#reviewStatusFilter")) $("#reviewStatusFilter").value = "pending";
     if ($("#reviewTimeFilter")) $("#reviewTimeFilter").value = "today";
