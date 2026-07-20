@@ -5575,6 +5575,58 @@ function bindNavigation() {
   $$("[data-section]").forEach((button) => {
     button.addEventListener("click", () => showSection(button.dataset.section));
   });
+  bindMobileNavigation();
+}
+
+const mobileSectionTitles = {
+  overview: "全球销售总览",
+  market: "市场选择",
+  "lead-finder": "自动找客户",
+  review: "线索审核",
+  crm: "客户池 CRM",
+  "website-leads": "独立站线索",
+  email: "智能开发信",
+  follow: "今日跟进",
+  quote: "CIF 报价",
+  risk: "售后与风险",
+  kpi: "KPI 看板",
+  "account-settings-page": "账号设置",
+  "user-management": "用户管理",
+  "system-settings": "系统设置"
+};
+
+function setMobileNavigation(open) {
+  const isOpen = Boolean(open);
+  document.body.classList.toggle("mobile-nav-open", isOpen);
+  $("#appSidebar")?.classList.toggle("mobile-open", isOpen);
+  const toggle = $("#mobileNavToggle");
+  const backdrop = $("#mobileNavBackdrop");
+  if (toggle) {
+    toggle.setAttribute("aria-expanded", String(isOpen));
+    toggle.setAttribute("aria-label", isOpen ? "关闭主菜单" : "打开主菜单");
+  }
+  if (backdrop) backdrop.hidden = !isOpen;
+}
+
+function updateMobileSectionTitle(id) {
+  const title = $("#mobileSectionTitle");
+  if (title) title.textContent = mobileSectionTitles[id] || "海外销售工作台";
+}
+
+function bindMobileNavigation() {
+  const toggle = $("#mobileNavToggle");
+  if (!toggle || toggle.dataset.bound === "true") return;
+  toggle.dataset.bound = "true";
+  toggle.addEventListener("click", () => {
+    setMobileNavigation(toggle.getAttribute("aria-expanded") !== "true");
+  });
+  $("#mobileNavBackdrop")?.addEventListener("click", () => setMobileNavigation(false));
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") setMobileNavigation(false);
+  });
+  window.addEventListener("resize", () => {
+    if (window.innerWidth > 700) setMobileNavigation(false);
+  });
 }
 
 function showSection(id) {
@@ -5586,6 +5638,8 @@ function showSection(id) {
   if (window.location.hash !== `#${id}`) {
     history.replaceState(null, "", `#${id}`);
   }
+  updateMobileSectionTitle(id);
+  setMobileNavigation(false);
   window.scrollTo({ top: 0, behavior: "smooth" });
   if (id === "overview") {
     window.requestAnimationFrame(() => {

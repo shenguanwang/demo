@@ -3,14 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8fa">
   <title>华为系新能源汽车海外获客工作台</title>
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260717-admin-distribution">
+  <link rel="stylesheet" href="./styles.css?v=20260720-mobile-workbench">
 </head>
 <body>
-  <aside class="sidebar">
+  <aside class="sidebar" id="appSidebar">
     <div class="brand">
       <svg class="brand-mark" viewBox="0 0 64 64" aria-label="HIMA Global">
         <path d="M11 13h12v15h18V13h12v38H41V39H23v12H11z"/>
@@ -56,6 +57,19 @@
       <span>⚙</span>系统设置
     </button>
   </aside>
+
+  <header class="mobile-app-bar" id="mobileAppBar">
+    <button class="mobile-nav-toggle" id="mobileNavToggle" type="button" aria-label="打开主菜单" aria-controls="appSidebar" aria-expanded="false">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </button>
+    <div class="mobile-app-title">
+      <strong>HIMA Global</strong>
+      <span id="mobileSectionTitle">全球销售总览</span>
+    </div>
+  </header>
+  <button class="mobile-nav-backdrop" id="mobileNavBackdrop" type="button" aria-label="关闭主菜单" hidden></button>
 
   <div class="app-settings" id="appSettings" aria-label="快捷设置">
     <button class="quick-setting-button" id="fullscreenToggle" type="button" aria-label="全屏" aria-pressed="false" title="全屏">
@@ -1276,6 +1290,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260717-admin-distribution"></script>
+  <script src="./script.js?v=20260720-mobile-workbench"></script>
 </body>
 </html>
