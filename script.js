@@ -1803,14 +1803,10 @@ function userAssignedCountries() {
 
 function discoveryDisabledForSession() {
   if (currentSession?.role === "admin") return false;
-  return Boolean(currentSession?.discoveryAdminOnly)
-    || userAssignedCountries().includes(ASSIGNED_COUNTRY_NONE);
+  return userAssignedCountries().includes(ASSIGNED_COUNTRY_NONE);
 }
 
 function discoveryDisabledReason() {
-  if (currentSession?.role !== "admin" && currentSession?.discoveryAdminOnly) {
-    return "接口正在调试，功能暂停";
-  }
   return "该账号未开通自动找客户功能";
 }
 
@@ -2089,7 +2085,7 @@ function renderCountries() {
   }
   const finderSubmit = $("#finderForm button[type='submit']");
   if (finderSubmit) {
-    finderSubmit.disabled = discoveryDisabledForSession() && !currentSession?.discoveryAdminOnly;
+    finderSubmit.disabled = discoveryDisabledForSession();
     finderSubmit.title = discoveryDisabledForSession() ? discoveryDisabledReason() : "";
   }
   const domesticSelect = $("#finderDomesticRegion");

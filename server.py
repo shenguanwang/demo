@@ -2966,8 +2966,6 @@ def assigned_country_matches(assigned: list[str], country: str) -> bool:
 def ensure_user_can_access_country(user: dict, country: str) -> None:
     if not user or user.get("role") == "admin":
         return
-    if bool(control_value("discovery", "adminOnly", False)):
-        raise PermissionError("接口正在调试，功能暂停")
     assigned = normalize_assigned_countries(user.get("assignedCountries") or user.get("assigned_countries"))
     if ASSIGNED_COUNTRY_NONE in assigned:
         raise PermissionError("该账号未开通自动找客户功能")
@@ -3456,10 +3454,10 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
     allowed_sources = {"combined", "google", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"}
     source_mode = str(payload.get("sourceMode") or "combined").strip().lower()
     if source_mode not in allowed_sources:
-        raise ValueError("??????")
+        raise ValueError("获客来源无效")
     interval_minutes = schedule_interval_minutes(payload.get("intervalMinutes") or 1440)
     if interval_minutes != 1440:
-        raise ValueError("?????????????????")
+        raise ValueError("全体销售自动任务当前仅支持每天执行")
 
     assignments = []
     excluded_users = []
@@ -3473,7 +3471,7 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
             continue
         assignments.extend((username, country) for country in assigned)
     if not assignments:
-        raise ValueError("????????????????")
+        raise ValueError("暂无已明确分配负责国家的启用销售")
 
     existing_schedules = list_discovery_schedules(owner_username, limit=5000)
     existing_by_key = {}
@@ -3489,9 +3487,9 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
         existing_by_key[key] = schedule
 
     source_labels = {
-        "combined": "????",
+        "combined": "综合搜索",
         "google": "Google Maps",
-        "dealer": "????",
+        "dealer": "车商官网",
         "instagram": "Instagram",
         "facebook": "Facebook",
         "tiktok": "TikTok",
@@ -3505,16 +3503,16 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
     saved = []
     for position, (target_username, country) in enumerate(assignments):
         raw_schedule_payload = {
-            "planName": f"{target_username} ? {country} ? {source_labels[source_mode]}",
+            "planName": f"{target_username} · {country} · {source_labels[source_mode]}",
             "targetUsername": target_username,
             "country": country,
-            "model": "????????",
+            "model": "华为系新能源汽车",
             "sourceMode": source_mode,
             "accountScope": "both",
             "freshness": "all",
             "searchDepth": "standard",
             "resultLimit": "90",
-            "goal": f"{country} ????????????????????????????????",
+            "goal": f"{country} 汽车经销商、二手车经销商、汽车进口商、汽车贸易公司和车队采购客户",
             "scheduleMode": "all_sales",
         }
         schedule_payload = normalize_schedule_payload(raw_schedule_payload)
@@ -14727,8 +14725,8 @@ class Handler(SimpleHTTPRequestHandler):
                     result = create_all_sales_discovery_schedules(payload, user["username"])
                     record_admin_audit(
                         user["username"],
-                        "??????????",
-                        f"{payload.get('sourceMode', 'combined')} ? {result['salesCount']} ??? ? {result['scheduleCount']} ?????",
+                        "开启全体销售定时获客",
+                        f"{payload.get('sourceMode', 'combined')} · {result['salesCount']} 名销售 · {result['scheduleCount']} 个地区任务",
                         self.client_ip(),
                     )
                     self.send_json(200, {"ok": True, **result})
