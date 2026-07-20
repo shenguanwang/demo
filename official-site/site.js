@@ -691,6 +691,13 @@ const optimizationTranslations = {
     homeLead: "Vehicle confirmation, inspection, export documents and port handover for overseas dealers, importers and fleet buyers.",
     homePrimaryCta: "Explore models",
     homeSecondaryCta: "Request a quote",
+    motionEyebrow: "Vehicle film",
+    motionTitle: "See the product before reviewing the specification.",
+    motionIntro: "A closer view of flagship design and the vehicle lines available for overseas sourcing discussions.",
+    motionFilmCaption: "Flagship proportions, lighting signatures, and exterior details.",
+    motionGalleryCaption: "Switch between current flagship vehicle lines.",
+    motionPlay: "Play film",
+    motionPause: "Pause film",
     channelValue: "Trial order to repeat supply",
     companyTitle: "A clear division of responsibility from China to your market.",
     companyIntro: "YIMING AUTO coordinates China-side sourcing and export execution. The overseas dealer remains responsible for local import, registration, sales and aftersales. Final scope is confirmed in writing for every order.",
@@ -728,6 +735,13 @@ const optimizationTranslations = {
     homeLead: "面向海外经销商、进口商与车队采购，提供车型确认、车辆检测、出口单证和港口交付。",
     homePrimaryCta: "查看车型",
     homeSecondaryCta: "提交询价",
+    motionEyebrow: "车型影像",
+    motionTitle: "先看产品，再核对参数。",
+    motionIntro: "近距离查看旗舰设计，以及可开展海外采购沟通的当前车型系列。",
+    motionFilmCaption: "旗舰车身比例、灯光语言与外观细节。",
+    motionGalleryCaption: "切换查看当前旗舰车型系列。",
+    motionPlay: "播放短片",
+    motionPause: "暂停短片",
     channelValue: "从样车到持续补货",
     companyTitle: "从中国端到当地市场，责任边界清晰。",
     companyIntro: "一名汽车负责中国端车源组织与出口执行；海外经销商负责当地进口、注册、销售和售后。每笔订单的车型、价格、文件与交付范围均以书面确认为准。",
@@ -765,6 +779,13 @@ const optimizationTranslations = {
     homeLead: "تأكيد المركبة والفحص ووثائق التصدير والتسليم في الميناء للوكلاء والمستوردين ومشتري الأساطيل.",
     homePrimaryCta: "استعرض الطرازات",
     homeSecondaryCta: "اطلب عرض سعر",
+    motionEyebrow: "فيلم المركبة",
+    motionTitle: "شاهد المنتج قبل مراجعة المواصفات.",
+    motionIntro: "نظرة أقرب على التصميم الرائد وخطوط المركبات المتاحة لمناقشات التوريد الخارجي.",
+    motionFilmCaption: "نسب رائدة وتوقيعات إضاءة وتفاصيل خارجية.",
+    motionGalleryCaption: "تنقل بين خطوط المركبات الرائدة الحالية.",
+    motionPlay: "تشغيل الفيلم",
+    motionPause: "إيقاف الفيلم",
     channelValue: "من الطلب التجريبي إلى التوريد المتكرر",
     companyTitle: "مسؤوليات واضحة من الصين إلى سوقك.",
     companyIntro: "تنسق YIMING AUTO التوريد والتنفيذ التصديري في الصين، بينما يتولى الوكيل الاستيراد والتسجيل والمبيعات وخدمة ما بعد البيع محلياً. يتم تأكيد النطاق كتابياً لكل طلب.",
@@ -802,6 +823,13 @@ const optimizationTranslations = {
     homeLead: "Confirmación, inspección, documentos de exportación y entrega portuaria para distribuidores, importadores y flotas.",
     homePrimaryCta: "Ver modelos",
     homeSecondaryCta: "Solicitar cotización",
+    motionEyebrow: "Película del vehículo",
+    motionTitle: "Vea el producto antes de revisar la ficha técnica.",
+    motionIntro: "Una mirada cercana al diseño insignia y a las líneas disponibles para conversaciones de abastecimiento internacional.",
+    motionFilmCaption: "Proporciones insignia, firma luminosa y detalles exteriores.",
+    motionGalleryCaption: "Cambie entre las líneas insignia actuales.",
+    motionPlay: "Reproducir",
+    motionPause: "Pausar",
     channelValue: "Del pedido piloto al suministro recurrente",
     companyTitle: "Responsabilidades claras desde China hasta su mercado.",
     companyIntro: "YIMING AUTO coordina el abastecimiento y la ejecución de exportación en China. El distribuidor se responsabiliza de la importación, matriculación, venta y posventa local. Cada pedido se confirma por escrito.",
@@ -839,6 +867,13 @@ const optimizationTranslations = {
     homeLead: "Подтверждение комплектации, инспекция, экспортные документы и передача в порту для дилеров, импортёров и автопарков.",
     homePrimaryCta: "Смотреть модели",
     homeSecondaryCta: "Запросить предложение",
+    motionEyebrow: "Видео автомобиля",
+    motionTitle: "Сначала оцените автомобиль, затем изучите характеристики.",
+    motionIntro: "Ближе к флагманскому дизайну и актуальным моделям для обсуждения зарубежных поставок.",
+    motionFilmCaption: "Флагманские пропорции, световой рисунок и детали экстерьера.",
+    motionGalleryCaption: "Переключайтесь между актуальными флагманскими линейками.",
+    motionPlay: "Воспроизвести",
+    motionPause: "Пауза",
     channelValue: "От пробного заказа к регулярным поставкам",
     companyTitle: "Чёткое разделение ответственности от Китая до вашего рынка.",
     companyIntro: "YIMING AUTO координирует закупку и экспорт в Китае. Зарубежный дилер отвечает за местный импорт, регистрацию, продажи и сервис. Объём работ письменно подтверждается по каждому заказу.",
@@ -876,6 +911,13 @@ const optimizationTranslations = {
     homeLead: "Confirmation, inspection, documents d’exportation et remise au port pour concessionnaires, importateurs et flottes.",
     homePrimaryCta: "Voir les modèles",
     homeSecondaryCta: "Demander un devis",
+    motionEyebrow: "Film du véhicule",
+    motionTitle: "Voir le produit avant d’examiner sa fiche technique.",
+    motionIntro: "Un regard rapproché sur le design des modèles phares disponibles pour les projets d’approvisionnement international.",
+    motionFilmCaption: "Proportions, signature lumineuse et détails extérieurs du modèle phare.",
+    motionGalleryCaption: "Passez d’une gamme phare actuelle à l’autre.",
+    motionPlay: "Lire le film",
+    motionPause: "Mettre en pause",
     channelValue: "De la commande pilote au réapprovisionnement",
     companyTitle: "Des responsabilités claires de la Chine à votre marché.",
     companyIntro: "YIMING AUTO coordonne l’approvisionnement et l’exécution export en Chine. Le concessionnaire assume l’importation, l’immatriculation, la vente et l’après-vente localement. Chaque commande est confirmée par écrit.",
@@ -1058,6 +1100,9 @@ function applyLanguage(lang, { persist = true, source = "" } = {}) {
     const value = dict[node.dataset.i18n] || translations.en[node.dataset.i18n];
     if (value) node.textContent = value;
   });
+  document.querySelectorAll('.js-motion-toggle[data-playing="true"]').forEach((node) => {
+    node.textContent = dict.motionPause || translations.en.motionPause;
+  });
   document.querySelectorAll(".js-language-switcher").forEach((select) => {
     select.value = lang;
   });
@@ -1228,7 +1273,7 @@ function initializeSiteMotion() {
   const groups = [
     [".company-hero .hero-copy, .company-hero .proof-panel, .page-hero > *, .luxeed-hero-copy", "reveal-from-left"],
     [".section-heading, .dealer-copy, .dealer-requirements, .aito-export-note > *, .r7-source-row > *, .edition-feature-copy > *", ""],
-    [".role-grid article, .choice-card, .export-service-list article, .market-board article, .process-map li, .spec-summary-grid > div, .spec-note-grid > article, .r7-overview > div, .edition-facts > div", "reveal-scale"],
+    [".role-grid article, .motion-showcase > article, .choice-card, .export-service-list article, .market-board article, .process-map li, .spec-summary-grid > div, .spec-note-grid > article, .r7-overview > div, .edition-facts > div", "reveal-scale"],
     [".aito-model, .spec-table-wrap, .inquiry-form, .faq-list, .luxeed-hero", "reveal-scale"]
   ];
 
@@ -1306,4 +1351,113 @@ function initializeSiteMotion() {
   });
 }
 
+function initializeMotionShowcase() {
+  const section = document.querySelector(".motion-showcase-section");
+  const video = section?.querySelector(".js-viewport-video");
+  const toggle = section?.querySelector(".js-motion-toggle");
+  const slides = [...(section?.querySelectorAll(".motion-gallery-stage img") || [])];
+  const tabs = [...(section?.querySelectorAll(".motion-gallery-nav button") || [])];
+  if (!section || !video || !toggle) return;
+
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const compactViewport = window.matchMedia("(max-width: 640px)").matches;
+  const saveData = navigator.connection?.saveData === true;
+  let videoLoaded = false;
+  let currentSlide = 0;
+  let galleryTimer = 0;
+
+  const language = () => translations[currentLanguage()] || translations.en;
+  const syncVideoButton = () => {
+    const playing = !video.paused && !video.ended;
+    toggle.dataset.playing = String(playing);
+    toggle.textContent = playing ? language().motionPause : language().motionPlay;
+  };
+
+  const loadVideo = () => {
+    if (videoLoaded) return;
+    videoLoaded = true;
+    video.src = video.dataset.src;
+    video.load();
+  };
+
+  const playVideo = async () => {
+    loadVideo();
+    try {
+      await video.play();
+    } catch (error) {
+      console.info("Video autoplay unavailable; waiting for user interaction.");
+    }
+    syncVideoButton();
+  };
+
+  toggle.addEventListener("click", () => {
+    if (video.paused) playVideo();
+    else video.pause();
+  });
+  video.addEventListener("play", syncVideoButton);
+  video.addEventListener("pause", syncVideoButton);
+  video.addEventListener("ended", syncVideoButton);
+
+  const showSlide = (index) => {
+    currentSlide = (index + slides.length) % slides.length;
+    slides.forEach((slide, slideIndex) => slide.classList.toggle("is-active", slideIndex === currentSlide));
+    tabs.forEach((tab, tabIndex) => {
+      const active = tabIndex === currentSlide;
+      tab.classList.toggle("is-active", active);
+      tab.setAttribute("aria-selected", String(active));
+      tab.tabIndex = active ? 0 : -1;
+    });
+  };
+
+  const stopGallery = () => window.clearInterval(galleryTimer);
+  const startGallery = () => {
+    stopGallery();
+    if (reduceMotion || compactViewport || document.hidden) return;
+    galleryTimer = window.setInterval(() => showSlide(currentSlide + 1), 4800);
+  };
+
+  tabs.forEach((tab, index) => {
+    tab.addEventListener("click", () => {
+      showSlide(index);
+      startGallery();
+    });
+    tab.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+      event.preventDefault();
+      showSlide(currentSlide + (event.key === "ArrowRight" ? 1 : -1));
+      tabs[currentSlide].focus();
+      startGallery();
+    });
+  });
+
+  if ("IntersectionObserver" in window) {
+    const mediaObserver = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        loadVideo();
+        if (!reduceMotion && !compactViewport && !saveData) playVideo();
+        startGallery();
+      } else {
+        video.pause();
+        stopGallery();
+      }
+    }, { threshold: 0.28 });
+    mediaObserver.observe(section);
+  } else {
+    loadVideo();
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      video.pause();
+      stopGallery();
+    } else {
+      startGallery();
+    }
+  });
+
+  showSlide(0);
+  syncVideoButton();
+}
+
 initializeSiteMotion();
+initializeMotionShowcase();
