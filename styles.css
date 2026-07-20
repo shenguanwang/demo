@@ -2129,12 +2129,12 @@ textarea {
 
 .schedule-list {
   display: grid;
-  gap: 18px;
+  gap: 12px;
 }
 
 .schedule-sales-group {
   display: grid;
-  gap: 10px;
+  gap: 7px;
 }
 
 .schedule-sales-group > header {
@@ -2142,7 +2142,7 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding-bottom: 8px;
+  padding: 0 2px 6px;
   border-bottom: 1px solid var(--line);
 }
 
@@ -2160,26 +2160,57 @@ textarea {
 .schedule-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 
 #scheduleList .schedule-item {
-  grid-template-columns: 1fr;
-  align-content: space-between;
-  align-items: stretch;
-  min-height: 164px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 92px;
+  padding: 10px 12px;
+  border-radius: 8px;
 }
 
 #scheduleList .schedule-item small {
-  display: -webkit-box;
+  display: block;
   overflow: hidden;
-  line-height: 1.55;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 3;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #scheduleList .schedule-actions {
   justify-content: flex-end;
+  gap: 5px;
+}
+
+#scheduleList .schedule-actions button {
+  min-height: 32px;
+  padding: 0 9px;
+}
+
+#scheduleList .schedule-title {
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+#scheduleList .schedule-title strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#scheduleList .schedule-title span {
+  flex: 0 0 auto;
+  padding: 3px 6px;
+  font-size: 10px;
+}
+
+#scheduleList .schedule-item p {
+  margin: 4px 0 3px;
+  font-size: 11px;
 }
 
 .schedule-item {
@@ -2367,6 +2398,15 @@ textarea {
 
   .schedule-grid {
     grid-template-columns: 1fr;
+  }
+
+  #scheduleList .schedule-item {
+    grid-template-columns: 1fr;
+    min-height: 0;
+  }
+
+  #scheduleList .schedule-actions {
+    justify-content: flex-end;
   }
 
   .scheduled-run-item {

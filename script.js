@@ -618,7 +618,7 @@ const autoImportingDiscoveryJobs = new Set();
 const hiddenDiscoveryJobIds = new Set(JSON.parse(localStorage.getItem(`${STORAGE_KEY}:hidden-discovery-jobs`) || "[]"));
 let discoverySchedules = [];
 let discoverySchedulePage = 1;
-const DISCOVERY_SCHEDULES_PAGE_SIZE = 9;
+const DISCOVERY_SCHEDULE_GROUPS_PAGE_SIZE = 4;
 let scheduledDiscoveryJobs = [];
 let scheduledRunPage = 1;
 const SCHEDULED_RUNS_PAGE_SIZE = 12;
@@ -6360,15 +6360,40 @@ function scheduleTimingLabel(schedule) {
     : scheduleIntervalLabel(schedule?.intervalMinutes);
 }
 
+function groupAllSalesDiscoverySchedules(schedules = discoverySchedules) {
+  const grouped = new Map();
+  schedules
+    .filter((schedule) => schedule.payload?.scheduleMode === "all_sales")
+    .sort((left, right) => {
+      const leftUsername = String(left.targetUsername || "未指定销售");
+      const rightUsername = String(right.targetUsername || "未指定销售");
+      const usernameOrder = leftUsername.localeCompare(rightUsername, "zh-CN", {
+        numeric: true,
+        sensitivity: "base"
+      });
+      if (usernameOrder) return usernameOrder;
+      const countryOrder = String(left.country || "").localeCompare(String(right.country || ""), "zh-CN");
+      if (countryOrder) return countryOrder;
+      return String(left.sourceMode || "").localeCompare(String(right.sourceMode || ""), "zh-CN");
+    })
+    .forEach((schedule) => {
+      const username = schedule.targetUsername || "未指定销售";
+      if (!grouped.has(username)) grouped.set(username, []);
+      grouped.get(username).push(schedule);
+    });
+  return Array.from(grouped.entries());
+}
+
 function renderDiscoverySchedules() {
   const box = $("#scheduleList");
   const allSalesSchedules = discoverySchedules.filter((schedule) => schedule.payload?.scheduleMode === "all_sales");
+  const groupedSchedules = groupAllSalesDiscoverySchedules(allSalesSchedules);
   const status = $("#scheduleStatus");
   const enabledCount = allSalesSchedules.filter((schedule) => schedule.enabled).length;
-  const pageCount = Math.max(1, Math.ceil(allSalesSchedules.length / DISCOVERY_SCHEDULES_PAGE_SIZE));
+  const pageCount = Math.max(1, Math.ceil(groupedSchedules.length / DISCOVERY_SCHEDULE_GROUPS_PAGE_SIZE));
   discoverySchedulePage = Math.max(1, Math.min(discoverySchedulePage, pageCount));
-  const pageStart = (discoverySchedulePage - 1) * DISCOVERY_SCHEDULES_PAGE_SIZE;
-  const visibleSchedules = allSalesSchedules.slice(pageStart, pageStart + DISCOVERY_SCHEDULES_PAGE_SIZE);
+  const pageStart = (discoverySchedulePage - 1) * DISCOVERY_SCHEDULE_GROUPS_PAGE_SIZE;
+  const visibleGroups = groupedSchedules.slice(pageStart, pageStart + DISCOVERY_SCHEDULE_GROUPS_PAGE_SIZE);
   if (status) status.textContent = allSalesSchedules.length
     ? `${enabledCount} 个启用 / ${allSalesSchedules.length} 个计划`
     : "未设置计划";
@@ -6386,13 +6411,7 @@ function renderDiscoverySchedules() {
   const nextPage = $("#scheduleNextPage");
   if (prevPage) prevPage.disabled = discoverySchedulePage <= 1;
   if (nextPage) nextPage.disabled = discoverySchedulePage >= pageCount;
-  const groupedSchedules = new Map();
-  visibleSchedules.forEach((schedule) => {
-    const username = schedule.targetUsername || "未指定销售";
-    if (!groupedSchedules.has(username)) groupedSchedules.set(username, []);
-    groupedSchedules.get(username).push(schedule);
-  });
-  if (box) box.innerHTML = visibleSchedules.length ? Array.from(groupedSchedules.entries()).map(([username, schedules]) => `
+  if (box) box.innerHTML = visibleGroups.length ? visibleGroups.map(([username, schedules]) => `
     <section class="schedule-sales-group">
       <header>
         <strong>${escapeHtml(username)}</strong>
@@ -7161,8 +7180,8 @@ function bindForms() {
   });
 
   $("#scheduleNextPage")?.addEventListener("click", () => {
-    const allSalesCount = discoverySchedules.filter((schedule) => schedule.payload?.scheduleMode === "all_sales").length;
-    const pageCount = Math.max(1, Math.ceil(allSalesCount / DISCOVERY_SCHEDULES_PAGE_SIZE));
+    const groupCount = groupAllSalesDiscoverySchedules().length;
+    const pageCount = Math.max(1, Math.ceil(groupCount / DISCOVERY_SCHEDULE_GROUPS_PAGE_SIZE));
     discoverySchedulePage = Math.min(pageCount, discoverySchedulePage + 1);
     renderDiscoverySchedules();
   });
