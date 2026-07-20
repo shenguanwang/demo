@@ -619,6 +619,7 @@ const hiddenDiscoveryJobIds = new Set(JSON.parse(localStorage.getItem(`${STORAGE
 let discoverySchedules = [];
 let discoverySchedulePage = 1;
 const DISCOVERY_SCHEDULES_PAGE_SIZE = 4;
+let adminUsers = [];
 let finderHistoryPage = 1;
 const FINDER_HISTORY_PAGE_SIZE = 24;
 let activeDiscoveryJobFilter = "all";
@@ -1883,6 +1884,79 @@ function assignedCountrySummary(values = []) {
   return `${assigned.slice(0, 2).join("、")} 等 ${assigned.length} 个国家`;
 }
 
+function scheduleSalesUsers() {
+  return adminUsers.filter((user) =>
+    user?.role === "user"
+    && user?.status !== "disabled"
+    && !user?.builtIn
+  );
+}
+
+function selectedScheduleSalesUser() {
+  const username = $("#scheduleTargetUsername")?.value || "";
+  return scheduleSalesUsers().find((user) => user.username === username) || null;
+}
+
+function renderScheduleCountryOptions() {
+  const select = $("#scheduleCountry");
+  if (!select) return;
+  const current = select.value;
+  const salesUser = selectedScheduleSalesUser();
+  const assigned = Array.isArray(salesUser?.assignedCountries) ? salesUser.assignedCountries : [];
+  const allowedCountries = !salesUser || assigned.includes(ASSIGNED_COUNTRY_NONE)
+    ? []
+    : assigned.length
+      ? countries.filter((country) => assigned.some((item) => countryKey(item) === countryKey(country.name)))
+      : countries;
+  if (!salesUser) {
+    select.innerHTML = `<option value="">请先选择接收销售</option>`;
+    select.disabled = true;
+  } else if (!allowedCountries.length) {
+    select.innerHTML = `<option value="">该销售尚未分配负责国家</option>`;
+    select.disabled = true;
+  } else {
+    const optionHtml = (country) => `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`;
+    const primary = allowedCountries.filter((country) => country.marketGroup !== "other");
+    const other = allowedCountries.filter((country) => country.marketGroup === "other");
+    select.innerHTML = `
+      ${primary.length ? `<optgroup label="负责国家">${primary.map(optionHtml).join("")}</optgroup>` : ""}
+      ${other.length ? `<optgroup label="其他负责区域">${other.map(optionHtml).join("")}</optgroup>` : ""}
+    `;
+    select.disabled = false;
+    select.value = allowedCountries.some((country) => country.name === current)
+      ? current
+      : allowedCountries[0].name;
+  }
+  const regions = $("#scheduleTargetRegions");
+  if (regions) {
+    regions.textContent = salesUser
+      ? `负责区域：${assignedCountrySummary(assigned)}`
+      : "选择销售后，只显示该销售负责的国家。";
+  }
+}
+
+function renderScheduleTargetOptions() {
+  const select = $("#scheduleTargetUsername");
+  if (!select) return;
+  const current = select.value;
+  const users = scheduleSalesUsers();
+  select.innerHTML = users.length
+    ? users.map((user) =>
+      `<option value="${escapeHtml(user.username)}">${escapeHtml(user.username)} · ${escapeHtml(assignedCountrySummary(user.assignedCountries))}</option>`
+    ).join("")
+    : `<option value="">暂无可分配的销售账号</option>`;
+  select.disabled = !users.length;
+  select.value = users.some((user) => user.username === current)
+    ? current
+    : users[0]?.username || "";
+  const submit = $("#scheduleForm button[type='submit']");
+  if (submit) {
+    submit.disabled = !users.length;
+    submit.title = users.length ? "" : "请先在用户管理中创建销售账号并分配负责国家";
+  }
+  renderScheduleCountryOptions();
+}
+
 function leadRegionVerification(lead) {
   const ai = lead.aiReview && typeof lead.aiReview === "object" ? lead.aiReview : {};
   const target = [lead.country, lead.city].filter(Boolean).join(" · ") || "未指定";
@@ -2057,20 +2131,7 @@ function renderCountries() {
     ).join("");
     domesticSelect.value = domesticRegions.some((region) => region.value === domesticCurrent) ? domesticCurrent : "";
   }
-  const scheduleCountry = $("#scheduleCountry");
-  if (scheduleCountry) {
-    const scheduleCurrent = scheduleCountry.value;
-    const optionHtml = (country) => `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`;
-    const primary = countries.filter((country) => country.marketGroup !== "other");
-    const other = countries.filter((country) => country.marketGroup === "other");
-    scheduleCountry.innerHTML = `
-      <optgroup label="重点目标国家">${primary.map(optionHtml).join("")}</optgroup>
-      ${other.length ? `<optgroup label="其他可开发区域">${other.map(optionHtml).join("")}</optgroup>` : ""}
-    `;
-    scheduleCountry.value = countries.some((country) => country.name === scheduleCurrent)
-      ? scheduleCurrent
-      : countries[0]?.name || "";
-  }
+  renderScheduleTargetOptions();
   updateFinderMarketControls();
 }
 
@@ -6074,6 +6135,8 @@ function renderDiscoveryHistory() {
   const jobCards = discoveryJobs.map((job) => ({
     kind: job.distributionType === "admin_search_copy"
       ? "管理员搜索导入"
+      : job.distributionType === "scheduled_sales_delivery"
+        ? "系统定时获客"
       : isScheduledDiscoveryJob(job) ? "定时抓取" : "自动抓取",
     id: job.id || "",
     status: stateLabels[job.status] || job.status || "未知",
@@ -6257,11 +6320,10 @@ function renderDiscoverySchedules() {
   const runningKpi = $("#scheduleRunningCount");
   const completedKpi = $("#scheduleCompletedCount");
   const failedKpi = $("#scheduleFailedCount");
-  const scheduledJobs = discoveryJobs.filter((job) => isScheduledDiscoveryJob(job));
   if (enabledKpi) enabledKpi.textContent = String(enabledCount);
-  if (runningKpi) runningKpi.textContent = String(scheduledJobs.filter((job) => ["queued", "running"].includes(job.status)).length);
-  if (completedKpi) completedKpi.textContent = String(scheduledJobs.filter((job) => job.status === "completed").length);
-  if (failedKpi) failedKpi.textContent = String(scheduledJobs.filter((job) => ["failed", "canceled"].includes(job.status)).length);
+  if (runningKpi) runningKpi.textContent = String(discoverySchedules.filter((schedule) => ["queued", "running"].includes(schedule.lastJobStatus)).length);
+  if (completedKpi) completedKpi.textContent = String(discoverySchedules.filter((schedule) => schedule.lastJobStatus === "completed").length);
+  if (failedKpi) failedKpi.textContent = String(discoverySchedules.filter((schedule) => ["failed", "canceled"].includes(schedule.lastJobStatus)).length);
   const pageLabel = $("#schedulePageLabel");
   if (pageLabel) pageLabel.textContent = `${discoverySchedulePage} / ${pageCount}`;
   const prevPage = $("#schedulePrevPage");
@@ -6275,8 +6337,8 @@ function renderDiscoverySchedules() {
           <strong>${escapeHtml(schedule.payload?.planName || `${schedule.country || "未指定市场"} · ${discoverySourceLabel(schedule.sourceMode)}`)}</strong>
           <span class="${schedule.enabled ? "enabled" : "paused"}">${schedule.enabled ? "已启用" : "已暂停"}</span>
         </div>
-        <p>${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleIntervalLabel(schedule.intervalMinutes))} · 单次最多 ${Number(schedule.payload?.resultLimit || 90)} 条</p>
-        <small>下次执行：${escapeHtml(formatJobTime(schedule.nextRunAt))}${schedule.lastRunAt ? ` · 上次执行：${escapeHtml(formatJobTime(schedule.lastRunAt))}` : ""}</small>
+        <p>接收销售：${escapeHtml(schedule.targetUsername || "未指定")} · ${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleIntervalLabel(schedule.intervalMinutes))}</p>
+        <small>下次执行：${escapeHtml(formatJobTime(schedule.nextRunAt))}${schedule.lastRunAt ? ` · 上次执行：${escapeHtml(formatJobTime(schedule.lastRunAt))}` : ""}${schedule.lastJobStatus ? ` · 最近状态：${escapeHtml(discoveryJobStateLabels()[schedule.lastJobStatus] || schedule.lastJobStatus)}${schedule.lastImportedCount !== undefined ? `，导入 ${Number(schedule.lastImportedCount || 0)} 条` : ""}` : ""}</small>
       </div>
       <div class="schedule-actions">
         <button class="ghost compact" type="button" data-toggle-schedule="${escapeHtml(schedule.id)}">
@@ -6299,6 +6361,7 @@ function scheduledDiscoveryPayload(form) {
   const words = generateKeywords(goal, country, model, { searchDepth });
   return {
     planName: String(formData.planName || "").trim() || `${country} · ${discoverySourceLabel(sourceMode)}`,
+    targetUsername: String(formData.targetUsername || "").trim(),
     goal,
     country,
     domesticRegion: "",
@@ -6354,6 +6417,7 @@ async function saveDiscoverySchedule(event) {
     $("#scheduleEnabled").checked = true;
     $("#scheduleStartMode").value = "now";
     $("#scheduleInterval").value = "1440";
+    renderScheduleTargetOptions();
     const status = $("#scheduleStatus");
     if (status) status.textContent = "计划已保存";
   } catch (error) {
@@ -6361,7 +6425,7 @@ async function saveDiscoverySchedule(event) {
     if (status) status.textContent = `保存失败：${error.message}`;
   } finally {
     if (submitButton) {
-      submitButton.disabled = false;
+      submitButton.disabled = !scheduleSalesUsers().length;
       submitButton.textContent = "保存并启动计划";
     }
   }
@@ -6554,7 +6618,11 @@ async function deleteDiscoveryJob(jobId) {
 
 function discoveryJobLabel(job) {
   if (!job) return "";
-  const prefix = job.distributionType === "admin_search_copy" ? "管理员搜索导入 · " : "";
+  const prefix = job.distributionType === "admin_search_copy"
+    ? "管理员搜索导入 · "
+    : job.distributionType === "scheduled_sales_delivery"
+      ? "系统定时获客 · "
+      : "";
   return `${prefix}${job.country || "未指定市场"} · ${job.model || "未指定车型"} · ${formatJobTime(job.createdAt || job.updatedAt)}`;
 }
 
@@ -6885,6 +6953,7 @@ function bindForms() {
   });
 
   $("#scheduleForm")?.addEventListener("submit", saveDiscoverySchedule);
+  $("#scheduleTargetUsername")?.addEventListener("change", renderScheduleCountryOptions);
 
   $("#scheduleList")?.addEventListener("click", (event) => {
     const toggleButton = event.target.closest("[data-toggle-schedule]");
@@ -8972,7 +9041,9 @@ async function loadUsers() {
   const response = await apiFetch("/api/users", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
-  renderUsers(Array.isArray(result.users) ? result.users : []);
+  adminUsers = Array.isArray(result.users) ? result.users : [];
+  renderUsers(adminUsers);
+  renderScheduleTargetOptions();
 }
 
 function renderDiscoveryDistribution(data = {}) {

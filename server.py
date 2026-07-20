@@ -3191,6 +3191,7 @@ def discovery_job_public(job: dict) -> dict:
         "sourceJobId": str(payload.get("sourceJobId", "")),
         "scheduleId": str(payload.get("scheduleId", "")),
         "planName": str(payload.get("planName", "")),
+        "targetUsername": str(payload.get("targetUsername") or payload.get("scheduledForUsername") or ""),
     }
 
 
@@ -3211,6 +3212,9 @@ def parse_iso_datetime(value: str | datetime | None) -> datetime | None:
 
 def schedule_public(schedule: dict) -> dict:
     payload = schedule.get("payload") or {}
+    last_job_id = str(schedule.get("lastJobId") or "")
+    last_job = load_discovery_job(last_job_id) if last_job_id else None
+    last_result = last_job.get("result") if isinstance(last_job, dict) and isinstance(last_job.get("result"), dict) else {}
     return {
         "id": schedule.get("id", ""),
         "enabled": bool(schedule.get("enabled", True)),
@@ -3224,6 +3228,10 @@ def schedule_public(schedule: dict) -> dict:
         "model": str(payload.get("model", "")),
         "sourceMode": str(payload.get("sourceMode", "")),
         "goal": str(payload.get("goal", "")),
+        "targetUsername": str(payload.get("targetUsername", "")),
+        "lastJobStatus": str(last_job.get("status", "")) if last_job else "",
+        "lastImportedCount": int(last_result.get("importedCount") or 0) if last_job else 0,
+        "lastRawCount": int(last_result.get("rawCount") or last_result.get("count") or 0) if last_job else 0,
         "payload": payload,
     }
 
@@ -3240,6 +3248,23 @@ def normalize_schedule_payload(payload: dict) -> dict:
     normalized.setdefault("freshness", "all")
     normalized.setdefault("resultLimit", "90")
     return normalized
+
+
+def validate_schedule_target(payload: dict) -> dict:
+    target_username = normalize_username(payload.get("targetUsername"))
+    target = get_user(target_username)
+    if not target or target.get("role") != "user":
+        raise ValueError("请选择有效的销售账号")
+    if target.get("status") == "disabled":
+        raise ValueError("该销售账号已被禁用")
+    assigned = normalize_assigned_countries(target.get("assignedCountries"))
+    if ASSIGNED_COUNTRY_NONE in assigned:
+        raise ValueError("该销售账号尚未开通负责区域")
+    country = str(payload.get("country") or "")
+    if assigned and not assigned_country_matches(assigned, country):
+        raise ValueError("目标国家不在该销售的负责区域内")
+    payload["targetUsername"] = target_username
+    return target
 
 
 def schedule_interval_minutes(value) -> int:
@@ -3397,6 +3422,7 @@ def create_or_update_discovery_schedule(payload: dict, owner_username: str) -> d
     existing = load_discovery_schedule(schedule_id, owner_username) if schedule_id else None
     interval_minutes = schedule_interval_minutes(payload.get("intervalMinutes"))
     schedule_payload = normalize_schedule_payload(payload.get("payload") or payload)
+    validate_schedule_target(schedule_payload)
     enabled = bool(payload.get("enabled", True))
     start_mode = str(payload.get("startMode") or "delay")
     schedule = existing or {
@@ -3445,16 +3471,21 @@ def run_due_discovery_schedules() -> int:
         if not next_run or next_run > now:
             continue
         try:
+            schedule_payload = dict(schedule.get("payload") or {})
+            target = validate_schedule_target(schedule_payload)
+            target_username = target["username"]
             last_job_id = str(schedule.get("lastJobId") or "")
-            last_job = get_discovery_job(last_job_id, schedule["ownerUsername"]) if last_job_id else None
+            last_job = get_discovery_job(last_job_id) if last_job_id else None
             if last_job and last_job.get("status") in {"queued", "running"}:
                 schedule["nextRunAt"] = (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
                 schedule["updatedAt"] = now.isoformat(timespec="seconds")
                 save_discovery_schedule(schedule)
                 continue
-            job_payload = dict(schedule.get("payload") or {})
+            job_payload = schedule_payload
             job_payload["scheduleId"] = schedule["id"]
-            job = create_discovery_job(job_payload, schedule["ownerUsername"])
+            job_payload["scheduledForUsername"] = target_username
+            job_payload["distributionType"] = "scheduled_sales_delivery"
+            job = create_discovery_job(job_payload, target_username, assigned_by_admin=True)
             schedule["lastJobId"] = job.get("id", "")
             schedule["lastRunAt"] = now.isoformat(timespec="seconds")
             schedule["nextRunAt"] = (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
@@ -3741,6 +3772,77 @@ def recipient_distribution_blocked_keys(username: str) -> set[str]:
         for lead in (job.get("result") or {}).get("leads") or []:
             keys.update(distribution_lead_keys(lead))
     return keys
+
+
+def deliver_scheduled_result_to_sales(job_id: str, result: dict) -> dict | None:
+    job = load_discovery_job(job_id)
+    payload = job.get("payload") if isinstance(job, dict) else {}
+    if not isinstance(payload, dict) or payload.get("distributionType") != "scheduled_sales_delivery":
+        return None
+    target_username = str(payload.get("scheduledForUsername") or payload.get("targetUsername") or job.get("ownerUsername") or "")
+    validate_schedule_target({**payload, "targetUsername": target_username})
+    raw_leads = result.get("leads") if isinstance(result, dict) and isinstance(result.get("leads"), list) else []
+    minimum_score = int(control_value("quality", "minimumAutoImportScore", 40))
+    now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    imported = []
+    skipped = {"ineligible": 0, "existing": 0, "rejected": 0, "duplicateWebsite": 0}
+
+    with STATE_LOCK:
+        workspace = load_workspace_state(target_username)
+        state = workspace.get("state") or empty_workspace_state()
+        blocked = set()
+        rejected_keys = set()
+        for bucket in ("reviewLeads", "customers", "rejectedLeads"):
+            for existing in state.get(bucket) or []:
+                keys = distribution_lead_keys(existing)
+                blocked.update(keys)
+                if bucket == "rejectedLeads":
+                    rejected_keys.update(keys)
+
+        for raw_lead in raw_leads:
+            if not isinstance(raw_lead, dict):
+                skipped["ineligible"] += 1
+                continue
+            try:
+                score = int(float(raw_lead.get("score") or raw_lead.get("baseScore") or 0))
+            except (TypeError, ValueError):
+                score = 0
+            if raw_lead.get("autoImportEligible") is False or score < minimum_score:
+                skipped["ineligible"] += 1
+                continue
+            lead_keys = distribution_lead_keys(raw_lead)
+            if lead_keys and lead_keys.intersection(rejected_keys):
+                skipped["rejected"] += 1
+                continue
+            if lead_keys and lead_keys.intersection(blocked):
+                skipped["existing"] += 1
+                continue
+            lead = json.loads(json.dumps(raw_lead, ensure_ascii=False))
+            lead.setdefault("id", uuid.uuid4().hex)
+            lead["discoveryJobId"] = job_id
+            lead["discoveryJobLabel"] = (
+                f"系统定时获客 · {payload.get('country', '未指定市场')} · "
+                f"{payload.get('model', '华为系新能源汽车')}"
+            )
+            lead["discoveryJobImportedAt"] = now
+            lead["assignedTo"] = target_username
+            lead["stage"] = "待审核"
+            imported.append(lead)
+            blocked.update(lead_keys)
+
+        if imported:
+            state["reviewLeads"] = [*imported, *(state.get("reviewLeads") or [])][:5000]
+            save_workspace_state(target_username, state)
+
+    return {
+        "targetUsername": target_username,
+        "rawCount": len(raw_leads),
+        "importedCount": len(imported),
+        "skippedCount": max(0, len(raw_leads) - len(imported)),
+        "skipBreakdown": skipped,
+        "minimumScore": minimum_score,
+        "deliveredAt": now,
+    }
 
 
 def prepare_discovery_distribution(
@@ -4361,14 +4463,35 @@ def run_discovery_job(job_id: str, params: dict[str, list[str]]) -> None:
             heartbeat_thread.start()
             result = discover(params)
             heartbeat_stop.set()
+            delivery = None
+            delivery_error = ""
+            try:
+                delivery = deliver_scheduled_result_to_sales(job_id, result)
+            except Exception as exc:
+                delivery_error = clean_text(str(exc))[:500]
+                result["deliveryError"] = delivery_error
+            if delivery:
+                result["delivery"] = delivery
+                result["rawCount"] = delivery["rawCount"]
+                result["importedCount"] = delivery["importedCount"]
+                result["skippedCount"] = delivery["skippedCount"]
+                result["skipBreakdown"] = delivery["skipBreakdown"]
             update_discovery_job(
                 job_id,
                 skip_statuses=("canceled", "failed"),
                 status="completed",
                 stage="done",
                 progress=100,
-                message=f"云端搜索完成，共发现 {result.get('count', 0)} 条线索。",
+                message=(
+                    f"系统定时获客完成，发现 {result.get('count', 0)} 条，"
+                    f"已向 {delivery['targetUsername']} 的线索审核导入 {delivery['importedCount']} 条。"
+                    if delivery
+                    else f"云端搜索完成，但自动写入销售线索失败：{delivery_error}"
+                    if delivery_error
+                    else f"云端搜索完成，共发现 {result.get('count', 0)} 条线索。"
+                ),
                 result=result,
+                imported=bool(delivery),
             )
     except Exception as exc:
         diagnostics = discovery_failure_diagnostics(exc, params)
@@ -4415,6 +4538,9 @@ def discovery_params(payload: dict) -> dict[str, list[str]]:
     allowed_fields = {
         "planName",
         "scheduleId",
+        "targetUsername",
+        "scheduledForUsername",
+        "distributionType",
         "goal",
         "country",
         "model",
@@ -4483,12 +4609,18 @@ def count_active_discovery_jobs(owner_username: str) -> int:
     return int(row[0] if row else 0)
 
 
-def create_discovery_job(payload: dict, owner_username: str, *, force: bool = False) -> dict:
+def create_discovery_job(
+    payload: dict,
+    owner_username: str,
+    *,
+    force: bool = False,
+    assigned_by_admin: bool = False,
+) -> dict:
     cleanup_discovery_jobs()
     params = discovery_params(payload)
     normalized_payload = {key: value[0] for key, value in params.items()}
     owner_user = get_user(owner_username)
-    if owner_user:
+    if owner_user and not assigned_by_admin:
         ensure_user_can_use_discovery_payload(owner_user, normalized_payload)
     with DISCOVERY_CREATE_LOCK:
         if not force:

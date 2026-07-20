@@ -1844,6 +1844,14 @@ textarea {
   gap: 14px;
 }
 
+.finder-v2-form-grid label small {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 .finder-v2-goal {
   grid-column: span 3;
 }

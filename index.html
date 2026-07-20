@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2">
+  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-sales">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -410,7 +410,7 @@
         <div>
           <p class="eyebrow">Admin automation</p>
           <h2>自动找客户2.0</h2>
-          <p>仅管理员可用。计划保存后由服务器定时在后台抓取，关闭页面不会中断；同一计划不会并发重复执行。</p>
+          <p>仅管理员可用。为销售设置国家和来源后，服务器定时抓取并直接写入该销售的线索审核；销售无需创建任务或手动导入。</p>
         </div>
         <span class="schedule-status" id="scheduleStatus">正在读取计划</span>
       </div>
@@ -426,7 +426,7 @@
         <div class="panel-head">
           <div>
             <h3>新建后台抓取计划</h3>
-            <p>每个国家和平台建议单独建立计划，方便暂停、核对成本和判断数据质量。</p>
+            <p>先选接收销售，再从其负责区域中选择国家。每个销售、国家和平台建议单独建立计划。</p>
           </div>
           <label class="toggle-line finder-v2-toggle">
             <input type="checkbox" name="enabled" id="scheduleEnabled" checked>
@@ -436,6 +436,12 @@
         <div class="finder-v2-form-grid">
           <label>计划名称
             <input name="planName" maxlength="60" placeholder="例如：尼日利亚 Instagram 每日车商">
+          </label>
+          <label>接收销售
+            <select name="targetUsername" id="scheduleTargetUsername" required>
+              <option value="">正在读取销售账号…</option>
+            </select>
+            <small id="scheduleTargetRegions">计划只能选择该销售负责的国家。</small>
           </label>
           <label>目标国家
             <select name="country" id="scheduleCountry" required></select>
@@ -500,7 +506,7 @@
           </label>
         </div>
         <div class="finder-v2-form-actions">
-          <p>结果继续使用现有去重、评分和线索审核规则；上一轮未结束时，本轮会自动跳过，避免重复消耗 API 额度。</p>
+          <p>服务器会按最低40分、地区匹配、汽车企业身份和跨客户池去重规则直接导入该销售的待审核线索；上一轮未结束时自动跳过。</p>
           <button class="primary" type="submit">保存并启动计划</button>
         </div>
       </form>
@@ -1375,6 +1381,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-finder-v2"></script>
+  <script src="./script.js?v=20260720-finder-v2-sales"></script>
 </body>
 </html>
