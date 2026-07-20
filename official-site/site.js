@@ -1533,5 +1533,187 @@ function initializePremiumInteraction() {
   });
 }
 
+function initializeShowroomMotion() {
+  if (!window.Motion || document.body.classList.contains("motion-library-ready")) return;
+
+  const { animate, inView, scroll, stagger } = window.Motion;
+  const hero = document.querySelector(".company-hero");
+  const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  document.body.classList.add("motion-library-ready");
+
+  if (hero) {
+    const lightField = document.createElement("div");
+    lightField.className = "showroom-light-field";
+    lightField.setAttribute("aria-hidden", "true");
+    lightField.innerHTML = `
+      <span class="showroom-beam beam-a"></span>
+      <span class="showroom-beam beam-b"></span>
+      <span class="showroom-horizon"></span>
+    `;
+    hero.prepend(lightField);
+
+    animate(".showroom-light-field .beam-a", {
+      x: ["-10%", "13%"],
+      opacity: [.16, .34],
+      rotate: [-10, -4]
+    }, {
+      duration: 8,
+      ease: "easeInOut",
+      repeat: Infinity,
+      repeatType: "mirror"
+    });
+    animate(".showroom-light-field .beam-b", {
+      x: ["9%", "-8%"],
+      opacity: [.08, .22],
+      rotate: [9, 3]
+    }, {
+      duration: 10,
+      ease: "easeInOut",
+      repeat: Infinity,
+      repeatType: "mirror"
+    });
+    animate(".showroom-light-field .showroom-horizon", {
+      opacity: [.2, .5],
+      scaleX: [.88, 1.06]
+    }, {
+      duration: 5.5,
+      ease: "easeInOut",
+      repeat: Infinity,
+      repeatType: "mirror"
+    });
+
+    const heroCopy = hero.querySelector(".hero-copy");
+    const proofPanel = hero.querySelector(".proof-panel");
+    if (heroCopy) {
+      scroll(animate(heroCopy, {
+        y: [0, -38],
+        opacity: [1, .68]
+      }, { ease: "linear" }), {
+        target: hero,
+        offset: ["start start", "end start"]
+      });
+    }
+    if (proofPanel) {
+      scroll(animate(proofPanel, {
+        y: [0, -22],
+        x: [0, 18],
+        opacity: [1, .72]
+      }, { ease: "linear" }), {
+        target: hero,
+        offset: ["start start", "end start"]
+      });
+    }
+    scroll(animate(lightField, {
+      y: [0, 72],
+      scale: [1, 1.08],
+      opacity: [1, .62]
+    }, { ease: "linear" }), {
+      target: hero,
+      offset: ["start start", "end start"]
+    });
+  }
+
+  document.querySelectorAll(".choice-card").forEach((card) => {
+    const media = card.querySelector(".choice-media img");
+    const index = card.querySelector(".choice-topline span");
+    if (!media) return;
+    inView(card, () => {
+      animate(media, {
+        scale: [1.055, 1],
+        filter: ["saturate(.72) contrast(.94)", "saturate(1) contrast(1)"]
+      }, {
+        duration: 1.05,
+        ease: [.22, 1, .36, 1]
+      });
+      if (index) {
+        animate(index, {
+          opacity: [.25, 1],
+          x: [-8, 0]
+        }, {
+          duration: .55,
+          delay: .16,
+          ease: "easeOut"
+        });
+      }
+    }, { amount: .2 });
+  });
+
+  const processMap = document.querySelector(".process-map");
+  if (processMap) {
+    inView(processMap, () => {
+      animate(processMap.querySelectorAll("li"), {
+        y: [0, -5, 0],
+        filter: ["brightness(1)", "brightness(1.07)", "brightness(1)"]
+      }, {
+        duration: .7,
+        delay: stagger(.075),
+        ease: "easeInOut"
+      });
+    }, { amount: .28 });
+  }
+
+  if (finePointer) {
+    const aura = document.createElement("div");
+    aura.className = "cursor-aura";
+    aura.setAttribute("aria-hidden", "true");
+    document.body.appendChild(aura);
+
+    let currentX = window.innerWidth * .5;
+    let currentY = window.innerHeight * .35;
+    let targetX = currentX;
+    let targetY = currentY;
+    let auraFrame = 0;
+
+    const renderAura = () => {
+      currentX += (targetX - currentX) * .115;
+      currentY += (targetY - currentY) * .115;
+      aura.style.transform = `translate3d(${currentX - 170}px, ${currentY - 170}px, 0)`;
+      auraFrame = requestAnimationFrame(renderAura);
+    };
+
+    window.addEventListener("pointermove", (event) => {
+      targetX = event.clientX;
+      targetY = event.clientY;
+      aura.classList.add("is-active");
+    }, { passive: true });
+    document.addEventListener("mouseleave", () => aura.classList.remove("is-active"));
+    auraFrame = requestAnimationFrame(renderAura);
+
+    window.addEventListener("pagehide", () => cancelAnimationFrame(auraFrame), { once: true });
+  }
+}
+
+function loadShowroomMotion() {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const wideViewport = window.matchMedia("(min-width: 761px)").matches;
+  if (reduceMotion || !wideViewport || document.body.classList.contains("legal-page")) return;
+
+  const load = () => {
+    if (window.Motion) {
+      initializeShowroomMotion();
+      return;
+    }
+    if (document.querySelector('script[data-showroom-motion]')) return;
+    const script = document.createElement("script");
+    script.src = "./assets/vendor/motion-12.42.2.min.js";
+    script.defer = true;
+    script.dataset.showroomMotion = "true";
+    script.addEventListener("load", initializeShowroomMotion, { once: true });
+    document.head.appendChild(script);
+  };
+
+  const schedule = () => {
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(load, { timeout: 1400 });
+    } else {
+      window.setTimeout(load, 300);
+    }
+  };
+
+  if (document.readyState === "complete") schedule();
+  else window.addEventListener("load", schedule, { once: true });
+}
+
 initializeSiteMotion();
 initializePremiumInteraction();
+loadShowroomMotion();

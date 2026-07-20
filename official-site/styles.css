@@ -3657,6 +3657,122 @@ html[dir="rtl"] .choice-card:hover > strong {
   display: none;
 }
 
+/* Optional showroom layer. Motion is loaded after the critical page is ready. */
+.showroom-light-field {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.showroom-beam {
+  position: absolute;
+  top: -18%;
+  bottom: -18%;
+  width: 28%;
+  border-radius: 50%;
+  background: linear-gradient(90deg, transparent, rgba(255, 213, 139, .16), rgba(255, 255, 255, .22), transparent);
+  filter: blur(18px);
+  opacity: 0;
+  will-change: transform, opacity;
+}
+
+.showroom-beam.beam-a {
+  left: 48%;
+}
+
+.showroom-beam.beam-b {
+  left: 68%;
+  width: 18%;
+  background: linear-gradient(90deg, transparent, rgba(148, 196, 255, .14), rgba(255, 255, 255, .15), transparent);
+}
+
+.showroom-horizon {
+  position: absolute;
+  right: 7%;
+  bottom: 16%;
+  width: 44%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 219, 159, .72), transparent);
+  box-shadow: 0 0 24px rgba(255, 207, 129, .38);
+  transform-origin: center;
+  will-change: transform, opacity;
+}
+
+.motion-library-ready .company-hero {
+  box-shadow: inset 0 -1px rgba(255, 255, 255, .15);
+}
+
+.motion-library-ready .company-hero .hero-copy,
+.motion-library-ready .company-hero .proof-panel,
+.motion-library-ready .showroom-light-field {
+  will-change: transform, opacity;
+}
+
+.motion-library-ready .choice-media {
+  overflow: hidden;
+}
+
+.motion-library-ready .choice-media img {
+  will-change: transform, filter;
+}
+
+.motion-library-ready .choice-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  z-index: 5;
+  border: 1px solid transparent;
+  background: linear-gradient(120deg, transparent 22%, rgba(202, 151, 68, .75), transparent 47%) border-box;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) padding-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  opacity: 0;
+  transform: translateX(-18%);
+  transition: opacity .3s ease, transform .8s var(--motion-ease, ease);
+  pointer-events: none;
+}
+
+.motion-library-ready .choice-card:hover::before,
+.motion-library-ready .choice-card:focus-visible::before {
+  opacity: .78;
+  transform: translateX(18%);
+}
+
+.cursor-aura {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 24;
+  width: 340px;
+  height: 340px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(214, 168, 89, .1) 0%, rgba(214, 168, 89, .035) 34%, transparent 69%);
+  opacity: 0;
+  transition: opacity .35s ease;
+  mix-blend-mode: screen;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.cursor-aura.is-active {
+  opacity: 1;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .motion-library-ready .section-heading h2 {
+    transition: letter-spacing .5s var(--motion-ease, ease);
+  }
+
+  .motion-library-ready .section-heading:hover h2 {
+    letter-spacing: .012em;
+  }
+}
+
 @supports (animation-timeline: view()) {
   @media (prefers-reduced-motion: no-preference) {
     .aito-model-media img,
@@ -3749,6 +3865,11 @@ html[dir="rtl"] .choice-card:hover > strong {
     display: none;
   }
 
+  .showroom-light-field,
+  .cursor-aura {
+    display: none;
+  }
+
   .choice-card:hover .choice-topline,
   .choice-card:hover h3,
   .choice-card:hover p,
@@ -3786,5 +3907,11 @@ html[dir="rtl"] .choice-card:hover > strong {
   .button,
   .model-quote-bar a {
     transform: none !important;
+  }
+
+  .showroom-light-field,
+  .cursor-aura,
+  .motion-library-ready .choice-card::before {
+    display: none;
   }
 }
