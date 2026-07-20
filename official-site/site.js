@@ -1180,6 +1180,8 @@ async function initializeVisitorLanguage() {
     applyLanguage(browserPreferredLanguage(), { persist: false });
   }
 
+  if (hasManualChoice) return;
+
   const country = await detectVisitorCountry();
   if (!country) return;
   document.documentElement.dataset.visitorCountry = country;
@@ -1379,7 +1381,6 @@ document.querySelector("#websiteInquiryForm")?.addEventListener("submit", async 
 
 function initializeSiteMotion() {
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const compactViewport = window.matchMedia("(max-width: 640px)").matches;
   document.body.classList.add("motion-ready");
 
   const groups = [
@@ -1399,7 +1400,7 @@ function initializeSiteMotion() {
     });
   });
 
-  if (reduceMotion || compactViewport || !("IntersectionObserver" in window)) {
+  if (reduceMotion || !("IntersectionObserver" in window)) {
     revealItems.forEach((element) => element.classList.add("is-visible"));
   } else {
     const revealObserver = new IntersectionObserver((entries, observer) => {
@@ -1445,7 +1446,7 @@ function initializeSiteMotion() {
     const target = Number(match[1].replace(/,/g, ""));
     const suffix = match[2];
     node.dataset.countTo = String(target);
-    if (reduceMotion || compactViewport || target > 100000) return;
+    if (reduceMotion || target > 100000) return;
     const countObserver = new IntersectionObserver(([entry], observer) => {
       if (!entry.isIntersecting) return;
       observer.unobserve(node);
@@ -1463,4 +1464,74 @@ function initializeSiteMotion() {
   });
 }
 
+function initializePremiumInteraction() {
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+  if (!document.querySelector(".page-progress") && !document.body.classList.contains("legal-page")) {
+    const progress = document.createElement("div");
+    progress.className = "page-progress";
+    progress.setAttribute("aria-hidden", "true");
+    document.body.prepend(progress);
+  }
+
+  document.querySelectorAll(".choice-grid").forEach((grid) => {
+    if (grid.nextElementSibling?.classList.contains("choice-scroll-progress")) return;
+    const progress = document.createElement("div");
+    progress.className = "choice-scroll-progress";
+    progress.setAttribute("aria-hidden", "true");
+    progress.innerHTML = "<span></span>";
+    grid.after(progress);
+
+    let queued = false;
+    const update = () => {
+      queued = false;
+      const max = grid.scrollWidth - grid.clientWidth;
+      const ratio = max > 0 ? Math.min(Math.abs(grid.scrollLeft) / max, 1) : 0;
+      progress.style.setProperty("--choice-progress", String(ratio));
+      progress.classList.toggle("is-scrollable", max > 12);
+    };
+    grid.addEventListener("scroll", () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(update);
+    }, { passive: true });
+    window.addEventListener("resize", update, { passive: true });
+    requestAnimationFrame(update);
+  });
+
+  if (reduceMotion || !finePointer) return;
+
+  document.querySelectorAll(".choice-card").forEach((card) => {
+    card.addEventListener("pointermove", (event) => {
+      const rect = card.getBoundingClientRect();
+      const x = (event.clientX - rect.left) / rect.width;
+      const y = (event.clientY - rect.top) / rect.height;
+      card.style.setProperty("--tilt-x", `${(0.5 - y) * 3.2}deg`);
+      card.style.setProperty("--tilt-y", `${(x - 0.5) * 3.2}deg`);
+      card.style.setProperty("--shine-x", `${x * 100}%`);
+      card.style.setProperty("--shine-y", `${y * 100}%`);
+      card.classList.add("is-pointer-active");
+    });
+    card.addEventListener("pointerleave", () => {
+      card.style.setProperty("--tilt-x", "0deg");
+      card.style.setProperty("--tilt-y", "0deg");
+      card.classList.remove("is-pointer-active");
+    });
+  });
+
+  document.querySelectorAll(".hero-actions .button, .model-quote-bar a").forEach((button) => {
+    button.addEventListener("pointermove", (event) => {
+      const rect = button.getBoundingClientRect();
+      button.style.setProperty("--magnetic-x", `${((event.clientX - rect.left) / rect.width - 0.5) * 5}px`);
+      button.style.setProperty("--magnetic-y", `${((event.clientY - rect.top) / rect.height - 0.5) * 4}px`);
+    });
+    button.addEventListener("pointerleave", () => {
+      button.style.setProperty("--magnetic-x", "0px");
+      button.style.setProperty("--magnetic-y", "0px");
+    });
+  });
+}
+
 initializeSiteMotion();
+initializePremiumInteraction();
