@@ -9314,8 +9314,7 @@ def instagram_market_hashtags(country: str, market: str, cities: list[str]) -> l
         "kg": ("bishkekauto", "avtosalonbishkek"),
         "uz": ("tashkentauto", "toshkentavto", "avtosalontashkent"),
     }.get(country_search_meta(country).get("code", ""), ())
-    hashtags.extend(local_terms)
-    return list(dict.fromkeys(tag for tag in hashtags if tag))[:8]
+    return list(dict.fromkeys(tag for tag in [*local_terms, *hashtags] if tag))[:8]
 
 
 def search_apify_instagram_hashtag_accounts(
@@ -9332,7 +9331,7 @@ def search_apify_instagram_hashtag_accounts(
         return []
     direct_urls = [
         f"https://www.instagram.com/explore/tags/{urllib.parse.quote(tag, safe='')}/"
-        for tag in hashtags[:6]
+        for tag in hashtags[:8]
     ]
     per_url_limit = max(2, (limit + len(direct_urls) - 1) // len(direct_urls))
     payload = {
