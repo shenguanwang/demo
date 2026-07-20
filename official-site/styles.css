@@ -3705,8 +3705,6 @@ html[dir="rtl"] .choice-card:hover > strong {
   box-shadow: inset 0 -1px rgba(255, 255, 255, .15);
 }
 
-.motion-library-ready .company-hero .hero-copy,
-.motion-library-ready .company-hero .proof-panel,
 .motion-library-ready .showroom-light-field {
   will-change: transform, opacity;
 }

@@ -1582,27 +1582,6 @@ function initializeShowroomMotion() {
       repeatType: "mirror"
     });
 
-    const heroCopy = hero.querySelector(".hero-copy");
-    const proofPanel = hero.querySelector(".proof-panel");
-    if (heroCopy) {
-      scroll(animate(heroCopy, {
-        y: [0, -38],
-        opacity: [1, .68]
-      }, { ease: "linear" }), {
-        target: hero,
-        offset: ["start start", "end start"]
-      });
-    }
-    if (proofPanel) {
-      scroll(animate(proofPanel, {
-        y: [0, -22],
-        x: [0, 18],
-        opacity: [1, .72]
-      }, { ease: "linear" }), {
-        target: hero,
-        offset: ["start start", "end start"]
-      });
-    }
     scroll(animate(lightField, {
       y: [0, 72],
       scale: [1, 1.08],
