@@ -2057,6 +2057,20 @@ function renderCountries() {
     ).join("");
     domesticSelect.value = domesticRegions.some((region) => region.value === domesticCurrent) ? domesticCurrent : "";
   }
+  const scheduleCountry = $("#scheduleCountry");
+  if (scheduleCountry) {
+    const scheduleCurrent = scheduleCountry.value;
+    const optionHtml = (country) => `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`;
+    const primary = countries.filter((country) => country.marketGroup !== "other");
+    const other = countries.filter((country) => country.marketGroup === "other");
+    scheduleCountry.innerHTML = `
+      <optgroup label="重点目标国家">${primary.map(optionHtml).join("")}</optgroup>
+      ${other.length ? `<optgroup label="其他可开发区域">${other.map(optionHtml).join("")}</optgroup>` : ""}
+    `;
+    scheduleCountry.value = countries.some((country) => country.name === scheduleCurrent)
+      ? scheduleCurrent
+      : countries[0]?.name || "";
+  }
   updateFinderMarketControls();
 }
 
@@ -4761,7 +4775,8 @@ function updateSocialProspectingQueries() {
   ].map((query) =>
     `<a href="https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(query)}" target="_blank" rel="noopener noreferrer" data-social-platform="LinkedIn">${escapeHtml(query)} ↗</a>`
   ).join("");
-  $("#extraSocialSearchLinks").innerHTML = "";
+  const extraLinks = $("#extraSocialSearchLinks");
+  if (extraLinks) extraLinks.innerHTML = "";
 }
 
 function socialPlatformFromUrl(url) {
@@ -5845,6 +5860,7 @@ const mobileSectionTitles = {
   overview: "全球销售总览",
   market: "市场选择",
   "lead-finder": "自动找客户",
+  "lead-finder-v2": "自动找客户2.0",
   review: "线索审核",
   crm: "客户池 CRM",
   "website-leads": "独立站线索",
@@ -5896,6 +5912,9 @@ function bindMobileNavigation() {
 }
 
 function showSection(id) {
+  if (id === "lead-finder-v2" && currentSession && currentSession.role !== "admin") {
+    id = "overview";
+  }
   $$(".section").forEach((section) => section.classList.toggle("active", section.id === id));
   $$(".nav button").forEach((button) => button.classList.toggle("active", button.dataset.section === id));
   $("#userManagementNav")?.classList.toggle("active", id === "user-management");
@@ -5967,7 +5986,8 @@ function discoveryJobStateLabels() {
 }
 
 function isScheduledDiscoveryJob(job) {
-  return discoverySchedules.some((schedule) => schedule.lastJobId && schedule.lastJobId === job.id);
+  return Boolean(job?.scheduleId)
+    || discoverySchedules.some((schedule) => schedule.lastJobId && schedule.lastJobId === job.id);
 }
 
 function discoveryJobRawCount(job) {
@@ -6233,6 +6253,15 @@ function renderDiscoverySchedules() {
   if (status) status.textContent = discoverySchedules.length
     ? `${enabledCount} 个启用 / ${discoverySchedules.length} 个计划`
     : "未设置计划";
+  const enabledKpi = $("#scheduleEnabledCount");
+  const runningKpi = $("#scheduleRunningCount");
+  const completedKpi = $("#scheduleCompletedCount");
+  const failedKpi = $("#scheduleFailedCount");
+  const scheduledJobs = discoveryJobs.filter((job) => isScheduledDiscoveryJob(job));
+  if (enabledKpi) enabledKpi.textContent = String(enabledCount);
+  if (runningKpi) runningKpi.textContent = String(scheduledJobs.filter((job) => ["queued", "running"].includes(job.status)).length);
+  if (completedKpi) completedKpi.textContent = String(scheduledJobs.filter((job) => job.status === "completed").length);
+  if (failedKpi) failedKpi.textContent = String(scheduledJobs.filter((job) => ["failed", "canceled"].includes(job.status)).length);
   const pageLabel = $("#schedulePageLabel");
   if (pageLabel) pageLabel.textContent = `${discoverySchedulePage} / ${pageCount}`;
   const prevPage = $("#schedulePrevPage");
@@ -6243,10 +6272,10 @@ function renderDiscoverySchedules() {
     <article class="schedule-item">
       <div>
         <div class="schedule-title">
-          <strong>${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(schedule.model || "未指定车型")}</strong>
+          <strong>${escapeHtml(schedule.payload?.planName || `${schedule.country || "未指定市场"} · ${discoverySourceLabel(schedule.sourceMode)}`)}</strong>
           <span class="${schedule.enabled ? "enabled" : "paused"}">${schedule.enabled ? "已启用" : "已暂停"}</span>
         </div>
-        <p>${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleIntervalLabel(schedule.intervalMinutes))}</p>
+        <p>${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(discoverySourceLabel(schedule.sourceMode))} · ${escapeHtml(scheduleIntervalLabel(schedule.intervalMinutes))} · 单次最多 ${Number(schedule.payload?.resultLimit || 90)} 条</p>
         <small>下次执行：${escapeHtml(formatJobTime(schedule.nextRunAt))}${schedule.lastRunAt ? ` · 上次执行：${escapeHtml(formatJobTime(schedule.lastRunAt))}` : ""}</small>
       </div>
       <div class="schedule-actions">
@@ -6256,32 +6285,38 @@ function renderDiscoverySchedules() {
         <button class="danger-button compact" type="button" data-delete-schedule="${escapeHtml(schedule.id)}">删除</button>
       </div>
     </article>
-  `).join("") : `<p class="empty">暂无定时计划。设置左侧找客户条件后，点击“保存定时抓取计划”。</p>`;
+  `).join("") : `<p class="empty">暂无后台抓取计划。请在上方设置国家、来源和频率后保存。</p>`;
   renderDiscoveryHistory();
 }
 
-function currentDiscoveryPayload() {
-  const form = $("#finderForm");
-  const data = normalizeFinderPayload(Object.fromEntries(new FormData(form).entries()), form);
-  const words = generateKeywords(data.goal, data.country, data.model, {
-    searchDepth: data.searchDepth,
-    domesticRegion: data.domesticRegion
-  });
+function scheduledDiscoveryPayload(form) {
+  const formData = Object.fromEntries(new FormData(form).entries());
+  const country = String(formData.country || "").trim();
+  const model = "华为系新能源汽车";
+  const sourceMode = String(formData.sourceMode || "combined");
+  const searchDepth = String(formData.searchDepth || "standard");
+  const goal = String(formData.goal || "").trim() || finderGoalText(country, model);
+  const words = generateKeywords(goal, country, model, { searchDepth });
   return {
-    goal: data.goal,
-    country: data.country,
-    domesticRegion: data.domesticRegion,
-    model: data.model,
-    sourceMode: data.sourceMode,
-    accountScope: data.accountScope,
-    freshness: data.freshness,
-    searchDepth: data.searchDepth,
-    resultLimit: 90,
+    planName: String(formData.planName || "").trim() || `${country} · ${discoverySourceLabel(sourceMode)}`,
+    goal,
+    country,
+    domesticRegion: "",
+    model,
+    sourceMode,
+    accountScope: String(formData.accountScope || "both"),
+    freshness: String(formData.freshness || "all"),
+    searchDepth,
+    resultLimit: Math.max(10, Math.min(90, Number(formData.resultLimit || 90))),
     keywords: words.join(" | ")
   };
 }
 
 async function loadDiscoverySchedules() {
+  if (currentSession?.role !== "admin") {
+    discoverySchedules = [];
+    return discoverySchedules;
+  }
   const response = await apiFetch("/api/discover/schedules", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -6304,7 +6339,7 @@ async function saveDiscoverySchedule(event) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        payload: currentDiscoveryPayload(),
+        payload: scheduledDiscoveryPayload(form),
         intervalMinutes: formData.intervalMinutes,
         startMode: formData.startMode,
         enabled: Boolean(formData.enabled)
@@ -6315,6 +6350,10 @@ async function saveDiscoverySchedule(event) {
     discoverySchedulePage = 1;
     await loadDiscoverySchedules();
     await loadDiscoveryJobs().catch(() => undefined);
+    form.reset();
+    $("#scheduleEnabled").checked = true;
+    $("#scheduleStartMode").value = "now";
+    $("#scheduleInterval").value = "1440";
     const status = $("#scheduleStatus");
     if (status) status.textContent = "计划已保存";
   } catch (error) {
@@ -6323,7 +6362,7 @@ async function saveDiscoverySchedule(event) {
   } finally {
     if (submitButton) {
       submitButton.disabled = false;
-      submitButton.textContent = "保存定时抓取计划";
+      submitButton.textContent = "保存并启动计划";
     }
   }
 }
@@ -7231,6 +7270,21 @@ function bindForms() {
     showSection("crm");
   });
 
+  $("#refreshDiscoverySchedules")?.addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const finishButtonLoading = startButtonLoading(button, "刷新中");
+    try {
+      await Promise.all([loadDiscoverySchedules(), loadDiscoveryJobs({ autoImport: false })]);
+      finishButtonLoading("刷新成功", { autoResetMs: 1600 });
+      const status = $("#scheduleStatus");
+      if (status) status.textContent = "刷新成功，计划和任务状态已更新";
+    } catch (error) {
+      finishButtonLoading("刷新失败", { autoResetMs: 1600 });
+      const status = $("#scheduleStatus");
+      if (status) status.textContent = `刷新失败：${error.message}`;
+    }
+  });
+
   $("#leadParserForm")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
@@ -7965,6 +8019,10 @@ async function loadSession() {
   if (userManagementNav) userManagementNav.hidden = session.role !== "admin";
   const systemSettingsNav = $("#systemSettingsNav");
   if (systemSettingsNav) systemSettingsNav.hidden = session.role !== "admin";
+  const autoFinderV2Nav = $("#autoFinderV2Nav");
+  if (autoFinderV2Nav) autoFinderV2Nav.hidden = session.role !== "admin";
+  const autoFinderV2Section = $("#lead-finder-v2");
+  if (autoFinderV2Section) autoFinderV2Section.hidden = session.role !== "admin";
   const userManagementSection = $("#user-management");
   if (userManagementSection) userManagementSection.hidden = session.role !== "admin";
   const systemSettingsSection = $("#system-settings");
@@ -7978,6 +8036,9 @@ async function loadSession() {
   const passwordForm = $("#accountPasswordForm");
   if (passwordForm) passwordForm.hidden = session.role === "admin";
   if (session.role === "admin" && window.location.hash === "#account-settings-page") {
+    showSection("overview");
+  }
+  if (session.role !== "admin" && window.location.hash === "#lead-finder-v2") {
     showSection("overview");
   }
   return session;
@@ -9095,14 +9156,16 @@ async function init() {
       $("#discoveryJobList").innerHTML = `<p class="empty">任务读取失败：${escapeHtml(error.message)}</p>`;
     }
   });
-  loadDiscoverySchedules().catch((error) => {
-    if ($("#scheduleList")) {
-      $("#scheduleList").innerHTML = `<p class="empty">定时计划读取失败：${escapeHtml(error.message)}</p>`;
-    }
-  });
+  if (currentSession?.role === "admin") {
+    loadDiscoverySchedules().catch((error) => {
+      if ($("#scheduleList")) {
+        $("#scheduleList").innerHTML = `<p class="empty">定时计划读取失败：${escapeHtml(error.message)}</p>`;
+      }
+    });
+  }
   discoveryJobsTimer = window.setInterval(() => {
     loadDiscoveryJobs().catch(() => undefined);
-    loadDiscoverySchedules().catch(() => undefined);
+    if (currentSession?.role === "admin") loadDiscoverySchedules().catch(() => undefined);
   }, 5_000);
   window.addEventListener("online", () => {
     hydrateCloudState(true).catch(() => undefined);

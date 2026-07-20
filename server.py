@@ -3189,6 +3189,8 @@ def discovery_job_public(job: dict) -> dict:
         "distributedBy": str(payload.get("distributedBy", "")),
         "sourceOwnerUsername": str(payload.get("sourceOwnerUsername", "")),
         "sourceJobId": str(payload.get("sourceJobId", "")),
+        "scheduleId": str(payload.get("scheduleId", "")),
+        "planName": str(payload.get("planName", "")),
     }
 
 
@@ -3436,11 +3438,23 @@ def run_due_discovery_schedules() -> int:
     for schedule in list_discovery_schedules(None, limit=200):
         if not schedule.get("enabled"):
             continue
+        owner = get_user(schedule.get("ownerUsername", ""))
+        if not owner or owner.get("role") != "admin":
+            continue
         next_run = parse_iso_datetime(schedule.get("nextRunAt"))
         if not next_run or next_run > now:
             continue
         try:
-            job = create_discovery_job(schedule.get("payload") or {}, schedule["ownerUsername"])
+            last_job_id = str(schedule.get("lastJobId") or "")
+            last_job = get_discovery_job(last_job_id, schedule["ownerUsername"]) if last_job_id else None
+            if last_job and last_job.get("status") in {"queued", "running"}:
+                schedule["nextRunAt"] = (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
+                schedule["updatedAt"] = now.isoformat(timespec="seconds")
+                save_discovery_schedule(schedule)
+                continue
+            job_payload = dict(schedule.get("payload") or {})
+            job_payload["scheduleId"] = schedule["id"]
+            job = create_discovery_job(job_payload, schedule["ownerUsername"])
             schedule["lastJobId"] = job.get("id", "")
             schedule["lastRunAt"] = now.isoformat(timespec="seconds")
             schedule["nextRunAt"] = (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
@@ -4399,6 +4413,8 @@ def launch_discovery_worker(job_id: str, params: dict[str, list[str]]) -> bool:
 
 def discovery_params(payload: dict) -> dict[str, list[str]]:
     allowed_fields = {
+        "planName",
+        "scheduleId",
         "goal",
         "country",
         "model",
@@ -14044,8 +14060,11 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/discover/schedules":
             if not self.require_auth(api=True):
                 return
+            user = self.require_admin()
+            if not user:
+                return
             try:
-                schedules = [schedule_public(schedule) for schedule in list_discovery_schedules(self.current_user()["username"])]
+                schedules = [schedule_public(schedule) for schedule in list_discovery_schedules(user["username"])]
                 self.send_json(200, {"ok": True, "schedules": schedules})
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
@@ -14444,6 +14463,9 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/discover/schedules":
+            user = self.require_admin()
+            if not user:
+                return
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
@@ -14452,13 +14474,13 @@ class Handler(SimpleHTTPRequestHandler):
                 action = str(payload.get("action") or "save")
                 if action == "delete":
                     schedule_id = str(payload.get("id", ""))
-                    if not delete_discovery_schedule(schedule_id, self.current_user()["username"]):
+                    if not delete_discovery_schedule(schedule_id, user["username"]):
                         self.send_json(404, {"ok": False, "error": "定时计划不存在"})
                         return
                     self.send_json(200, {"ok": True, "id": schedule_id})
                     return
-                ensure_user_can_use_discovery_payload(self.current_user(), payload)
-                schedule = create_or_update_discovery_schedule(payload, self.current_user()["username"])
+                ensure_user_can_use_discovery_payload(user, payload)
+                schedule = create_or_update_discovery_schedule(payload, user["username"])
                 self.send_json(200, {"ok": True, "schedule": schedule})
             except PermissionError as exc:
                 self.send_json(403, {"ok": False, "error": str(exc)})

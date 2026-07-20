@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-customer-import">
+  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -27,6 +27,7 @@
       <button class="active" data-section="overview"><span>⌂</span>总览</button>
       <button data-section="market"><span>01</span>市场选择</button>
       <button data-section="lead-finder"><span>02</span>自动找客户</button>
+      <button class="nav-submenu" id="autoFinderV2Nav" data-section="lead-finder-v2" type="button" hidden><span></span>自动找客户2.0</button>
       <button data-section="review"><span>03</span>线索审核</button>
       <button data-section="crm"><span>04</span>客户池 CRM</button>
       <button data-section="website-leads"><span>05</span>独立站线索 <b id="websiteLeadCount">0</b></button>
@@ -294,47 +295,6 @@
           </div>
         </div>
       </div>
-      <div class="panel section-gap scheduled-discovery">
-        <div class="panel-head">
-          <div>
-            <h3>定时自动抓取</h3>
-            <p>把左侧当前找客户条件保存为计划，到时间后后台自动创建获客任务，结果会出现在下方云端获客任务里。</p>
-          </div>
-          <div class="schedule-panel-actions">
-            <span class="schedule-status" id="scheduleStatus">等待设置</span>
-            <div class="schedule-pager" aria-label="定时抓取计划分页">
-              <button class="ghost compact" id="schedulePrevPage" type="button" disabled>←</button>
-              <span id="schedulePageLabel">1 / 1</span>
-              <button class="ghost compact" id="scheduleNextPage" type="button" disabled>→</button>
-            </div>
-          </div>
-        </div>
-        <form class="schedule-form" id="scheduleForm">
-          <label>执行频率
-            <select name="intervalMinutes" id="scheduleInterval">
-              <option value="60">每 1 小时</option>
-              <option value="360">每 6 小时</option>
-              <option value="720">每 12 小时</option>
-              <option value="1440" selected>每天</option>
-              <option value="10080">每周</option>
-            </select>
-          </label>
-          <label>首次执行
-            <select name="startMode" id="scheduleStartMode">
-              <option value="delay">按频率等待后执行</option>
-              <option value="now">保存后立即执行一次</option>
-            </select>
-          </label>
-          <label class="toggle-line">
-            <input type="checkbox" name="enabled" id="scheduleEnabled" checked>
-            <span>启用计划</span>
-          </label>
-          <button class="primary" type="submit">保存定时抓取计划</button>
-        </form>
-        <div class="schedule-list" id="scheduleList">
-          <p class="empty">正在读取定时计划…</p>
-        </div>
-      </div>
       <div class="panel section-gap discovery-task-center">
         <div class="panel-head">
           <div>
@@ -442,6 +402,127 @@
           <span id="candidateLeadSummary">点击客户卡片可跳到审核详情</span>
         </div>
         <div class="lead-list" id="leadList"></div>
+      </div>
+    </section>
+
+    <section class="section" id="lead-finder-v2" hidden>
+      <div class="section-head finder-v2-head">
+        <div>
+          <p class="eyebrow">Admin automation</p>
+          <h2>自动找客户2.0</h2>
+          <p>仅管理员可用。计划保存后由服务器定时在后台抓取，关闭页面不会中断；同一计划不会并发重复执行。</p>
+        </div>
+        <span class="schedule-status" id="scheduleStatus">正在读取计划</span>
+      </div>
+
+      <div class="finder-v2-kpis" aria-label="自动找客户2.0运行概况">
+        <div><span>启用计划</span><strong id="scheduleEnabledCount">0</strong><small>服务器后台持续调度</small></div>
+        <div><span>运行中任务</span><strong id="scheduleRunningCount">0</strong><small>排队与执行中的任务</small></div>
+        <div><span>最近完成</span><strong id="scheduleCompletedCount">0</strong><small>最近任务记录</small></div>
+        <div><span>最近失败</span><strong id="scheduleFailedCount">0</strong><small>可在任务中心重新执行</small></div>
+      </div>
+
+      <form class="panel finder-v2-form" id="scheduleForm">
+        <div class="panel-head">
+          <div>
+            <h3>新建后台抓取计划</h3>
+            <p>每个国家和平台建议单独建立计划，方便暂停、核对成本和判断数据质量。</p>
+          </div>
+          <label class="toggle-line finder-v2-toggle">
+            <input type="checkbox" name="enabled" id="scheduleEnabled" checked>
+            <span>保存后启用</span>
+          </label>
+        </div>
+        <div class="finder-v2-form-grid">
+          <label>计划名称
+            <input name="planName" maxlength="60" placeholder="例如：尼日利亚 Instagram 每日车商">
+          </label>
+          <label>目标国家
+            <select name="country" id="scheduleCountry" required></select>
+          </label>
+          <label>客户来源
+            <select name="sourceMode" id="scheduleSourceMode">
+              <option value="combined">综合搜索（地图 + 官网）</option>
+              <option value="google">Google Maps 企业数据</option>
+              <option value="dealer">车商官网 / 汽车行业目录</option>
+              <option value="instagram">Instagram 公开账号</option>
+              <option value="facebook">Facebook 公开主页</option>
+              <option value="tiktok">TikTok 公开账号</option>
+              <option value="youtube">YouTube 公开频道</option>
+              <option value="linkedin">LinkedIn 公司 / 个人主页</option>
+            </select>
+          </label>
+          <label>账号对象
+            <select name="accountScope">
+              <option value="both">公司账号 + 个人决策人</option>
+              <option value="company">仅公司官方账号</option>
+              <option value="person">仅公开个人 / 经营者账号</option>
+            </select>
+          </label>
+          <label>线索时效
+            <select name="freshness">
+              <option value="all">不限时间</option>
+              <option value="3">最近 3 天</option>
+              <option value="7">最近 7 天</option>
+              <option value="30">最近 30 天</option>
+            </select>
+          </label>
+          <label>搜索深度
+            <select name="searchDepth">
+              <option value="standard">标准搜索</option>
+              <option value="deep">深度搜索</option>
+            </select>
+          </label>
+          <label>单次目标数量
+            <select name="resultLimit">
+              <option value="30">30 条</option>
+              <option value="60">60 条</option>
+              <option value="90" selected>90 条</option>
+            </select>
+          </label>
+          <label>执行频率
+            <select name="intervalMinutes" id="scheduleInterval">
+              <option value="360">每 6 小时</option>
+              <option value="720">每 12 小时</option>
+              <option value="1440" selected>每天</option>
+              <option value="4320">每 3 天</option>
+              <option value="10080">每周</option>
+            </select>
+          </label>
+          <label>首次执行
+            <select name="startMode" id="scheduleStartMode">
+              <option value="now">保存后立即执行一次</option>
+              <option value="delay">按频率等待后执行</option>
+            </select>
+          </label>
+          <label class="finder-v2-goal">目标描述
+            <textarea name="goal" rows="3" placeholder="留空时系统会按国家、平台和汽车经销商规则自动生成。"></textarea>
+          </label>
+        </div>
+        <div class="finder-v2-form-actions">
+          <p>结果继续使用现有去重、评分和线索审核规则；上一轮未结束时，本轮会自动跳过，避免重复消耗 API 额度。</p>
+          <button class="primary" type="submit">保存并启动计划</button>
+        </div>
+      </form>
+
+      <div class="panel section-gap scheduled-discovery">
+        <div class="panel-head">
+          <div>
+            <h3>后台抓取计划</h3>
+            <p>可以随时暂停、启用或删除计划。删除计划不会删除已经抓取的任务和线索。</p>
+          </div>
+          <div class="schedule-panel-actions">
+            <div class="schedule-pager" aria-label="定时抓取计划分页">
+              <button class="ghost compact" id="schedulePrevPage" type="button" disabled>←</button>
+              <span id="schedulePageLabel">1 / 1</span>
+              <button class="ghost compact" id="scheduleNextPage" type="button" disabled>→</button>
+            </div>
+            <button class="ghost compact" id="refreshDiscoverySchedules" type="button">刷新状态</button>
+          </div>
+        </div>
+        <div class="schedule-list" id="scheduleList">
+          <p class="empty">正在读取后台计划…</p>
+        </div>
       </div>
     </section>
 
@@ -1294,6 +1375,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-customer-import"></script>
+  <script src="./script.js?v=20260720-finder-v2"></script>
 </body>
 </html>
