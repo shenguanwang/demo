@@ -1892,69 +1892,38 @@ function scheduleSalesUsers() {
   );
 }
 
-function selectedScheduleSalesUser() {
-  const username = $("#scheduleTargetUsername")?.value || "";
-  return scheduleSalesUsers().find((user) => user.username === username) || null;
-}
-
-function renderScheduleCountryOptions() {
-  const select = $("#scheduleCountry");
-  if (!select) return;
-  const current = select.value;
-  const salesUser = selectedScheduleSalesUser();
-  const assigned = Array.isArray(salesUser?.assignedCountries) ? salesUser.assignedCountries : [];
-  const allowedCountries = !salesUser || assigned.includes(ASSIGNED_COUNTRY_NONE)
-    ? []
-    : assigned.length
-      ? countries.filter((country) => assigned.some((item) => countryKey(item) === countryKey(country.name)))
-      : countries;
-  if (!salesUser) {
-    select.innerHTML = `<option value="">请先选择接收销售</option>`;
-    select.disabled = true;
-  } else if (!allowedCountries.length) {
-    select.innerHTML = `<option value="">该销售尚未分配负责国家</option>`;
-    select.disabled = true;
-  } else {
-    const optionHtml = (country) => `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`;
-    const primary = allowedCountries.filter((country) => country.marketGroup !== "other");
-    const other = allowedCountries.filter((country) => country.marketGroup === "other");
-    select.innerHTML = `
-      ${primary.length ? `<optgroup label="负责国家">${primary.map(optionHtml).join("")}</optgroup>` : ""}
-      ${other.length ? `<optgroup label="其他负责区域">${other.map(optionHtml).join("")}</optgroup>` : ""}
-    `;
-    select.disabled = false;
-    select.value = allowedCountries.some((country) => country.name === current)
-      ? current
-      : allowedCountries[0].name;
-  }
-  const regions = $("#scheduleTargetRegions");
-  if (regions) {
-    regions.textContent = salesUser
-      ? `负责区域：${assignedCountrySummary(assigned)}`
-      : "选择销售后，只显示该销售负责的国家。";
-  }
+function allSalesScheduleAssignments() {
+  return scheduleSalesUsers().flatMap((user) => {
+    const assigned = Array.isArray(user.assignedCountries) ? user.assignedCountries : [];
+    if (!assigned.length || assigned.includes(ASSIGNED_COUNTRY_NONE)) return [];
+    return assigned.map((country) => ({ username: user.username, country }));
+  });
 }
 
 function renderScheduleTargetOptions() {
-  const select = $("#scheduleTargetUsername");
-  if (!select) return;
-  const current = select.value;
   const users = scheduleSalesUsers();
-  select.innerHTML = users.length
-    ? users.map((user) =>
-      `<option value="${escapeHtml(user.username)}">${escapeHtml(user.username)} · ${escapeHtml(assignedCountrySummary(user.assignedCountries))}</option>`
-    ).join("")
-    : `<option value="">暂无可分配的销售账号</option>`;
-  select.disabled = !users.length;
-  select.value = users.some((user) => user.username === current)
-    ? current
-    : users[0]?.username || "";
+  const assignments = allSalesScheduleAssignments();
+  const coveredUsers = new Set(assignments.map((item) => item.username));
+  const excludedUsers = users.filter((user) => !coveredUsers.has(user.username));
+  const summary = $("#scheduleCoverageSummary");
+  if (summary) {
+    summary.textContent = assignments.length
+      ? `${coveredUsers.size} 名销售 · ${assignments.length} 个“销售 × 国家”每日任务`
+      : "暂无已明确分配负责地区的销售";
+  }
+  const coverage = $("#scheduleCoverageList");
+  if (coverage) {
+    coverage.textContent = !users.length
+      ? "请先在用户管理中创建销售账号并分配负责地区。"
+      : excludedUsers.length
+      ? `${excludedUsers.map((user) => user.username).join("、")} 未分配明确地区，本次不会创建任务。`
+      : "所有启用销售都已纳入自动任务。";
+  }
   const submit = $("#scheduleForm button[type='submit']");
   if (submit) {
-    submit.disabled = !users.length;
-    submit.title = users.length ? "" : "请先在用户管理中创建销售账号并分配负责国家";
+    submit.disabled = !assignments.length;
+    submit.title = assignments.length ? "" : "请先在用户管理中为销售分配明确负责国家";
   }
-  renderScheduleCountryOptions();
 }
 
 function leadRegionVerification(lead) {
@@ -2785,6 +2754,34 @@ function reviewModeLabel(mode = reviewStatusMode()) {
   return "待审核线索";
 }
 
+function scheduledLeadsImportedToday() {
+  const today = new Date();
+  return reviewLeads.filter((lead) => {
+    if (!String(lead.discoveryJobLabel || "").includes("系统定时获客")) return false;
+    const importedAt = new Date(lead.discoveryJobImportedAt || "");
+    return Number.isFinite(importedAt.getTime())
+      && importedAt.getFullYear() === today.getFullYear()
+      && importedAt.getMonth() === today.getMonth()
+      && importedAt.getDate() === today.getDate();
+  });
+}
+
+function renderScheduledLeadMorningNotice() {
+  const notice = $("#scheduledLeadMorningNotice");
+  if (!notice) return;
+  const leads = currentSession?.role === "admin" ? [] : scheduledLeadsImportedToday();
+  notice.hidden = !leads.length;
+  if (!leads.length) return;
+  const countries = Array.from(new Set(leads.map((lead) => lead.country).filter(Boolean)));
+  const hour = new Date().getHours();
+  const title = $("#scheduledLeadNoticeTitle");
+  const text = $("#scheduledLeadNoticeText");
+  if (title) title.textContent = hour < 12 ? "早上好，今日定时获客已送达" : "今日定时获客已送达";
+  if (text) {
+    text.textContent = `系统已为你新增 ${leads.length} 条待审核线索${countries.length ? `，来自 ${countries.slice(0, 3).join("、")}${countries.length > 3 ? ` 等 ${countries.length} 个国家` : ""}` : ""}。`;
+  }
+}
+
 function renderReview(options = {}) {
   const detailOnly = Boolean(options.detailOnly);
   // Keep the review queue stable. Scores are decision support, not a reason to
@@ -2798,6 +2795,7 @@ function renderReview(options = {}) {
   const previousWindowScrollY = window.scrollY;
   const reviewMode = reviewStatusMode();
   if (reviewMode === "pending") purgeIrrelevantReviewLeads();
+  renderScheduledLeadMorningNotice();
   renderReviewFilterOptions();
   const sourceLeads = reviewSourceLeads();
   const rankedLeads = sourceLeads
@@ -6394,7 +6392,7 @@ async function saveDiscoverySchedule(event) {
   const submitButton = form.querySelector('button[type="submit"]');
   if (submitButton) {
     submitButton.disabled = true;
-    submitButton.textContent = "正在保存计划";
+    submitButton.textContent = "正在创建全员任务";
   }
   try {
     const formData = Object.fromEntries(new FormData(form).entries());
@@ -6402,10 +6400,10 @@ async function saveDiscoverySchedule(event) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        payload: scheduledDiscoveryPayload(form),
-        intervalMinutes: formData.intervalMinutes,
-        startMode: formData.startMode,
-        enabled: Boolean(formData.enabled)
+        action: "save_all_sales",
+        sourceMode: String(formData.sourceMode || "combined"),
+        intervalMinutes: 1440,
+        enabled: true
       })
     });
     const result = await response.json().catch(() => ({}));
@@ -6413,20 +6411,18 @@ async function saveDiscoverySchedule(event) {
     discoverySchedulePage = 1;
     await loadDiscoverySchedules();
     await loadDiscoveryJobs().catch(() => undefined);
-    form.reset();
-    $("#scheduleEnabled").checked = true;
-    $("#scheduleStartMode").value = "now";
-    $("#scheduleInterval").value = "1440";
     renderScheduleTargetOptions();
     const status = $("#scheduleStatus");
-    if (status) status.textContent = "计划已保存";
+    if (status) {
+      status.textContent = `已覆盖 ${Number(result.salesCount || 0)} 名销售 · ${Number(result.scheduleCount || 0)} 个地区任务`;
+    }
   } catch (error) {
     const status = $("#scheduleStatus");
-    if (status) status.textContent = `保存失败：${error.message}`;
+    if (status) status.textContent = `创建失败：${error.message}`;
   } finally {
     if (submitButton) {
-      submitButton.disabled = !scheduleSalesUsers().length;
-      submitButton.textContent = "保存并启动计划";
+      submitButton.disabled = !allSalesScheduleAssignments().length;
+      submitButton.textContent = "一键开启全员定时获客";
     }
   }
 }
@@ -6953,7 +6949,11 @@ function bindForms() {
   });
 
   $("#scheduleForm")?.addEventListener("submit", saveDiscoverySchedule);
-  $("#scheduleTargetUsername")?.addEventListener("change", renderScheduleCountryOptions);
+  $("#showTodayScheduledLeads")?.addEventListener("click", () => {
+    if ($("#reviewStatusFilter")) $("#reviewStatusFilter").value = "pending";
+    if ($("#reviewTimeFilter")) $("#reviewTimeFilter").value = "today";
+    renderReview();
+  });
 
   $("#scheduleList")?.addEventListener("click", (event) => {
     const toggleButton = event.target.closest("[data-toggle-schedule]");

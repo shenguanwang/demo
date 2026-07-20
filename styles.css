@@ -1863,6 +1863,74 @@ textarea {
   font-size: 12px;
 }
 
+.finder-v2-daily-time {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid #d8e6dd;
+  border-radius: 6px;
+  background: #f3faf6;
+  color: #17633e;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.finder-v2-bulk-setup {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(420px, 1.2fr);
+  gap: 28px;
+  align-items: end;
+  padding: 24px 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.finder-v2-bulk-scope {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 0;
+}
+
+.finder-v2-bulk-icon {
+  display: inline-flex;
+  flex: 0 0 40px;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid #cfd7df;
+  border-radius: 7px;
+  color: #263442;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.finder-v2-bulk-scope h4,
+.finder-v2-bulk-scope p {
+  margin: 0;
+}
+
+.finder-v2-bulk-scope h4 {
+  color: var(--ink);
+  font-size: 15px;
+}
+
+.finder-v2-bulk-scope p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.finder-v2-bulk-control {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.finder-v2-bulk-control button {
+  min-width: 190px;
+}
+
 .finder-v2-toggle {
   flex: 0 0 auto;
   min-height: 34px;
@@ -1971,6 +2039,12 @@ textarea {
   font-size: 12px;
 }
 
+.finder-v2-form-actions > span {
+  color: var(--muted);
+  font-size: 11px;
+  text-align: right;
+}
+
 .finder-v2-form-actions button {
   flex: 0 0 auto;
   width: auto;
@@ -1979,6 +2053,11 @@ textarea {
 }
 
 @media (max-width: 1100px) {
+  .finder-v2-bulk-setup {
+    grid-template-columns: 1fr;
+    gap: 18px;
+  }
+
   .finder-v2-step {
     grid-template-columns: 1fr;
     gap: 14px;
@@ -2270,6 +2349,14 @@ textarea {
     align-items: flex-start;
   }
 
+  .finder-v2-bulk-control {
+    grid-template-columns: 1fr;
+  }
+
+  .finder-v2-bulk-control button {
+    width: 100%;
+  }
+
   .finder-v2-step-grid.three,
   .finder-v2-step-grid.four {
     grid-template-columns: 1fr;
@@ -2286,6 +2373,10 @@ textarea {
 
   .finder-v2-form-actions button {
     width: 100%;
+  }
+
+  .finder-v2-form-actions > span {
+    text-align: left;
   }
 
   .discovery-job-actions,
@@ -3539,6 +3630,53 @@ textarea {
 .user-activity-summary b {
   color: var(--ink);
   font-size: 12px;
+}
+
+.scheduled-lead-notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+  padding: 13px 16px;
+  border: 1px solid #cfe4d7;
+  border-left: 3px solid #198754;
+  border-radius: 7px;
+  background: #f4faf6;
+}
+
+.scheduled-lead-notice[hidden] {
+  display: none;
+}
+
+.scheduled-lead-notice > div {
+  display: grid;
+  gap: 3px;
+}
+
+.scheduled-lead-notice strong {
+  color: #124d31;
+  font-size: 13px;
+}
+
+.scheduled-lead-notice span {
+  color: #51705e;
+  font-size: 12px;
+}
+
+.scheduled-lead-notice button {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 700px) {
+  .scheduled-lead-notice {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scheduled-lead-notice button {
+    width: 100%;
+  }
 }
 
 .review-toolbar {

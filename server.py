@@ -3284,6 +3284,15 @@ def next_schedule_time(interval_minutes: int, start_mode: str = "delay") -> date
     return now + timedelta(minutes=interval_minutes)
 
 
+def next_all_sales_schedule_time(position: int = 0) -> datetime:
+    beijing_tz = timezone(timedelta(hours=8))
+    now_local = datetime.now(beijing_tz)
+    next_run = now_local.replace(hour=6, minute=0, second=0, microsecond=0)
+    if next_run <= now_local:
+        next_run += timedelta(days=1)
+    return (next_run + timedelta(minutes=max(0, position) * 5)).astimezone(timezone.utc)
+
+
 def row_to_discovery_schedule(row) -> dict:
     payload = row[2] if isinstance(row[2], dict) else json.loads(row[2] or "{}")
     next_run_at = row[5].isoformat() if hasattr(row[5], "isoformat") else str(row[5])
@@ -3443,6 +3452,109 @@ def create_or_update_discovery_schedule(payload: dict, owner_username: str) -> d
     return schedule_public(schedule)
 
 
+def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> dict:
+    allowed_sources = {"combined", "google", "dealer", "instagram", "facebook", "tiktok", "youtube", "linkedin"}
+    source_mode = str(payload.get("sourceMode") or "combined").strip().lower()
+    if source_mode not in allowed_sources:
+        raise ValueError("??????")
+    interval_minutes = schedule_interval_minutes(payload.get("intervalMinutes") or 1440)
+    if interval_minutes != 1440:
+        raise ValueError("?????????????????")
+
+    assignments = []
+    excluded_users = []
+    for user in list_users():
+        username = str(user.get("username") or "")
+        assigned = normalize_assigned_countries(user.get("assignedCountries"))
+        if user.get("role") != "user" or user.get("status") == "disabled" or user.get("builtIn"):
+            continue
+        if not assigned or ASSIGNED_COUNTRY_NONE in assigned:
+            excluded_users.append(username)
+            continue
+        assignments.extend((username, country) for country in assigned)
+    if not assignments:
+        raise ValueError("????????????????")
+
+    existing_schedules = list_discovery_schedules(owner_username, limit=5000)
+    existing_by_key = {}
+    for schedule in existing_schedules:
+        schedule_payload = schedule.get("payload") or {}
+        if schedule_payload.get("scheduleMode") != "all_sales":
+            continue
+        key = (
+            str(schedule_payload.get("targetUsername") or "").lower(),
+            normalize_country_match_text(schedule_payload.get("country") or ""),
+            str(schedule_payload.get("sourceMode") or "").lower(),
+        )
+        existing_by_key[key] = schedule
+
+    source_labels = {
+        "combined": "????",
+        "google": "Google Maps",
+        "dealer": "????",
+        "instagram": "Instagram",
+        "facebook": "Facebook",
+        "tiktok": "TikTok",
+        "youtube": "YouTube",
+        "linkedin": "LinkedIn",
+    }
+    now = datetime.now(timezone.utc)
+    created_count = 0
+    updated_count = 0
+    covered_users = set()
+    saved = []
+    for position, (target_username, country) in enumerate(assignments):
+        raw_schedule_payload = {
+            "planName": f"{target_username} ? {country} ? {source_labels[source_mode]}",
+            "targetUsername": target_username,
+            "country": country,
+            "model": "????????",
+            "sourceMode": source_mode,
+            "accountScope": "both",
+            "freshness": "all",
+            "searchDepth": "standard",
+            "resultLimit": "90",
+            "goal": f"{country} ????????????????????????????????",
+            "scheduleMode": "all_sales",
+        }
+        schedule_payload = normalize_schedule_payload(raw_schedule_payload)
+        schedule_payload["scheduleMode"] = "all_sales"
+        validate_schedule_target(schedule_payload)
+        key = (target_username.lower(), normalize_country_match_text(country), source_mode)
+        schedule = existing_by_key.get(key)
+        if schedule:
+            updated_count += 1
+        else:
+            created_count += 1
+            schedule = {
+                "id": uuid.uuid4().hex,
+                "ownerUsername": owner_username,
+                "createdAt": now.isoformat(timespec="seconds"),
+                "lastRunAt": "",
+                "lastJobId": "",
+            }
+        schedule.update({
+            "payload": schedule_payload,
+            "intervalMinutes": interval_minutes,
+            "enabled": True,
+            "nextRunAt": next_all_sales_schedule_time(position).isoformat(timespec="seconds"),
+            "updatedAt": now.isoformat(timespec="seconds"),
+        })
+        save_discovery_schedule(schedule)
+        saved.append(schedule_public(schedule))
+        covered_users.add(target_username)
+
+    return {
+        "schedules": saved,
+        "scheduleCount": len(saved),
+        "salesCount": len(covered_users),
+        "createdCount": created_count,
+        "updatedCount": updated_count,
+        "excludedUsers": excluded_users,
+        "firstRunAt": saved[0]["nextRunAt"] if saved else "",
+    }
+
+
 def delete_discovery_schedule(schedule_id: str, owner_username: str) -> bool:
     if not load_discovery_schedule(schedule_id, owner_username):
         return False
@@ -3461,7 +3573,7 @@ def delete_discovery_schedule(schedule_id: str, owner_username: str) -> bool:
 def run_due_discovery_schedules() -> int:
     now = datetime.now(timezone.utc)
     ran = 0
-    for schedule in list_discovery_schedules(None, limit=200):
+    for schedule in list_discovery_schedules(None, limit=1000):
         if not schedule.get("enabled"):
             continue
         owner = get_user(schedule.get("ownerUsername", ""))
@@ -14196,7 +14308,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not user:
                 return
             try:
-                schedules = [schedule_public(schedule) for schedule in list_discovery_schedules(user["username"])]
+                schedules = [schedule_public(schedule) for schedule in list_discovery_schedules(user["username"], limit=1000)]
                 self.send_json(200, {"ok": True, "schedules": schedules})
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
@@ -14610,6 +14722,16 @@ class Handler(SimpleHTTPRequestHandler):
                         self.send_json(404, {"ok": False, "error": "定时计划不存在"})
                         return
                     self.send_json(200, {"ok": True, "id": schedule_id})
+                    return
+                if action == "save_all_sales":
+                    result = create_all_sales_discovery_schedules(payload, user["username"])
+                    record_admin_audit(
+                        user["username"],
+                        "??????????",
+                        f"{payload.get('sourceMode', 'combined')} ? {result['salesCount']} ??? ? {result['scheduleCount']} ?????",
+                        self.client_ip(),
+                    )
+                    self.send_json(200, {"ok": True, **result})
                     return
                 ensure_user_can_use_discovery_payload(user, payload)
                 schedule = create_or_update_discovery_schedule(payload, user["username"])

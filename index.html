@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-layout">
+  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-all-sales">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -425,43 +425,22 @@
       <form class="panel finder-v2-form" id="scheduleForm">
         <div class="finder-v2-form-head">
           <div>
-            <h3>新建后台抓取计划</h3>
-            <p>按顺序完成分配、搜索和执行设置。</p>
+            <h3>全体销售自动获客</h3>
+            <p>系统按销售负责地区自动拆分任务，线索直接进入对应销售的线索审核。</p>
           </div>
-          <label class="toggle-line finder-v2-toggle">
-            <input type="checkbox" name="enabled" id="scheduleEnabled" checked>
-            <span>立即启用</span>
-          </label>
+          <span class="finder-v2-daily-time">每天 06:00 开始</span>
         </div>
 
-        <section class="finder-v2-step" aria-labelledby="finderV2AssignmentTitle">
-          <div class="finder-v2-step-title">
-            <span>01</span>
-            <div><h4 id="finderV2AssignmentTitle">分配对象</h4><p>确定计划名称、接收销售和负责国家。</p></div>
+        <section class="finder-v2-bulk-setup" aria-labelledby="finderV2BulkTitle">
+          <div class="finder-v2-bulk-scope">
+            <span class="finder-v2-bulk-icon">全</span>
+            <div>
+              <h4 id="finderV2BulkTitle">全部启用销售</h4>
+              <p id="scheduleCoverageSummary">正在读取销售负责地区…</p>
+            </div>
           </div>
-          <div class="finder-v2-step-grid three">
-            <label>计划名称
-              <input name="planName" maxlength="60" placeholder="例如：尼日利亚 Instagram 每日车商">
-            </label>
-            <label>接收销售
-              <select name="targetUsername" id="scheduleTargetUsername" required>
-                <option value="">正在读取销售账号…</option>
-              </select>
-              <small id="scheduleTargetRegions">计划只能选择该销售负责的国家。</small>
-            </label>
-            <label>目标国家
-              <select name="country" id="scheduleCountry" required></select>
-            </label>
-          </div>
-        </section>
-
-        <section class="finder-v2-step" aria-labelledby="finderV2SearchTitle">
-          <div class="finder-v2-step-title">
-            <span>02</span>
-            <div><h4 id="finderV2SearchTitle">搜索策略</h4><p>选择数据来源和线索范围。</p></div>
-          </div>
-          <div class="finder-v2-step-grid four">
-            <label>客户来源
+          <div class="finder-v2-bulk-control">
+            <label>选择获客来源
               <select name="sourceMode" id="scheduleSourceMode">
                 <option value="combined">综合搜索（地图 + 官网）</option>
                 <option value="google">Google Maps 企业数据</option>
@@ -473,67 +452,13 @@
                 <option value="linkedin">LinkedIn 公司 / 个人主页</option>
               </select>
             </label>
-            <label>账号对象
-              <select name="accountScope">
-                <option value="both">公司账号 + 个人决策人</option>
-                <option value="company">仅公司官方账号</option>
-                <option value="person">仅公开个人 / 经营者账号</option>
-              </select>
-            </label>
-            <label>线索时效
-              <select name="freshness">
-                <option value="all">不限时间</option>
-                <option value="3">最近 3 天</option>
-                <option value="7">最近 7 天</option>
-                <option value="30">最近 30 天</option>
-              </select>
-            </label>
-            <label>搜索深度
-              <select name="searchDepth">
-                <option value="standard">标准搜索</option>
-                <option value="deep">深度搜索</option>
-              </select>
-            </label>
-            <label class="finder-v2-goal">目标描述
-              <textarea name="goal" rows="2" placeholder="可留空，系统会自动生成汽车经销商和进口商搜索规则。"></textarea>
-            </label>
-          </div>
-        </section>
-
-        <section class="finder-v2-step" aria-labelledby="finderV2TimingTitle">
-          <div class="finder-v2-step-title">
-            <span>03</span>
-            <div><h4 id="finderV2TimingTitle">执行计划</h4><p>控制单次数量和后台运行节奏。</p></div>
-          </div>
-          <div class="finder-v2-step-grid three">
-            <label>单次目标数量
-              <select name="resultLimit">
-                <option value="30">30 条</option>
-                <option value="60">60 条</option>
-                <option value="90" selected>90 条</option>
-              </select>
-            </label>
-            <label>执行频率
-              <select name="intervalMinutes" id="scheduleInterval">
-                <option value="360">每 6 小时</option>
-                <option value="720">每 12 小时</option>
-                <option value="1440" selected>每天</option>
-                <option value="4320">每 3 天</option>
-                <option value="10080">每周</option>
-              </select>
-            </label>
-            <label>首次执行
-              <select name="startMode" id="scheduleStartMode">
-                <option value="now">保存后立即执行一次</option>
-                <option value="delay">按频率等待后执行</option>
-              </select>
-            </label>
+            <button class="primary" type="submit">一键开启全员定时获客</button>
           </div>
         </section>
 
         <div class="finder-v2-form-actions">
-          <p><strong>自动入库规则</strong><span>最低40分 · 地区匹配 · 汽车企业 · 跨客户池去重</span></p>
-          <button class="primary" type="submit">保存并启动计划</button>
+          <p><strong>自动执行规则</strong><span>全部销售 · 按负责地区分配 · 每天执行 · 最低40分 · 跨客户池去重</span></p>
+          <span id="scheduleCoverageList">未分配明确地区的销售不会创建任务。</span>
         </div>
       </form>
 
@@ -565,6 +490,13 @@
           <h2>线索审核</h2>
           <p>使用统一100分机会模型评估进出口资质、客户匹配、采购意向、经营能力、车型匹配和可触达性；进出口资质占20分，评分只用于排序，不替代人工决定。</p>
         </div>
+      </div>
+      <div class="scheduled-lead-notice" id="scheduledLeadMorningNotice" hidden aria-live="polite">
+        <div>
+          <strong id="scheduledLeadNoticeTitle">今日定时获客已送达</strong>
+          <span id="scheduledLeadNoticeText"></span>
+        </div>
+        <button class="ghost compact" id="showTodayScheduledLeads" type="button">查看今日线索</button>
       </div>
       <div class="review-toolbar" aria-label="线索审核筛选与批量操作">
         <div class="review-filter-group">
@@ -1407,6 +1339,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-finder-v2-layout"></script>
+  <script src="./script.js?v=20260720-finder-v2-all-sales"></script>
 </body>
 </html>
