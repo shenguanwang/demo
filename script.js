@@ -1890,7 +1890,9 @@ function scheduleSalesUsers() {
 
 function allSalesScheduleAssignments() {
   return scheduleSalesUsers().flatMap((user) => {
-    const assigned = Array.isArray(user.assignedCountries) ? user.assignedCountries : [];
+    const assigned = (Array.isArray(user.assignedCountries) ? user.assignedCountries : [])
+      .map((country) => String(country || "").trim())
+      .filter(Boolean);
     if (!assigned.length || assigned.includes(ASSIGNED_COUNTRY_NONE)) return [];
     return assigned.map((country) => ({ username: user.username, country }));
   });
@@ -2094,6 +2096,11 @@ function renderCountries() {
   if (finderSubmit) {
     finderSubmit.disabled = discoveryDisabledForSession();
     finderSubmit.title = discoveryDisabledForSession() ? discoveryDisabledReason() : "";
+  }
+  const personalScheduleSubmit = $("#personalScheduleForm button[type='submit']");
+  if (personalScheduleSubmit) {
+    personalScheduleSubmit.disabled = discoveryDisabledForSession();
+    personalScheduleSubmit.title = discoveryDisabledForSession() ? discoveryDisabledReason() : "";
   }
   const domesticSelect = $("#finderDomesticRegion");
   if (domesticSelect) {
@@ -6314,31 +6321,31 @@ function scheduleTimingLabel(schedule) {
 
 function renderDiscoverySchedules() {
   const box = $("#scheduleList");
-  if (!box) return;
+  const allSalesSchedules = discoverySchedules.filter((schedule) => schedule.payload?.scheduleMode === "all_sales");
   const status = $("#scheduleStatus");
-  const enabledCount = discoverySchedules.filter((schedule) => schedule.enabled).length;
-  const pageCount = Math.max(1, Math.ceil(discoverySchedules.length / DISCOVERY_SCHEDULES_PAGE_SIZE));
+  const enabledCount = allSalesSchedules.filter((schedule) => schedule.enabled).length;
+  const pageCount = Math.max(1, Math.ceil(allSalesSchedules.length / DISCOVERY_SCHEDULES_PAGE_SIZE));
   discoverySchedulePage = Math.max(1, Math.min(discoverySchedulePage, pageCount));
   const pageStart = (discoverySchedulePage - 1) * DISCOVERY_SCHEDULES_PAGE_SIZE;
-  const visibleSchedules = discoverySchedules.slice(pageStart, pageStart + DISCOVERY_SCHEDULES_PAGE_SIZE);
-  if (status) status.textContent = discoverySchedules.length
-    ? `${enabledCount} 个启用 / ${discoverySchedules.length} 个计划`
+  const visibleSchedules = allSalesSchedules.slice(pageStart, pageStart + DISCOVERY_SCHEDULES_PAGE_SIZE);
+  if (status) status.textContent = allSalesSchedules.length
+    ? `${enabledCount} 个启用 / ${allSalesSchedules.length} 个计划`
     : "未设置计划";
   const enabledKpi = $("#scheduleEnabledCount");
   const runningKpi = $("#scheduleRunningCount");
   const completedKpi = $("#scheduleCompletedCount");
   const failedKpi = $("#scheduleFailedCount");
   if (enabledKpi) enabledKpi.textContent = String(enabledCount);
-  if (runningKpi) runningKpi.textContent = String(discoverySchedules.filter((schedule) => ["queued", "running"].includes(schedule.lastJobStatus)).length);
-  if (completedKpi) completedKpi.textContent = String(discoverySchedules.filter((schedule) => schedule.lastJobStatus === "completed").length);
-  if (failedKpi) failedKpi.textContent = String(discoverySchedules.filter((schedule) => ["failed", "canceled"].includes(schedule.lastJobStatus)).length);
+  if (runningKpi) runningKpi.textContent = String(allSalesSchedules.filter((schedule) => ["queued", "running"].includes(schedule.lastJobStatus)).length);
+  if (completedKpi) completedKpi.textContent = String(allSalesSchedules.filter((schedule) => schedule.lastJobStatus === "completed").length);
+  if (failedKpi) failedKpi.textContent = String(allSalesSchedules.filter((schedule) => ["failed", "canceled"].includes(schedule.lastJobStatus)).length);
   const pageLabel = $("#schedulePageLabel");
   if (pageLabel) pageLabel.textContent = `${discoverySchedulePage} / ${pageCount}`;
   const prevPage = $("#schedulePrevPage");
   const nextPage = $("#scheduleNextPage");
   if (prevPage) prevPage.disabled = discoverySchedulePage <= 1;
   if (nextPage) nextPage.disabled = discoverySchedulePage >= pageCount;
-  box.innerHTML = visibleSchedules.length ? visibleSchedules.map((schedule) => `
+  if (box) box.innerHTML = visibleSchedules.length ? visibleSchedules.map((schedule) => `
     <article class="schedule-item">
       <div>
         <div class="schedule-title">
@@ -6356,7 +6363,50 @@ function renderDiscoverySchedules() {
       </div>
     </article>
   `).join("") : `<p class="empty">暂无后台抓取计划。请在上方设置国家、来源和频率后保存。</p>`;
+  renderPersonalDiscoverySchedules();
   renderDiscoveryHistory();
+}
+
+function renderPersonalDiscoverySchedules() {
+  const box = $("#personalScheduleList");
+  if (!box) return;
+  const schedules = discoverySchedules.filter((schedule) => schedule.payload?.scheduleMode !== "all_sales");
+  const status = $("#personalScheduleStatus");
+  const enabledCount = schedules.filter((schedule) => schedule.enabled).length;
+  if (status) {
+    status.textContent = schedules.length ? `${enabledCount} 个启用 / ${schedules.length} 个任务` : "未设置任务";
+  }
+  box.innerHTML = schedules.length ? schedules.map((schedule) => `
+    <article class="schedule-item">
+      <div>
+        <div class="schedule-title">
+          <strong>${escapeHtml(schedule.country || "未指定市场")} · ${escapeHtml(discoverySourceLabel(schedule.sourceMode))}</strong>
+          <span class="${schedule.enabled ? "enabled" : "paused"}">${schedule.enabled ? "已启用" : "已暂停"}</span>
+        </div>
+        <p>${escapeHtml(scheduleTimingLabel(schedule))} · 结果进入当前账号搜索记录</p>
+        <small>下次执行：${escapeHtml(formatJobTime(schedule.nextRunAt))}${schedule.lastRunAt ? ` · 上次执行：${escapeHtml(formatJobTime(schedule.lastRunAt))}` : ""}</small>
+      </div>
+      <div class="schedule-actions">
+        <button class="ghost compact" type="button" data-toggle-schedule="${escapeHtml(schedule.id)}">${schedule.enabled ? "暂停" : "启用"}</button>
+        <button class="danger-button compact" type="button" data-delete-schedule="${escapeHtml(schedule.id)}">删除</button>
+      </div>
+    </article>
+  `).join("") : `<p class="empty">暂无个人定时任务。设置上方找客户条件后保存即可。</p>`;
+}
+
+function currentFinderSchedulePayload() {
+  const form = $("#finderForm");
+  const data = normalizeFinderPayload(Object.fromEntries(new FormData(form).entries()), form);
+  const words = generateKeywords(data.goal, data.country, data.model, {
+    searchDepth: data.searchDepth,
+    domesticRegion: data.domesticRegion
+  });
+  return {
+    ...data,
+    scheduleMode: "personal",
+    resultLimit: 90,
+    keywords: words.join(" | ")
+  };
 }
 
 function scheduledDiscoveryPayload(form) {
@@ -6384,10 +6434,6 @@ function scheduledDiscoveryPayload(form) {
 }
 
 async function loadDiscoverySchedules() {
-  if (currentSession?.role !== "admin") {
-    discoverySchedules = [];
-    return discoverySchedules;
-  }
   const response = await apiFetch("/api/discover/schedules", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
@@ -6396,7 +6442,7 @@ async function loadDiscoverySchedules() {
   return discoverySchedules;
 }
 
-async function saveDiscoverySchedule(event) {
+async function saveAllSalesDiscoverySchedule(event) {
   event.preventDefault();
   const form = event.currentTarget;
   const submitButton = form.querySelector('button[type="submit"]');
@@ -6708,6 +6754,43 @@ function mergeDiscoveryResult(result, sourceMode = "", job = null) {
   };
 }
 
+async function savePersonalDiscoverySchedule(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.disabled = true;
+    submitButton.textContent = "正在保存";
+  }
+  try {
+    const formData = Object.fromEntries(new FormData(form).entries());
+    const response = await apiFetch("/api/discover/schedules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        action: "save_personal",
+        payload: currentFinderSchedulePayload(),
+        intervalMinutes: formData.intervalMinutes,
+        startMode: formData.startMode,
+        enabled: Boolean(formData.enabled)
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    await loadDiscoverySchedules();
+    const status = $("#personalScheduleStatus");
+    if (status) status.textContent = "定时任务已保存";
+  } catch (error) {
+    const status = $("#personalScheduleStatus");
+    if (status) status.textContent = `保存失败：${error.message}`;
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = discoveryDisabledForSession();
+      submitButton.textContent = "保存定时任务";
+    }
+  }
+}
+
 function discoverySkippedMessage(merged) {
   const skipped = merged?.skipped || {};
   const reasons = [];
@@ -6931,7 +7014,8 @@ function bindForms() {
   });
 
   $("#scheduleNextPage")?.addEventListener("click", () => {
-    const pageCount = Math.max(1, Math.ceil(discoverySchedules.length / DISCOVERY_SCHEDULES_PAGE_SIZE));
+    const allSalesCount = discoverySchedules.filter((schedule) => schedule.payload?.scheduleMode === "all_sales").length;
+    const pageCount = Math.max(1, Math.ceil(allSalesCount / DISCOVERY_SCHEDULES_PAGE_SIZE));
     discoverySchedulePage = Math.min(pageCount, discoverySchedulePage + 1);
     renderDiscoverySchedules();
   });
@@ -6959,7 +7043,8 @@ function bindForms() {
     if (deleteButton && !deleteButton.disabled) deleteDiscoveryJob(deleteButton.dataset.deleteJob);
   });
 
-  $("#scheduleForm")?.addEventListener("submit", saveDiscoverySchedule);
+  $("#scheduleForm")?.addEventListener("submit", saveAllSalesDiscoverySchedule);
+  $("#personalScheduleForm")?.addEventListener("submit", savePersonalDiscoverySchedule);
   $("#scheduleRunTime")?.addEventListener("input", updateAllSalesScheduleTimeLabel);
   $("#showTodayScheduledLeads")?.addEventListener("click", () => {
     if ($("#reviewStatusFilter")) $("#reviewStatusFilter").value = "pending";
@@ -7349,6 +7434,22 @@ function bindForms() {
     closeManualLeadModal();
     refreshAllLeadViews();
     showSection("crm");
+  });
+
+  $("#personalScheduleList")?.addEventListener("click", (event) => {
+    const toggleButton = event.target.closest("[data-toggle-schedule]");
+    const deleteButton = event.target.closest("[data-delete-schedule]");
+    const button = toggleButton || deleteButton;
+    if (!button) return;
+    button.disabled = true;
+    const operation = toggleButton
+      ? toggleDiscoverySchedule(toggleButton.dataset.toggleSchedule)
+      : deleteDiscoverySchedule(deleteButton.dataset.deleteSchedule);
+    operation.catch((error) => {
+      const status = $("#personalScheduleStatus");
+      if (status) status.textContent = `操作失败：${error.message}`;
+      button.disabled = false;
+    });
   });
 
   $("#refreshDiscoverySchedules")?.addEventListener("click", async (event) => {
@@ -9239,16 +9340,17 @@ async function init() {
       $("#discoveryJobList").innerHTML = `<p class="empty">任务读取失败：${escapeHtml(error.message)}</p>`;
     }
   });
-  if (currentSession?.role === "admin") {
-    loadDiscoverySchedules().catch((error) => {
-      if ($("#scheduleList")) {
-        $("#scheduleList").innerHTML = `<p class="empty">定时计划读取失败：${escapeHtml(error.message)}</p>`;
-      }
-    });
-  }
+  loadDiscoverySchedules().catch((error) => {
+    if ($("#personalScheduleList")) {
+      $("#personalScheduleList").innerHTML = `<p class="empty">定时任务读取失败：${escapeHtml(error.message)}</p>`;
+    }
+    if ($("#scheduleList") && currentSession?.role === "admin") {
+      $("#scheduleList").innerHTML = `<p class="empty">定时计划读取失败：${escapeHtml(error.message)}</p>`;
+    }
+  });
   discoveryJobsTimer = window.setInterval(() => {
     loadDiscoveryJobs().catch(() => undefined);
-    if (currentSession?.role === "admin") loadDiscoverySchedules().catch(() => undefined);
+    loadDiscoverySchedules().catch(() => undefined);
   }, 5_000);
   window.addEventListener("online", () => {
     hydrateCloudState(true).catch(() => undefined);

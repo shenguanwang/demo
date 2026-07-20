@@ -3437,8 +3437,27 @@ def create_or_update_discovery_schedule(payload: dict, owner_username: str) -> d
     now = datetime.now(timezone.utc)
     existing = load_discovery_schedule(schedule_id, owner_username) if schedule_id else None
     interval_minutes = schedule_interval_minutes(payload.get("intervalMinutes"))
-    schedule_payload = normalize_schedule_payload(payload.get("payload") or payload)
-    validate_schedule_target(schedule_payload)
+    raw_schedule_payload = payload.get("payload") or payload
+    schedule_payload = normalize_schedule_payload(raw_schedule_payload)
+    schedule_mode = str(raw_schedule_payload.get("scheduleMode") or "").strip()
+    if schedule_mode:
+        schedule_payload["scheduleMode"] = schedule_mode
+    schedule_run_time = str(raw_schedule_payload.get("scheduleRunTime") or "").strip()
+    if schedule_run_time:
+        schedule_payload["scheduleRunTime"] = normalize_daily_run_time(schedule_run_time)
+    owner = get_user(owner_username)
+    if not owner or owner.get("status") == "disabled":
+        raise ValueError("当前账号不存在或已被禁用")
+    if schedule_payload.get("scheduleMode") == "all_sales":
+        if owner.get("role") != "admin":
+            raise PermissionError("只有管理员可以创建全员定时获客计划")
+        validate_schedule_target(schedule_payload)
+    else:
+        ensure_user_can_access_country(owner, str(schedule_payload.get("country") or ""))
+        schedule_payload["scheduleMode"] = "personal"
+        schedule_payload.pop("targetUsername", None)
+        schedule_payload.pop("scheduledForUsername", None)
+        schedule_payload.pop("distributionType", None)
     enabled = bool(payload.get("enabled", True))
     start_mode = str(payload.get("startMode") or "delay")
     schedule = existing or {
@@ -3587,15 +3606,21 @@ def run_due_discovery_schedules() -> int:
         if not schedule.get("enabled"):
             continue
         owner = get_user(schedule.get("ownerUsername", ""))
-        if not owner or owner.get("role") != "admin":
+        if not owner or owner.get("status") == "disabled":
             continue
         next_run = parse_iso_datetime(schedule.get("nextRunAt"))
         if not next_run or next_run > now:
             continue
         try:
             schedule_payload = dict(schedule.get("payload") or {})
-            target = validate_schedule_target(schedule_payload)
-            target_username = target["username"]
+            all_sales_schedule = schedule_payload.get("scheduleMode") == "all_sales"
+            if all_sales_schedule:
+                if owner.get("role") != "admin":
+                    raise PermissionError("全员定时获客计划必须由管理员创建")
+                target_username = validate_schedule_target(schedule_payload)["username"]
+            else:
+                ensure_user_can_access_country(owner, str(schedule_payload.get("country") or ""))
+                target_username = owner["username"]
             last_job_id = str(schedule.get("lastJobId") or "")
             last_job = get_discovery_job(last_job_id) if last_job_id else None
             if last_job and last_job.get("status") in {"queued", "running"}:
@@ -3605,9 +3630,14 @@ def run_due_discovery_schedules() -> int:
                 continue
             job_payload = schedule_payload
             job_payload["scheduleId"] = schedule["id"]
-            job_payload["scheduledForUsername"] = target_username
-            job_payload["distributionType"] = "scheduled_sales_delivery"
-            job = create_discovery_job(job_payload, target_username, assigned_by_admin=True)
+            if all_sales_schedule:
+                job_payload["scheduledForUsername"] = target_username
+                job_payload["distributionType"] = "scheduled_sales_delivery"
+            job = create_discovery_job(
+                job_payload,
+                target_username,
+                assigned_by_admin=all_sales_schedule,
+            )
             schedule["lastJobId"] = job.get("id", "")
             schedule["lastRunAt"] = now.isoformat(timespec="seconds")
             schedule["nextRunAt"] = (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
@@ -14314,9 +14344,7 @@ class Handler(SimpleHTTPRequestHandler):
         if parsed.path == "/api/discover/schedules":
             if not self.require_auth(api=True):
                 return
-            user = self.require_admin()
-            if not user:
-                return
+            user = self.current_user()
             try:
                 schedules = [schedule_public(schedule) for schedule in list_discovery_schedules(user["username"], limit=1000)]
                 self.send_json(200, {"ok": True, "schedules": schedules})
@@ -14717,15 +14745,17 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(400, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/discover/schedules":
-            user = self.require_admin()
-            if not user:
+            if not self.require_auth(api=True):
                 return
+            user = self.current_user()
             try:
                 content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
                 payload = json.loads(self.rfile.read(content_length).decode("utf-8"))
                 if not isinstance(payload, dict):
                     raise ValueError("请求格式无效")
                 action = str(payload.get("action") or "save")
+                if action == "save" and not payload.get("payload") and ("runTime" in payload or "sourceMode" in payload):
+                    action = "save_all_sales"
                 if action == "delete":
                     schedule_id = str(payload.get("id", ""))
                     if not delete_discovery_schedule(schedule_id, user["username"]):
@@ -14734,6 +14764,8 @@ class Handler(SimpleHTTPRequestHandler):
                     self.send_json(200, {"ok": True, "id": schedule_id})
                     return
                 if action == "save_all_sales":
+                    if user.get("role") != "admin":
+                        raise PermissionError("只有管理员可以创建全员定时获客计划")
                     result = create_all_sales_discovery_schedules(payload, user["username"])
                     record_admin_audit(
                         user["username"],
@@ -14743,7 +14775,8 @@ class Handler(SimpleHTTPRequestHandler):
                     )
                     self.send_json(200, {"ok": True, **result})
                     return
-                ensure_user_can_use_discovery_payload(user, payload)
+                schedule_request = payload.get("payload") if isinstance(payload.get("payload"), dict) else payload
+                ensure_user_can_use_discovery_payload(user, schedule_request)
                 schedule = create_or_update_discovery_schedule(payload, user["username"])
                 self.send_json(200, {"ok": True, "schedule": schedule})
             except PermissionError as exc:

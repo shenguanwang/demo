@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-time">
+  <link rel="stylesheet" href="./styles.css?v=20260720-schedule-fix">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -293,6 +293,40 @@
               </div>
             </div>
           </div>
+        </div>
+      </div>
+      <div class="panel section-gap scheduled-discovery personal-scheduled-discovery">
+        <div class="panel-head">
+          <div>
+            <h3>定时自动找客户</h3>
+            <p>把上方当前搜索条件保存为个人计划，服务器会按频率在后台执行，结果仍进入当前账号的搜索记录。</p>
+          </div>
+          <span class="schedule-status" id="personalScheduleStatus">等待设置</span>
+        </div>
+        <form class="schedule-form" id="personalScheduleForm">
+          <label>执行频率
+            <select name="intervalMinutes">
+              <option value="360">每 6 小时</option>
+              <option value="720">每 12 小时</option>
+              <option value="1440" selected>每天</option>
+              <option value="4320">每 3 天</option>
+              <option value="10080">每周</option>
+            </select>
+          </label>
+          <label>首次执行
+            <select name="startMode">
+              <option value="delay">按频率等待后执行</option>
+              <option value="now">保存后立即执行一次</option>
+            </select>
+          </label>
+          <label class="toggle-line">
+            <input type="checkbox" name="enabled" checked>
+            <span>启用计划</span>
+          </label>
+          <button class="primary" type="submit">保存定时任务</button>
+        </form>
+        <div class="schedule-list personal-schedule-list" id="personalScheduleList">
+          <p class="empty">正在读取个人定时任务…</p>
         </div>
       </div>
       <div class="panel section-gap discovery-task-center">
@@ -1341,6 +1375,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-finder-v2-time"></script>
+  <script src="./script.js?v=20260720-schedule-fix"></script>
 </body>
 </html>
