@@ -1891,10 +1891,14 @@ function userAssignedCountries() {
 
 function discoveryDisabledForSession() {
   if (currentSession?.role === "admin") return false;
+  if (currentSession?.discoveryAdminOnly) return true;
   return userAssignedCountries().includes(ASSIGNED_COUNTRY_NONE);
 }
 
 function discoveryDisabledReason() {
+  if (currentSession?.role !== "admin" && currentSession?.discoveryAdminOnly) {
+    return "系统当前仅允许管理员启动一键获客";
+  }
   return "该账号未开通自动找客户功能";
 }
 

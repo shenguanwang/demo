@@ -3014,6 +3014,8 @@ def ensure_user_can_access_country(user: dict, country: str) -> None:
 def ensure_user_can_use_discovery_payload(user: dict, payload: dict) -> None:
     if not isinstance(payload, dict):
         raise ValueError("请求格式无效")
+    if user and user.get("role") != "admin" and control_value("discovery", "adminOnly", False):
+        raise PermissionError("系统当前仅允许管理员启动一键获客")
     country = str(payload.get("country") or "UAE")
     ensure_user_can_access_country(user, country)
 
@@ -3694,7 +3696,7 @@ def run_due_discovery_schedules() -> int:
                     raise PermissionError("全员定时获客计划必须由管理员创建")
                 target_username = validate_schedule_target(schedule_payload)["username"]
             else:
-                ensure_user_can_access_country(owner, str(schedule_payload.get("country") or ""))
+                ensure_user_can_use_discovery_payload(owner, schedule_payload)
                 target_username = owner["username"]
             last_job_id = str(schedule.get("lastJobId") or "")
             last_job = get_discovery_job(last_job_id) if last_job_id else None
