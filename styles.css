@@ -1792,6 +1792,25 @@ textarea {
   align-items: flex-end;
 }
 
+.finder-v2-head-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.finder-v2-head-actions label {
+  min-width: 132px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.finder-v2-head-actions select {
+  min-height: 36px;
+  padding: 6px 30px 6px 10px;
+}
+
 .finder-v2-kpis {
   display: flex;
   align-items: center;
@@ -1810,7 +1829,7 @@ textarea {
   align-items: baseline;
   gap: 10px;
   min-width: 0;
-  padding: 0 24px;
+  padding: 0 16px;
   border-right: 1px solid var(--line);
 }
 
@@ -2157,6 +2176,22 @@ textarea {
   font-weight: 700;
 }
 
+.schedule-sales-group-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.schedule-sales-group-actions button {
+  min-height: 32px;
+  padding: 0 10px;
+}
+
+.schedule-sales-group-actions .primary {
+  min-width: 0;
+}
+
 .schedule-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2381,6 +2416,22 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .finder-v2-head-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .schedule-sales-group > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .schedule-sales-group-actions {
+    width: 100%;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
   .finder-v2-run-toolbar {
     width: 100%;
     justify-content: stretch;

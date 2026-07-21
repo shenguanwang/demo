@@ -618,7 +618,7 @@ const autoImportingDiscoveryJobs = new Set();
 const hiddenDiscoveryJobIds = new Set(JSON.parse(localStorage.getItem(`${STORAGE_KEY}:hidden-discovery-jobs`) || "[]"));
 let discoverySchedules = [];
 let discoverySchedulePage = 1;
-const DISCOVERY_SCHEDULE_GROUPS_PAGE_SIZE = 4;
+const DISCOVERY_SCHEDULE_GROUPS_PAGE_SIZE = 1;
 let scheduledDiscoveryJobs = [];
 let scheduledRunPage = 1;
 const SCHEDULED_RUNS_PAGE_SIZE = 12;
@@ -6384,6 +6384,50 @@ function groupAllSalesDiscoverySchedules(schedules = discoverySchedules) {
   return Array.from(grouped.entries());
 }
 
+function scheduledJobMatchesStatsPeriod(job, period = "7d") {
+  if (period === "all") return true;
+  const timestamp = new Date(job.updatedAt || job.createdAt || "");
+  if (Number.isNaN(timestamp.getTime())) return false;
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (period === "today") return timestamp >= todayStart;
+  if (period === "yesterday") {
+    const yesterdayStart = new Date(todayStart);
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    return timestamp >= yesterdayStart && timestamp < todayStart;
+  }
+  const days = period === "30d" ? 30 : 7;
+  const rangeStart = new Date(todayStart);
+  rangeStart.setDate(rangeStart.getDate() - (days - 1));
+  return timestamp >= rangeStart;
+}
+
+function renderFinderV2Stats() {
+  const period = $("#scheduleStatsPeriod")?.value || "7d";
+  const jobs = scheduledDiscoveryJobs.filter((job) => scheduledJobMatchesStatsPeriod(job, period));
+  const completed = jobs.filter((job) => job.status === "completed").length;
+  const failed = jobs.filter((job) => ["failed", "canceled"].includes(job.status)).length;
+  const terminal = completed + failed;
+  const imported = jobs.reduce((total, job) => total + Number(
+    job.result?.importedCount ?? job.result?.delivery?.importedCount ?? 0
+  ), 0);
+  const enabled = discoverySchedules.filter((schedule) =>
+    schedule.payload?.scheduleMode === "all_sales" && schedule.enabled
+  ).length;
+  const values = {
+    scheduleEnabledCount: enabled,
+    scheduleJobCount: jobs.length,
+    scheduleCompletedCount: completed,
+    scheduleFailedCount: failed,
+    scheduleImportedCount: imported,
+    scheduleSuccessRate: terminal ? `${Math.round((completed / terminal) * 100)}%` : "0%"
+  };
+  Object.entries(values).forEach(([id, value]) => {
+    const element = document.getElementById(id);
+    if (element) element.textContent = String(value);
+  });
+}
+
 function renderDiscoverySchedules() {
   const box = $("#scheduleList");
   const allSalesSchedules = discoverySchedules.filter((schedule) => schedule.payload?.scheduleMode === "all_sales");
@@ -6397,16 +6441,14 @@ function renderDiscoverySchedules() {
   if (status) status.textContent = allSalesSchedules.length
     ? `${enabledCount} 个启用 / ${allSalesSchedules.length} 个计划`
     : "未设置计划";
-  const enabledKpi = $("#scheduleEnabledCount");
-  const runningKpi = $("#scheduleRunningCount");
-  const completedKpi = $("#scheduleCompletedCount");
-  const failedKpi = $("#scheduleFailedCount");
-  if (enabledKpi) enabledKpi.textContent = String(enabledCount);
-  if (runningKpi) runningKpi.textContent = String(allSalesSchedules.filter((schedule) => ["queued", "running"].includes(schedule.lastJobStatus)).length);
-  if (completedKpi) completedKpi.textContent = String(allSalesSchedules.filter((schedule) => schedule.lastJobStatus === "completed").length);
-  if (failedKpi) failedKpi.textContent = String(allSalesSchedules.filter((schedule) => ["failed", "canceled"].includes(schedule.lastJobStatus)).length);
+  renderFinderV2Stats();
   const pageLabel = $("#schedulePageLabel");
-  if (pageLabel) pageLabel.textContent = `${discoverySchedulePage} / ${pageCount}`;
+  if (pageLabel) {
+    const currentUsername = visibleGroups[0]?.[0] || "";
+    pageLabel.textContent = currentUsername
+      ? `${currentUsername} · ${discoverySchedulePage} / ${pageCount}`
+      : `${discoverySchedulePage} / ${pageCount}`;
+  }
   const prevPage = $("#schedulePrevPage");
   const nextPage = $("#scheduleNextPage");
   if (prevPage) prevPage.disabled = discoverySchedulePage <= 1;
@@ -6415,7 +6457,11 @@ function renderDiscoverySchedules() {
     <section class="schedule-sales-group">
       <header>
         <strong>${escapeHtml(username)}</strong>
-        <span>${schedules.length} 个计划</span>
+        <div class="schedule-sales-group-actions">
+          <span>${schedules.length} 个计划</span>
+          <button class="ghost compact" type="button" data-bulk-schedule="pause" data-schedule-sales="${escapeHtml(username)}"${schedules.some((schedule) => schedule.enabled) ? "" : " disabled"}>全部暂停</button>
+          <button class="primary compact" type="button" data-bulk-schedule="start" data-schedule-sales="${escapeHtml(username)}"${schedules.some((schedule) => !schedule.enabled) ? "" : " disabled"}>全部启动</button>
+        </div>
       </header>
       <div class="schedule-grid">
         ${schedules.map((schedule) => `
@@ -6598,6 +6644,7 @@ async function loadScheduledDiscoveryJobs() {
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
   scheduledDiscoveryJobs = Array.isArray(result.jobs) ? result.jobs : [];
+  renderFinderV2Stats();
   renderScheduledDiscoveryRuns();
   return scheduledDiscoveryJobs;
 }
@@ -6839,6 +6886,23 @@ function discoveryJobLabel(job) {
       ? "系统定时获客 · "
       : "";
   return `${prefix}${job.country || "未指定市场"} · ${job.model || "未指定车型"} · ${formatJobTime(job.createdAt || job.updatedAt)}`;
+}
+
+async function setSalesDiscoverySchedulesEnabled(targetUsername, enabled) {
+  const response = await apiFetch("/api/discover/schedules", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "bulk_set_enabled",
+      targetUsername,
+      enabled
+    })
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+  await loadDiscoverySchedules();
+  const status = $("#scheduleStatus");
+  if (status) status.textContent = `${targetUsername}：已${enabled ? "启动" : "暂停"} ${Number(result.updatedCount || 0)} 个计划`;
 }
 
 function backfillAiReviewsFromDiscoveryJobs() {
@@ -7240,6 +7304,17 @@ function bindForms() {
   });
 
   $("#scheduleList")?.addEventListener("click", (event) => {
+    const bulkButton = event.target.closest("[data-bulk-schedule]");
+    if (bulkButton) {
+      bulkButton.disabled = true;
+      const enabled = bulkButton.dataset.bulkSchedule === "start";
+      setSalesDiscoverySchedulesEnabled(bulkButton.dataset.scheduleSales, enabled).catch((error) => {
+        const status = $("#scheduleStatus");
+        if (status) status.textContent = `批量操作失败：${error.message}`;
+        bulkButton.disabled = false;
+      });
+      return;
+    }
     const toggleButton = event.target.closest("[data-toggle-schedule]");
     if (toggleButton) {
       toggleButton.disabled = true;
@@ -7622,6 +7697,8 @@ function bindForms() {
     refreshAllLeadViews();
     showSection("crm");
   });
+
+  $("#scheduleStatsPeriod")?.addEventListener("change", renderFinderV2Stats);
 
   $("#personalScheduleList")?.addEventListener("click", (event) => {
     const toggleButton = event.target.closest("[data-toggle-schedule]");

@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260720-finder-v2-compact-groups">
+  <link rel="stylesheet" href="./styles.css?v=20260721-finder-v2-stats-controls">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -446,14 +446,27 @@
           <h2>自动找客户2.0</h2>
           <p>仅管理员可用。为销售设置国家和来源后，服务器定时抓取并直接写入该销售的线索审核；销售无需创建任务或手动导入。</p>
         </div>
-        <span class="schedule-status" id="scheduleStatus">正在读取计划</span>
+        <div class="finder-v2-head-actions">
+          <label>统计日期
+            <select id="scheduleStatsPeriod">
+              <option value="today">今天</option>
+              <option value="yesterday">昨天</option>
+              <option value="7d" selected>近7天</option>
+              <option value="30d">近30天</option>
+              <option value="all">全部时间</option>
+            </select>
+          </label>
+          <span class="schedule-status" id="scheduleStatus">正在读取计划</span>
+        </div>
       </div>
 
       <div class="finder-v2-kpis" aria-label="自动找客户2.0运行概况">
         <div><span>启用计划</span><strong id="scheduleEnabledCount">0</strong></div>
-        <div><span>运行中</span><strong id="scheduleRunningCount">0</strong></div>
-        <div><span>最近完成</span><strong id="scheduleCompletedCount">0</strong></div>
-        <div><span>最近失败</span><strong id="scheduleFailedCount">0</strong></div>
+        <div><span>执行任务</span><strong id="scheduleJobCount">0</strong></div>
+        <div><span>已完成</span><strong id="scheduleCompletedCount">0</strong></div>
+        <div><span>失败</span><strong id="scheduleFailedCount">0</strong></div>
+        <div><span>导入线索</span><strong id="scheduleImportedCount">0</strong></div>
+        <div><span>成功率</span><strong id="scheduleSuccessRate">0%</strong></div>
       </div>
 
       <form class="panel finder-v2-form" id="scheduleForm">
@@ -1413,6 +1426,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260720-finder-v2-compact-groups"></script>
+  <script src="./script.js?v=20260721-finder-v2-stats-controls"></script>
 </body>
 </html>

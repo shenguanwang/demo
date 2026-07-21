@@ -3614,6 +3614,28 @@ def delete_discovery_schedule(schedule_id: str, owner_username: str) -> bool:
     return True
 
 
+def set_sales_discovery_schedules_enabled(owner_username: str, target_username: str, enabled: bool) -> int:
+    normalized_target = normalize_username(target_username)
+    schedules = [
+        schedule for schedule in list_discovery_schedules(owner_username, limit=5000)
+        if (schedule.get("payload") or {}).get("scheduleMode") == "all_sales"
+        and normalize_username((schedule.get("payload") or {}).get("targetUsername")) == normalized_target
+    ]
+    if not schedules:
+        raise ValueError("该销售暂无后台抓取计划")
+    now = datetime.now(timezone.utc)
+    for schedule in schedules:
+        schedule["enabled"] = bool(enabled)
+        if enabled:
+            next_run = parse_iso_datetime(schedule.get("nextRunAt"))
+            if not next_run or next_run <= now:
+                run_time = (schedule.get("payload") or {}).get("scheduleRunTime") or "06:00"
+                schedule["nextRunAt"] = next_all_sales_schedule_time(0, run_time).isoformat(timespec="seconds")
+        schedule["updatedAt"] = now.isoformat(timespec="seconds")
+        save_discovery_schedule(schedule)
+    return len(schedules)
+
+
 def run_due_discovery_schedules() -> int:
     now = datetime.now(timezone.utc)
     ran = 0
@@ -14391,7 +14413,7 @@ class Handler(SimpleHTTPRequestHandler):
             if not self.require_auth(api=True) or not self.require_admin():
                 return
             try:
-                self.send_json(200, {"ok": True, "jobs": list_scheduled_delivery_jobs(500)})
+                self.send_json(200, {"ok": True, "jobs": list_scheduled_delivery_jobs(5000)})
             except (OSError, ValueError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(500, {"ok": False, "error": str(exc)})
             return
@@ -14816,6 +14838,21 @@ class Handler(SimpleHTTPRequestHandler):
                         self.send_json(404, {"ok": False, "error": "定时计划不存在"})
                         return
                     self.send_json(200, {"ok": True, "id": schedule_id})
+                    return
+                if action == "bulk_set_enabled":
+                    if user.get("role") != "admin":
+                        raise PermissionError("只有管理员可以批量控制后台抓取计划")
+                    target_username = str(payload.get("targetUsername") or "")
+                    updated_count = set_sales_discovery_schedules_enabled(
+                        user["username"], target_username, bool(payload.get("enabled"))
+                    )
+                    record_admin_audit(
+                        user["username"],
+                        "批量启动定时获客" if payload.get("enabled") else "批量暂停定时获客",
+                        f"{target_username} · {updated_count} 个计划",
+                        self.client_ip(),
+                    )
+                    self.send_json(200, {"ok": True, "updatedCount": updated_count})
                     return
                 if action == "save_all_sales":
                     if user.get("role") != "admin":
