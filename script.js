@@ -9661,7 +9661,9 @@ function renderBeijingGreeting() {
   const greetingBox = $("#timeGreeting");
   const dateBox = $("#beijingDate");
   const accountName = String(currentSession?.username || "").trim();
-  if (greetingBox) greetingBox.textContent = accountName ? `${accountName}，${greeting}` : greeting;
+  const mappedName = userDisplayName(accountName);
+  const greetingName = mappedName === "-" ? accountName : mappedName;
+  if (greetingBox) greetingBox.textContent = greetingName ? `${greetingName}，${greeting}` : greeting;
   if (dateBox) {
     dateBox.textContent =
       `${parts.year}年${parts.month}月${parts.day}日 · ${weekday} · ` +
