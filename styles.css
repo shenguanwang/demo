@@ -139,6 +139,11 @@ button {
   transition: 160ms ease;
 }
 
+.nav button[hidden],
+.section[hidden] {
+  display: none !important;
+}
+
 .nav button > span {
   display: grid;
   width: 25px;

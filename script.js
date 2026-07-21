@@ -8574,9 +8574,15 @@ async function loadSession() {
   const systemSettingsNav = $("#systemSettingsNav");
   if (systemSettingsNav) systemSettingsNav.hidden = session.role !== "admin";
   const autoFinderV2Nav = $("#autoFinderV2Nav");
-  if (autoFinderV2Nav) autoFinderV2Nav.hidden = session.role !== "admin";
+  if (autoFinderV2Nav) {
+    autoFinderV2Nav.hidden = session.role !== "admin";
+    autoFinderV2Nav.style.display = session.role === "admin" ? "" : "none";
+  }
   const autoFinderV2Section = $("#lead-finder-v2");
-  if (autoFinderV2Section) autoFinderV2Section.hidden = session.role !== "admin";
+  if (autoFinderV2Section) {
+    autoFinderV2Section.hidden = session.role !== "admin";
+    autoFinderV2Section.style.display = session.role === "admin" ? "" : "none";
+  }
   const userManagementSection = $("#user-management");
   if (userManagementSection) userManagementSection.hidden = session.role !== "admin";
   const systemSettingsSection = $("#system-settings");
