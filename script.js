@@ -9226,6 +9226,18 @@ async function restoreAdminBackup(file) {
   await loadAdminOperations();
 }
 
+function userDisplayName(username) {
+  return {
+    admin: "管理员",
+    chenruizhe: "陈睿哲",
+    xuchenghui: "徐成会",
+    sunruilin: "孙瑞林",
+    sunpengfei: "孙鹏飞",
+    shihaohua: "石豪华",
+    fanjie: "范杰"
+  }[String(username || "").trim().toLowerCase()] || "-";
+}
+
 function renderUsers(users = []) {
   const rows = $("#userRows");
   if (!rows) return;
@@ -9234,6 +9246,7 @@ function renderUsers(users = []) {
     <tr>
       <td>${index + 1}</td>
       <td><strong>${escapeHtml(user.username)}</strong>${user.builtIn ? `<br><small>系统内置</small>` : ""}</td>
+      <td><strong class="user-display-name">${escapeHtml(userDisplayName(user.username))}</strong></td>
       <td>${escapeHtml(userRoleLabel(user.role))}</td>
       <td>${escapeHtml(assignedCountrySummary(user.assignedCountries))}</td>
       <td>${escapeHtml(formatSyncTime(user.createdAt))}</td>
@@ -9253,7 +9266,7 @@ function renderUsers(users = []) {
         </select>
         <button type="button" data-user-action="status" data-status="${user.status}" data-username="${escapeHtml(user.username)}">${user.status === "disabled" ? "启用" : "禁用"}</button>
         <button class="danger" type="button" data-user-action="delete" data-username="${escapeHtml(user.username)}">删除</button>`}</div></td>
-    </tr>`).join("") : `<tr><td colspan="8">暂无用户。管理员可通过左侧表单添加。</td></tr>`;
+    </tr>`).join("") : `<tr><td colspan="9">暂无用户。管理员可通过左侧表单添加。</td></tr>`;
 }
 
 function renderUserActivity(data = {}) {
@@ -9418,7 +9431,7 @@ function closeManualLeadModal() {
 async function loadUsers() {
   if (currentSession?.role !== "admin") return;
   const rows = $("#userRows");
-  if (rows) rows.innerHTML = `<tr><td colspan="8">正在读取用户列表…</td></tr>`;
+  if (rows) rows.innerHTML = `<tr><td colspan="9">正在读取用户列表…</td></tr>`;
   const response = await apiFetch("/api/users", { cache: "no-store" });
   const result = await response.json().catch(() => ({}));
   if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);

@@ -3508,7 +3508,7 @@ textarea {
 .user-table-panel { min-width: 0; }
 .user-table-panel .panel-head > div { min-width: 0; }
 .user-table-panel table {
-  min-width: 960px;
+  min-width: 1040px;
   table-layout: fixed;
 }
 
@@ -3523,23 +3523,35 @@ textarea {
 .user-table-panel th:nth-child(1),
 .user-table-panel td:nth-child(1) { width: 42px; }
 .user-table-panel th:nth-child(2),
-.user-table-panel td:nth-child(2) { width: 110px; }
+.user-table-panel td:nth-child(2) { width: 100px; }
 .user-table-panel th:nth-child(3),
-.user-table-panel td:nth-child(3) { width: 64px; }
+.user-table-panel td:nth-child(3) { width: 74px; }
 .user-table-panel th:nth-child(4),
-.user-table-panel td:nth-child(4) { width: 175px; }
+.user-table-panel td:nth-child(4) { width: 62px; }
 .user-table-panel th:nth-child(5),
-.user-table-panel td:nth-child(5) { width: 116px; }
+.user-table-panel td:nth-child(5) { width: 175px; }
 .user-table-panel th:nth-child(6),
-.user-table-panel td:nth-child(6) { width: 78px; }
+.user-table-panel td:nth-child(6) { width: 116px; }
 .user-table-panel th:nth-child(7),
-.user-table-panel td:nth-child(7) { width: 70px; }
+.user-table-panel td:nth-child(7) { width: 78px; }
 .user-table-panel th:nth-child(8),
-.user-table-panel td:nth-child(8) { width: 330px; }
-.user-table-panel td:nth-child(4) {
+.user-table-panel td:nth-child(8) { width: 70px; }
+.user-table-panel th:nth-child(9),
+.user-table-panel td:nth-child(9) { width: 300px; }
+.user-table-panel td:nth-child(5) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.user-display-name {
+  color: #1d2a36;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+:root[data-theme="dark"] .user-display-name {
+  color: #f4f6f8;
 }
 
 .user-status {
@@ -3573,6 +3585,11 @@ textarea {
   font-size: 10px;
 }
 .user-actions .danger { border-color: #f0d2ce; color: #a33c32; background: #fff8f7; }
+.user-actions .user-role-select {
+  width: 78px;
+  min-width: 78px;
+  padding-right: 22px;
+}
 
 .user-table-panel .table-wrap {
   overflow-x: auto;

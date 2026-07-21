@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260721-finder-v2-stats-controls">
+  <link rel="stylesheet" href="./styles.css?v=20260721-user-display-name">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -678,8 +678,8 @@
         <div class="panel user-table-panel">
           <div class="panel-head"><div><h3>用户列表</h3><span id="userCount">0 位用户</span></div><button class="ghost compact" id="refreshUsers" type="button">刷新</button></div>
           <div class="table-wrap"><table>
-            <thead><tr><th>ID</th><th>用户名</th><th>角色</th><th>负责区域</th><th>创建时间</th><th>在线</th><th>状态</th><th>操作</th></tr></thead>
-            <tbody id="userRows"><tr><td colspan="8">正在读取用户列表…</td></tr></tbody>
+            <thead><tr><th>ID</th><th>用户名</th><th>姓名</th><th>角色</th><th>负责区域</th><th>创建时间</th><th>在线</th><th>状态</th><th>操作</th></tr></thead>
+            <tbody id="userRows"><tr><td colspan="9">正在读取用户列表…</td></tr></tbody>
           </table></div>
           <div class="user-activity-panel" id="userActivityPanel" hidden></div>
         </div>
@@ -1426,6 +1426,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260721-finder-v2-stats-controls"></script>
+  <script src="./script.js?v=20260721-user-display-name"></script>
 </body>
 </html>
