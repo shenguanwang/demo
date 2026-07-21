@@ -8088,6 +8088,7 @@ function bindForms() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           username: data.username,
+          displayName: data.displayName,
           password: data.password,
           role: data.role || "user",
           assignedCountries: selectedUserCountryValues($("#userAssignedCountries"))
@@ -8097,7 +8098,7 @@ function bindForms() {
       if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
       form.reset();
       renderUserCountryOptions();
-      status.textContent = `已添加用户：${result.user.username}`;
+      status.textContent = `已添加用户：${result.user.displayName}（${result.user.username}）`;
       status.classList.add("success");
       await loadUsers();
     } catch (error) {
@@ -9336,7 +9337,11 @@ async function restoreAdminBackup(file) {
   await loadAdminOperations();
 }
 
-function userDisplayName(username) {
+function userDisplayName(userOrUsername) {
+  const user = userOrUsername && typeof userOrUsername === "object" ? userOrUsername : null;
+  const username = String(user?.username || userOrUsername || "").trim();
+  const savedName = String(user?.displayName || "").trim();
+  if (savedName) return savedName;
   return {
     admin: "管理员",
     chenruizhe: "陈睿哲",
@@ -9356,7 +9361,7 @@ function renderUsers(users = []) {
     <tr>
       <td>${index + 1}</td>
       <td><strong>${escapeHtml(user.username)}</strong>${user.builtIn ? `<br><small>系统内置</small>` : ""}</td>
-      <td><strong class="user-display-name">${escapeHtml(userDisplayName(user.username))}</strong></td>
+      <td><strong class="user-display-name">${escapeHtml(userDisplayName(user))}</strong></td>
       <td>${escapeHtml(userRoleLabel(user.role))}</td>
       <td>${escapeHtml(assignedCountrySummary(user.assignedCountries))}</td>
       <td>${escapeHtml(formatSyncTime(user.createdAt))}</td>
@@ -9667,7 +9672,7 @@ function renderBeijingGreeting() {
   const greetingBox = $("#timeGreeting");
   const dateBox = $("#beijingDate");
   const accountName = String(currentSession?.username || "").trim();
-  const mappedName = userDisplayName(accountName);
+  const mappedName = userDisplayName(currentSession || accountName);
   const greetingName = mappedName === "-" ? accountName : mappedName;
   if (greetingBox) greetingBox.textContent = greetingName ? `${greetingName}，${greeting}` : greeting;
   if (dateBox) {

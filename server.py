@@ -1297,6 +1297,7 @@ def _initialize_state_store_schema() -> None:
                     """
                     CREATE TABLE IF NOT EXISTS app_users (
                         username TEXT PRIMARY KEY,
+                        display_name TEXT NOT NULL DEFAULT '',
                         password_hash TEXT NOT NULL,
                         role TEXT NOT NULL DEFAULT 'user',
                         status TEXT NOT NULL DEFAULT 'enabled',
@@ -1306,6 +1307,7 @@ def _initialize_state_store_schema() -> None:
                     """
                 )
                 cursor.execute("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS assigned_countries JSONB NOT NULL DEFAULT '[]'::jsonb")
+                cursor.execute("ALTER TABLE app_users ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''")
                 cursor.execute(
                     """
                     CREATE TABLE IF NOT EXISTS app_settings (
@@ -1413,6 +1415,7 @@ def _initialize_state_store_schema() -> None:
             """
             CREATE TABLE IF NOT EXISTS app_users (
                 username TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL DEFAULT '',
                 password_hash TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'user',
                 status TEXT NOT NULL DEFAULT 'enabled',
@@ -1423,6 +1426,11 @@ def _initialize_state_store_schema() -> None:
         )
         try:
             connection.execute("ALTER TABLE app_users ADD COLUMN assigned_countries TEXT NOT NULL DEFAULT '[]'")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+        try:
+            connection.execute("ALTER TABLE app_users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError as exc:
             if "duplicate column name" not in str(exc).lower():
                 raise
@@ -2855,21 +2863,30 @@ def normalize_username(username: str) -> str:
     return value
 
 
+def normalize_display_name(display_name: str, *, required: bool = False) -> str:
+    value = " ".join(str(display_name or "").strip().split())
+    if required and not value:
+        raise ValueError("请输入姓名")
+    if len(value) > 32:
+        raise ValueError("姓名不能超过 32 个字符")
+    return value
+
+
 def list_users() -> list[dict]:
     initialize_state_store()
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT username, role, status, created_at, assigned_countries FROM app_users ORDER BY created_at ASC")
+                cursor.execute("SELECT username, display_name, role, status, created_at, assigned_countries FROM app_users ORDER BY created_at ASC")
                 rows = cursor.fetchall()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            rows = connection.execute("SELECT username, role, status, created_at, assigned_countries FROM app_users ORDER BY created_at ASC").fetchall()
+            rows = connection.execute("SELECT username, display_name, role, status, created_at, assigned_countries FROM app_users ORDER BY created_at ASC").fetchall()
     users = [user_row_public(AUTH_USERNAME, "admin", "enabled", "系统内置", [], True)]
     for row in rows:
         if row[0] in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
             continue
-        users.append(user_row_public(row[0], row[1], row[2], row[3], row[4] if len(row) > 4 else [], False))
+        users.append(user_row_public(row[0], row[2], row[3], row[4], row[5] if len(row) > 5 else [], False, row[1]))
     presence_by_user = presence_rows_by_user()
     for user in users:
         presence = presence_payload(user["username"], user, presence_by_user.get(user["username"]))
@@ -2893,15 +2910,15 @@ def get_user(username: str) -> dict | None:
     if DATABASE_URL:
         with postgres_connection() as connection:
             with connection.cursor() as cursor:
-                cursor.execute("SELECT username, password_hash, role, status, created_at, assigned_countries FROM app_users WHERE username = %s", (username,))
+                cursor.execute("SELECT username, display_name, password_hash, role, status, created_at, assigned_countries FROM app_users WHERE username = %s", (username,))
                 row = cursor.fetchone()
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
-            row = connection.execute("SELECT username, password_hash, role, status, created_at, assigned_countries FROM app_users WHERE username = ?", (username,)).fetchone()
+            row = connection.execute("SELECT username, display_name, password_hash, role, status, created_at, assigned_countries FROM app_users WHERE username = ?", (username,)).fetchone()
     if not row:
         return None
-    user = user_row_public(row[0], row[2], row[3], row[4], row[5] if len(row) > 5 else [], False)
-    user["passwordHash"] = row[1]
+    user = user_row_public(row[0], row[3], row[4], row[5], row[6] if len(row) > 6 else [], False, row[1])
+    user["passwordHash"] = row[2]
     return user
 
 
@@ -2982,10 +2999,11 @@ def ensure_user_can_use_discovery_payload(user: dict, payload: dict) -> None:
     ensure_user_can_access_country(user, country)
 
 
-def user_row_public(username: str, role: str, status: str, created_at, assigned_countries=None, built_in: bool = False) -> dict:
+def user_row_public(username: str, role: str, status: str, created_at, assigned_countries=None, built_in: bool = False, display_name: str = "") -> dict:
     created_value = created_at.isoformat() if hasattr(created_at, "isoformat") else str(created_at)
     return {
         "username": username,
+        "displayName": normalize_display_name(display_name),
         "role": role,
         "status": status,
         "createdAt": created_value,
@@ -2994,8 +3012,9 @@ def user_row_public(username: str, role: str, status: str, created_at, assigned_
     }
 
 
-def create_user(username: str, password: str, role: str | None = None, assigned_countries=None) -> dict:
+def create_user(username: str, password: str, role: str | None = None, assigned_countries=None, display_name: str = "") -> dict:
     username = normalize_username(username)
+    display_name = normalize_display_name(display_name, required=True)
     if username in {AUTH_USERNAME, HIDDEN_ADMIN_USERNAME}:
         raise ValueError("管理员账户为系统内置账户，不能重复创建")
     minimum = password_min_length()
@@ -3013,18 +3032,18 @@ def create_user(username: str, password: str, role: str | None = None, assigned_
             with connection.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO app_users (username, password_hash, role, status, assigned_countries, created_at)
-                    VALUES (%s, %s, %s, 'enabled', %s::jsonb, NOW())
+                    INSERT INTO app_users (username, display_name, password_hash, role, status, assigned_countries, created_at)
+                    VALUES (%s, %s, %s, %s, 'enabled', %s::jsonb, NOW())
                     """,
-                    (username, password_hash, role, encoded_countries),
+                    (username, display_name, password_hash, role, encoded_countries),
                 )
     else:
         with sqlite3.connect(SQLITE_STATE_FILE) as connection:
             connection.execute(
-                "INSERT INTO app_users (username, password_hash, role, status, assigned_countries, created_at) VALUES (?, ?, ?, 'enabled', ?, ?)",
-                (username, password_hash, role, encoded_countries, now),
+                "INSERT INTO app_users (username, display_name, password_hash, role, status, assigned_countries, created_at) VALUES (?, ?, ?, ?, 'enabled', ?, ?)",
+                (username, display_name, password_hash, role, encoded_countries, now),
             )
-    return user_row_public(username, role, "enabled", now, assigned_countries, False)
+    return user_row_public(username, role, "enabled", now, assigned_countries, False, display_name)
 
 
 def update_user(
@@ -14267,6 +14286,7 @@ class Handler(SimpleHTTPRequestHandler):
                     "ok": True,
                     "authenticated": bool(user),
                     "username": user.get("username", "") if user else "",
+                    "displayName": user.get("displayName", "") if user else "",
                     "role": user.get("role", "") if user else "",
                     "assignedCountries": user.get("assignedCountries", []) if user else [],
                     "discoveryAdminOnly": bool(control_value("discovery", "adminOnly", False)),
@@ -14647,6 +14667,7 @@ class Handler(SimpleHTTPRequestHandler):
                     str(payload.get("password", "")),
                     payload.get("role"),
                     payload.get("assignedCountries"),
+                    str(payload.get("displayName", "")),
                 )
                 record_admin_audit(self.current_user()["username"], "创建用户", user["username"], self.client_ip())
                 self.send_json(201, {"ok": True, "user": user})

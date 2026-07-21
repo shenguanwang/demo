@@ -665,6 +665,7 @@
         <form class="panel user-form" id="userForm">
           <div class="panel-head"><h3>添加用户</h3><span>初始状态：启用</span></div>
           <label>用户名<input name="username" autocomplete="off" minlength="3" maxlength="32" required placeholder="3-32 位字母、数字或 _ . -"></label>
+          <label>姓名<input name="displayName" autocomplete="name" minlength="2" maxlength="32" required placeholder="例如 陈睿哲"></label>
           <label>角色<select name="role"><option value="user">销售</option><option value="operator">运营</option><option value="admin">管理员</option></select></label>
           <label>负责国家（国外）
             <div class="user-country-checklist" id="userAssignedCountries"></div>
@@ -1426,6 +1427,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260721-admin-v2-visibility"></script>
+  <script src="./script.js?v=20260721-user-display-name"></script>
 </body>
 </html>
