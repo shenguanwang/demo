@@ -2254,9 +2254,27 @@ function reviewReasonParts(lead) {
 }
 
 function reviewAiResultHtml(lead) {
-  const { aiReason } = reviewReasonParts(lead);
+  const { aiReason: storedReason } = reviewReasonParts(lead);
+  const ai = lead.aiReview && typeof lead.aiReview === "object" ? lead.aiReview : {};
+  const confidence = Math.max(0, Math.min(100, Number(ai.confidence || 0)));
+  let aiReason = storedReason;
+  if (/^AI置信度低于\s*\d+%[，,]\s*需人工核验[。.]?$/i.test(aiReason)) {
+    const evidence = [
+      ai.businessType || lead.type || lead.accountType,
+      ...(Array.isArray(ai.automotiveEvidence) ? ai.automotiveEvidence.slice(0, 1) : []),
+      ...(Array.isArray(ai.countryEvidenceSnippets) ? ai.countryEvidenceSnippets.slice(0, 1) : [])
+    ].map((item) => String(item || "").trim()).filter(Boolean);
+    const contactSummary = [lead.customerWebsite ? "官网" : "", lead.email ? "邮箱" : "", lead.phone ? "电话" : ""]
+      .filter(Boolean).join("、");
+    if (contactSummary) evidence.push(`已有${contactSummary}`);
+    const context = [...new Set(evidence)].slice(0, 3).join("；") || `${lead.sourceType || lead.source || "公开来源"}证据仍不完整`;
+    aiReason = `${context}。本条 AI 判断置信度 ${confidence}%，低于系统阈值，需人工核验。`;
+  }
+  const reviewLabel = ai.available === false
+    ? "AI复核未完成"
+    : `AI复核${confidence ? ` ${confidence}%` : ""}`;
   return aiReason
-    ? `<p class="review-title-ai"><strong>AI复核：</strong><span>${escapeHtml(aiReason)}</span></p>`
+    ? `<p class="review-title-ai"><strong>${escapeHtml(reviewLabel)}：</strong><span>${escapeHtml(aiReason)}</span></p>`
     : "";
 }
 

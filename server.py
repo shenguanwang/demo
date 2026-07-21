@@ -733,6 +733,25 @@ Return one valid JSON object only. Do not add markdown or commentary.
     }
 
 
+def apply_ai_confidence_threshold(ai_review: dict, minimum_confidence: int) -> dict:
+    if not ai_review or ai_review.get("decision") == "reject":
+        return ai_review
+    confidence = max(0, min(100, int(ai_review.get("confidence") or 0)))
+    threshold = max(0, min(100, int(minimum_confidence or 0)))
+    if confidence >= threshold:
+        return ai_review
+    original_reason = clean_text(str(ai_review.get("reason") or ""))
+    if not original_reason:
+        original_reason = "现有公开证据不足以形成高置信度判断"
+    ai_review["decision"] = "manual_review"
+    ai_review["belowConfidenceThreshold"] = True
+    ai_review["confidenceThreshold"] = threshold
+    ai_review["reason"] = (
+        f"{original_reason}（本条 AI 判断置信度 {confidence}%，低于系统阈值 {threshold}%，转人工核验。）"
+    )[:500]
+    return ai_review
+
+
 def ai_generate_search_queries(
     *,
     country: str,
@@ -13742,18 +13761,25 @@ def discover(params: dict[str, list[str]]) -> dict:
             if ai_policy.get("failurePolicy") == "skip":
                 reject_candidate("aiUnavailableSkip")
                 continue
+            available_evidence = "、".join(filter(None, (
+                source_type or origin,
+                "客户官网" if customer_website else "",
+                "公开联系方式" if contactable else "",
+            ))) or "公开来源"
             ai_review = {
                 "provider": get_ai_provider() or "deepseek",
                 "model": get_ai_model("fast"),
                 "decision": "manual_review" if ai_policy.get("failurePolicy") != "allow" else "keep",
                 "confidence": 0,
-                "reason": "AI复核暂未返回有效结果，需人工核验。",
+                "available": False,
+                "reason": (
+                    f"AI服务未返回有效结果；{company}当前仅有{available_evidence}，"
+                    "需人工核验汽车业务主体及目标国家信息。"
+                ),
                 "countryEvidence": "none",
             }
         minimum_ai_confidence = int(quality_policy.get("minimumAiConfidence") or 0)
-        if ai_review and int(ai_review.get("confidence") or 0) < minimum_ai_confidence and ai_review.get("decision") != "reject":
-            ai_review["decision"] = "manual_review"
-            ai_review["reason"] = f"AI置信度低于 {minimum_ai_confidence}%，需人工核验。"
+        ai_review = apply_ai_confidence_threshold(ai_review, minimum_ai_confidence)
         if ai_review:
             hard_reject = bool(
                 (quality_policy.get("strictCountryMatch") and ai_review.get("countryEvidence") == "conflict")
