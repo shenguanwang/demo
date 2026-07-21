@@ -3330,21 +3330,18 @@ def normalize_daily_run_time(value) -> str:
     return f"{match.group(1)}:{match.group(2)}"
 
 
-ALL_SALES_SCHEDULE_BATCH_SIZE = 3
-ALL_SALES_SCHEDULE_BATCH_INTERVAL_MINUTES = 30
-
-
-def next_all_sales_schedule_time(position: int = 0, run_time: str = "06:00") -> datetime:
+def next_all_sales_schedule_time(
+    run_time: str = "06:00",
+    now: datetime | None = None,
+) -> datetime:
     hour, minute = (int(part) for part in normalize_daily_run_time(run_time).split(":"))
     beijing_tz = timezone(timedelta(hours=8))
-    now_local = datetime.now(beijing_tz)
+    reference = now or datetime.now(timezone.utc)
+    now_local = reference.astimezone(beijing_tz)
     next_run = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
     if next_run <= now_local:
         next_run += timedelta(days=1)
-    batch_index = max(0, position) // ALL_SALES_SCHEDULE_BATCH_SIZE
-    return (
-        next_run + timedelta(minutes=batch_index * ALL_SALES_SCHEDULE_BATCH_INTERVAL_MINUTES)
-    ).astimezone(timezone.utc)
+    return next_run.astimezone(timezone.utc)
 
 
 def row_to_discovery_schedule(row) -> dict:
@@ -3582,7 +3579,7 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
     updated_count = 0
     covered_users = set()
     saved = []
-    for position, (target_username, country) in enumerate(assignments):
+    for target_username, country in assignments:
         raw_schedule_payload = {
             "planName": f"{target_username} · {country} · {source_labels[source_mode]}",
             "targetUsername": target_username,
@@ -3617,7 +3614,7 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
             "payload": schedule_payload,
             "intervalMinutes": interval_minutes,
             "enabled": True,
-            "nextRunAt": next_all_sales_schedule_time(position, run_time).isoformat(timespec="seconds"),
+            "nextRunAt": next_all_sales_schedule_time(run_time=run_time).isoformat(timespec="seconds"),
             "updatedAt": now.isoformat(timespec="seconds"),
         })
         save_discovery_schedule(schedule)
@@ -3633,8 +3630,8 @@ def create_all_sales_discovery_schedules(payload: dict, owner_username: str) -> 
         "excludedUsers": excluded_users,
         "targetUsername": requested_target,
         "runTime": run_time,
-        "batchSize": ALL_SALES_SCHEDULE_BATCH_SIZE,
-        "batchIntervalMinutes": ALL_SALES_SCHEDULE_BATCH_INTERVAL_MINUTES,
+        "batchSize": 0,
+        "batchIntervalMinutes": 0,
         "firstRunAt": saved[0]["nextRunAt"] if saved else "",
     }
 
@@ -3670,7 +3667,7 @@ def set_sales_discovery_schedules_enabled(owner_username: str, target_username: 
             next_run = parse_iso_datetime(schedule.get("nextRunAt"))
             if not next_run or next_run <= now:
                 run_time = (schedule.get("payload") or {}).get("scheduleRunTime") or "06:00"
-                schedule["nextRunAt"] = next_all_sales_schedule_time(0, run_time).isoformat(timespec="seconds")
+                schedule["nextRunAt"] = next_all_sales_schedule_time(run_time).isoformat(timespec="seconds")
         schedule["updatedAt"] = now.isoformat(timespec="seconds")
         save_discovery_schedule(schedule)
     return len(schedules)
@@ -3701,7 +3698,14 @@ def run_due_discovery_schedules() -> int:
             last_job_id = str(schedule.get("lastJobId") or "")
             last_job = get_discovery_job(last_job_id) if last_job_id else None
             if last_job and last_job.get("status") in {"queued", "running"}:
-                schedule["nextRunAt"] = (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
+                schedule["nextRunAt"] = (
+                    next_all_sales_schedule_time(
+                        run_time=schedule_payload.get("scheduleRunTime") or "06:00",
+                        now=now,
+                    ).isoformat(timespec="seconds")
+                    if all_sales_schedule
+                    else (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
+                )
                 schedule["updatedAt"] = now.isoformat(timespec="seconds")
                 save_discovery_schedule(schedule)
                 continue
@@ -3717,13 +3721,28 @@ def run_due_discovery_schedules() -> int:
             )
             schedule["lastJobId"] = job.get("id", "")
             schedule["lastRunAt"] = now.isoformat(timespec="seconds")
-            schedule["nextRunAt"] = (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
+            schedule["nextRunAt"] = (
+                next_all_sales_schedule_time(
+                    run_time=schedule_payload.get("scheduleRunTime") or "06:00",
+                    now=now,
+                ).isoformat(timespec="seconds")
+                if all_sales_schedule
+                else (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
+            )
             schedule["updatedAt"] = now.isoformat(timespec="seconds")
             save_discovery_schedule(schedule)
             ran += 1
         except Exception as exc:
             schedule["lastRunAt"] = now.isoformat(timespec="seconds")
-            schedule["nextRunAt"] = (now + timedelta(minutes=max(15, int(schedule.get("intervalMinutes", 1440))))).isoformat(timespec="seconds")
+            failed_payload = schedule.get("payload") or {}
+            schedule["nextRunAt"] = (
+                next_all_sales_schedule_time(
+                    run_time=failed_payload.get("scheduleRunTime") or "06:00",
+                    now=now,
+                ).isoformat(timespec="seconds")
+                if failed_payload.get("scheduleMode") == "all_sales"
+                else (now + timedelta(minutes=max(15, int(schedule.get("intervalMinutes", 1440))))).isoformat(timespec="seconds")
+            )
             schedule["updatedAt"] = now.isoformat(timespec="seconds")
             save_discovery_schedule(schedule)
             print(f"scheduled discovery failed for {schedule.get('id')}: {exc}")

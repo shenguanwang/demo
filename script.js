@@ -2043,7 +2043,7 @@ function renderScheduleTargetOptions() {
 function updateAllSalesScheduleTimeLabel() {
   const value = String($("#scheduleRunTime")?.value || "06:00");
   const label = $("#scheduleDailyTime");
-  if (label) label.textContent = `每天 ${value} 开始 · 每批3个`;
+  if (label) label.textContent = `每天 ${value} 准时开始`;
 }
 
 function leadRegionVerification(lead) {
