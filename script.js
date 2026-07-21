@@ -119,6 +119,20 @@ const countries = [
     targets: "汽车贸易公司、平行进口商、区域代理"
   },
   {
+    name: "Belarus 白俄罗斯",
+    rank: "第三优先级",
+    cities: "Minsk / Gomel / Brest",
+    reason: "东欧俄语汽车市场，中国品牌认知度较高，适合开发进口商、汽车贸易公司和多品牌展厅。",
+    targets: "汽车进口商、多品牌经销商、汽车贸易公司"
+  },
+  {
+    name: "South Africa 南非",
+    rank: "第三优先级",
+    cities: "Johannesburg / Pretoria / Cape Town / Durban",
+    reason: "非洲成熟汽车市场，经销网络和二手车渠道完善，适合开发经销集团、进口商和企业车队。",
+    targets: "经销商集团、汽车进口商、企业及租赁车队"
+  },
+  {
     name: "Bahrain 巴林",
     rank: "其他可开发",
     marketGroup: "other",
@@ -170,6 +184,7 @@ const countries = [
     name: "Brazil 巴西",
     rank: "其他可开发",
     marketGroup: "other",
+    marketRegion: "south_america",
     cities: "São Paulo / Rio de Janeiro / Brasília",
     reason: "拉美最大汽车市场之一，插混和中国品牌接受度提升，但需提前核算税费与认证。",
     targets: "大型经销集团、汽车进口商、企业车队"
@@ -178,6 +193,7 @@ const countries = [
     name: "Chile 智利",
     rank: "其他可开发",
     marketGroup: "other",
+    marketRegion: "south_america",
     cities: "Santiago / Valparaíso / Concepción",
     reason: "进口车型市场开放度较高，可从多品牌经销商和新能源车渠道切入。",
     targets: "汽车进口商、多品牌经销商、车队采购"
@@ -186,9 +202,55 @@ const countries = [
     name: "Colombia 哥伦比亚",
     rank: "其他可开发",
     marketGroup: "other",
+    marketRegion: "south_america",
     cities: "Bogotá / Medellín / Cali",
     reason: "新能源政策和城市电动化持续推进，适合开发进口商、经销集团和商务车队。",
     targets: "汽车进口商、经销商集团、商务车队"
+  },
+  {
+    name: "Argentina 阿根廷",
+    rank: "其他可开发",
+    marketGroup: "other",
+    marketRegion: "south_america",
+    cities: "Buenos Aires / Córdoba / Rosario",
+    reason: "南美重要汽车市场，经销体系成熟，适合筛选进口商、多品牌经销商和新能源车渠道。",
+    targets: "汽车进口商、经销商集团、新能源车展厅"
+  },
+  {
+    name: "Peru 秘鲁",
+    rank: "其他可开发",
+    marketGroup: "other",
+    marketRegion: "south_america",
+    cities: "Lima / Arequipa / Trujillo",
+    reason: "进口车型占比较高，可从利马经销商、汽车贸易公司和企业车队切入。",
+    targets: "汽车进口商、多品牌经销商、企业车队"
+  },
+  {
+    name: "Ecuador 厄瓜多尔",
+    rank: "其他可开发",
+    marketGroup: "other",
+    marketRegion: "south_america",
+    cities: "Quito / Guayaquil / Cuenca",
+    reason: "中国汽车品牌已有市场基础，适合开发当地经销集团、进口商和新能源渠道。",
+    targets: "汽车进口商、经销商集团、新能源车展厅"
+  },
+  {
+    name: "Uruguay 乌拉圭",
+    rank: "其他可开发",
+    marketGroup: "other",
+    marketRegion: "south_america",
+    cities: "Montevideo / Canelones / Maldonado",
+    reason: "市场规模较小但进口开放度较高，可重点寻找首都经销商和区域进口商。",
+    targets: "汽车进口商、多品牌经销商、租赁车队"
+  },
+  {
+    name: "Paraguay 巴拉圭",
+    rank: "其他可开发",
+    marketGroup: "other",
+    marketRegion: "south_america",
+    cities: "Asunción / Ciudad del Este / San Lorenzo",
+    reason: "进口车和区域贸易活跃，适合开发汽车贸易公司、平行进口商和经销商。",
+    targets: "汽车贸易公司、平行进口商、多品牌经销商"
   },
   {
     name: "Morocco 摩洛哥",
@@ -278,7 +340,14 @@ const destinationByCountry = {
   Kyrgyzstan: "Bishkek, Kyrgyzstan",
   Ethiopia: "Addis Ababa, Ethiopia",
   Oman: "Sohar, Oman",
-  Armenia: "Yerevan, Armenia"
+  Armenia: "Yerevan, Armenia",
+  Belarus: "Klaipeda, Lithuania (transit to Belarus)",
+  "South Africa": "Durban, South Africa",
+  Argentina: "Buenos Aires, Argentina",
+  Peru: "Callao, Peru",
+  Ecuador: "Guayaquil, Ecuador",
+  Uruguay: "Montevideo, Uruguay",
+  Paraguay: "Asunción, Paraguay"
 };
 
 const riskProfiles = {
@@ -334,7 +403,8 @@ const riskProfiles = {
 
 [
   "Nigeria", "Ghana", "Algeria", "Côte d'Ivoire", "Egypt",
-  "Kyrgyzstan", "Ethiopia", "Oman", "Armenia"
+  "Kyrgyzstan", "Ethiopia", "Oman", "Armenia", "Belarus", "South Africa",
+  "Argentina", "Peru", "Ecuador", "Uruguay", "Paraguay"
 ].forEach((key) => {
   riskProfiles[key] = {
     certification: "成交前让当地进口商或清关代理书面确认车型准入、认证、年份、排放、关税和上牌资料。",
@@ -696,6 +766,8 @@ const salesCountryCoordinates = {
   Ethiopia: [9.15, 40.49],
   Oman: [21.47, 55.98],
   Armenia: [40.07, 45.04],
+  Belarus: [53.71, 27.95],
+  "South Africa": [-30.56, 22.94],
   Bahrain: [26.07, 50.56],
   Jordan: [31.24, 36.51],
   Georgia: [42.32, 43.36],
@@ -705,6 +777,11 @@ const salesCountryCoordinates = {
   Brazil: [-14.24, -51.93],
   Chile: [-33.45, -70.67],
   Colombia: [4.57, -74.3],
+  Argentina: [-38.42, -63.62],
+  Peru: [-9.19, -75.02],
+  Ecuador: [-1.83, -78.18],
+  Uruguay: [-32.52, -55.77],
+  Paraguay: [-23.44, -58.44],
   Morocco: [31.79, -7.09],
   China: [35.86, 104.2]
 };
@@ -1699,6 +1776,8 @@ const leadCountryEvidencePatterns = {
   Ethiopia: /(?:\+251\b|\.et(?:\b|\/)|\b(?:ethiopia|addis ababa|dire dawa)\b)/i,
   Oman: /(?:\+968\b|\.om(?:\b|\/)|\b(?:oman|muscat|salalah|sohar)\b)/i,
   Armenia: /(?:\+374\b|\.am(?:\b|\/)|\b(?:armenia|yerevan|gyumri)\b)/i,
+  Belarus: /(?:\+375\b|\.by(?:\b|\/)|\b(?:belarus|minsk|gomel|brest|vitebsk|grodno)\b|беларусь|минск)/i,
+  "South Africa": /(?:\+27\b|\.za(?:\b|\/)|\b(?:south africa|johannesburg|pretoria|cape town|durban|gauteng)\b)/i,
   Bahrain: /(?:\+973\b|\.bh(?:\b|\/)|\b(?:bahrain|manama|riffa|muharraq)\b)/i,
   Jordan: /(?:\+962\b|\.jo(?:\b|\/)|\b(?:jordan|amman|zarqa|irbid)\b)/i,
   Georgia: /(?:\+995\b|\.ge(?:\b|\/)|\b(?:georgia|tbilisi|batumi|rustavi)\b)/i,
@@ -1708,6 +1787,11 @@ const leadCountryEvidencePatterns = {
   Brazil: /(?:\+55\b|\.br(?:\b|\/)|\b(?:brazil|brasil|s[aã]o paulo|rio de janeiro|bras[ií]lia)\b)/i,
   Chile: /(?:\+56\b|\.cl(?:\b|\/)|\b(?:chile|santiago|valpara[ií]so|concepci[oó]n)\b)/i,
   Colombia: /(?:\+57\b|\.co(?:\b|\/)|\b(?:colombia|bogot[aá]|medell[ií]n|cali)\b)/i,
+  Argentina: /(?:\+54\b|\.ar(?:\b|\/)|\b(?:argentina|buenos aires|c[oó]rdoba|rosario|mendoza)\b)/i,
+  Peru: /(?:\+51\b|\.pe(?:\b|\/)|\b(?:peru|perú|lima|arequipa|trujillo|callao)\b)/i,
+  Ecuador: /(?:\+593\b|\.ec(?:\b|\/)|\b(?:ecuador|quito|guayaquil|cuenca|ambato)\b)/i,
+  Uruguay: /(?:\+598\b|\.uy(?:\b|\/)|\b(?:uruguay|montevideo|canelones|maldonado|salto)\b)/i,
+  Paraguay: /(?:\+595\b|\.py(?:\b|\/)|\b(?:paraguay|asunci[oó]n|ciudad del este|san lorenzo|luque)\b)/i,
   Morocco: /(?:\+212\b|\.ma(?:\b|\/)|\b(?:morocco|maroc|casablanca|rabat|tangier)\b)/i,
   China: /(?:\+86\b|\.cn(?:\b|\/)|\b(?:china|beijing|shanghai|guangzhou|shenzhen)\b|中国|北京|上海|广州|深圳)/i
 };
@@ -2083,11 +2167,21 @@ function renderCountries() {
     </article>
   `;
   const primaryCountries = marketCountries.filter((country) => country.marketGroup !== "other");
-  const otherCountries = marketCountries.filter((country) => country.marketGroup === "other");
+  const southAmericaCountries = marketCountries.filter((country) => country.marketRegion === "south_america");
+  const otherCountries = marketCountries.filter((country) => country.marketGroup === "other" && country.marketRegion !== "south_america");
   $("#countryGrid").innerHTML = discoveryDisabledForSession()
     ? `<p class="empty">${escapeHtml(discoveryDisabledReason())}。</p>`
     : [
       ...primaryCountries.map(countryCardHtml),
+      ...(southAmericaCountries.length ? [`
+        <div class="country-region-heading">
+          <div>
+            <span class="eyebrow">南美市场</span>
+            <h3>南美重点市场</h3>
+          </div>
+          <p>按真实国家分别执行地区校验、地图搜索、本地平台搜索和电话归属判断。</p>
+        </div>
+      `, ...southAmericaCountries.map(countryCardHtml)] : []),
       ...(otherCountries.length ? [`
         <div class="country-region-heading">
           <div>
@@ -2106,10 +2200,12 @@ function renderCountries() {
     select.disabled = true;
   } else {
   const selectPrimaryCountries = selectCountries.filter((country) => country.marketGroup !== "other");
-  const selectOtherCountries = selectCountries.filter((country) => country.marketGroup === "other");
+  const selectSouthAmericaCountries = selectCountries.filter((country) => country.marketRegion === "south_america");
+  const selectOtherCountries = selectCountries.filter((country) => country.marketGroup === "other" && country.marketRegion !== "south_america");
   const optionHtml = (country) => `<option value="${escapeHtml(country.name)}">${escapeHtml(country.name)}</option>`;
   select.innerHTML = `
     <optgroup label="重点目标国家">${selectPrimaryCountries.map(optionHtml).join("")}</optgroup>
+    ${selectSouthAmericaCountries.length ? `<optgroup label="南美重点市场">${selectSouthAmericaCountries.map(optionHtml).join("")}</optgroup>` : ""}
     ${selectOtherCountries.length ? `<optgroup label="其他可开发区域">${selectOtherCountries.map(optionHtml).join("")}</optgroup>` : ""}
   `;
   if (selectCountries.some((country) => country.name === current)) {
@@ -2262,6 +2358,7 @@ function chooseMarket(countryName) {
 function countryKey(value) {
   const text = String(value || "");
   if (text.startsWith("Saudi Arabia")) return "Saudi Arabia";
+  if (text.startsWith("South Africa")) return "South Africa";
   if (text.startsWith("Côte d'Ivoire")) return "Côte d'Ivoire";
   return text.split(" ")[0];
 }
@@ -4628,6 +4725,8 @@ function countrySearchCities(country, options = {}) {
     Kuwait: ["Kuwait City", "Shuwaikh", "Hawalli"],
     Uzbekistan: ["Tashkent"],
     Azerbaijan: ["Baku"],
+    Belarus: ["Minsk", "Gomel", "Brest"],
+    "South Africa": ["Johannesburg", "Pretoria", "Cape Town", "Durban"],
     Bahrain: ["Manama", "Riffa", "Muharraq"],
     Jordan: ["Amman", "Zarqa", "Irbid"],
     Georgia: ["Tbilisi", "Batumi", "Rustavi"],
@@ -4637,6 +4736,11 @@ function countrySearchCities(country, options = {}) {
     Brazil: ["São Paulo", "Rio de Janeiro", "Brasília"],
     Chile: ["Santiago", "Valparaíso", "Concepción"],
     Colombia: ["Bogotá", "Medellín", "Cali"],
+    Argentina: ["Buenos Aires", "Córdoba", "Rosario"],
+    Peru: ["Lima", "Arequipa", "Trujillo", "Callao"],
+    Ecuador: ["Quito", "Guayaquil", "Cuenca"],
+    Uruguay: ["Montevideo", "Canelones", "Maldonado"],
+    Paraguay: ["Asunción", "Ciudad del Este", "San Lorenzo"],
     Morocco: ["Casablanca", "Rabat", "Tangier"]
   }[key] || [key];
   const fromConfig = configured.split("/").map((city) => city.trim()).filter(Boolean);

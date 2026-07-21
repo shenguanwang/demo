@@ -5069,6 +5069,11 @@ COUNTRY_HINTS = {
         "Yerevan", "Gyumri", "Vanadzor", "Abovyan", "Vagharshapat",
         "Armavir", "Artashat", "Hrazdan",
     ),
+    "Belarus": ("Minsk", "Gomel", "Brest", "Vitebsk", "Grodno", "Mogilev", "Baranovichi"),
+    "South Africa": (
+        "Johannesburg", "Pretoria", "Cape Town", "Durban", "Gqeberha",
+        "Bloemfontein", "East London", "Sandton", "Centurion",
+    ),
     "Bahrain": ("Manama", "Riffa", "Muharraq", "Sitra", "Isa Town"),
     "Jordan": ("Amman", "Zarqa", "Irbid", "Aqaba", "Sahab"),
     "Georgia": ("Tbilisi", "Batumi", "Rustavi", "Kutaisi", "Poti"),
@@ -5078,6 +5083,11 @@ COUNTRY_HINTS = {
     "Brazil": ("São Paulo", "Rio de Janeiro", "Brasília", "Belo Horizonte", "Curitiba"),
     "Chile": ("Santiago", "Valparaíso", "Concepción", "Antofagasta", "Viña del Mar"),
     "Colombia": ("Bogotá", "Medellín", "Cali", "Barranquilla", "Cartagena"),
+    "Argentina": ("Buenos Aires", "Córdoba", "Rosario", "Mendoza", "La Plata", "Mar del Plata"),
+    "Peru": ("Lima", "Arequipa", "Trujillo", "Callao", "Chiclayo", "Cusco"),
+    "Ecuador": ("Quito", "Guayaquil", "Cuenca", "Ambato", "Manta"),
+    "Uruguay": ("Montevideo", "Canelones", "Maldonado", "Salto", "Paysandú"),
+    "Paraguay": ("Asunción", "Ciudad del Este", "San Lorenzo", "Luque", "Capiatá"),
     "Morocco": ("Casablanca", "Rabat", "Tangier", "Marrakesh", "Agadir"),
     "China": (
         "Beijing", "Shanghai", "Guangzhou", "Shenzhen", "Hangzhou", "Chengdu",
@@ -5216,6 +5226,8 @@ CITY_COORDS = {
     "Ethiopia": ("Addis Ababa", 8.9806, 38.7578),
     "Oman": ("Muscat", 23.5880, 58.3829),
     "Armenia": ("Yerevan", 40.1792, 44.4991),
+    "Belarus": ("Minsk", 53.9006, 27.5590),
+    "South Africa": ("Johannesburg", -26.2041, 28.0473),
     "Bahrain": ("Manama", 26.2235, 50.5876),
     "Jordan": ("Amman", 31.9539, 35.9106),
     "Georgia": ("Tbilisi", 41.7151, 44.8271),
@@ -5225,6 +5237,11 @@ CITY_COORDS = {
     "Brazil": ("São Paulo", -23.5505, -46.6333),
     "Chile": ("Santiago", -33.4489, -70.6693),
     "Colombia": ("Bogotá", 4.7110, -74.0721),
+    "Argentina": ("Buenos Aires", -34.6037, -58.3816),
+    "Peru": ("Lima", -12.0464, -77.0428),
+    "Ecuador": ("Quito", -0.1807, -78.4678),
+    "Uruguay": ("Montevideo", -34.9011, -56.1645),
+    "Paraguay": ("Asunción", -25.2637, -57.5759),
     "Morocco": ("Casablanca", 33.5731, -7.5898),
     "China": ("Shanghai", 31.2304, 121.4737),
 }
@@ -5369,6 +5386,14 @@ COUNTRY_SEARCH_META = {
         "google_domain": "google.am",
         "aliases": ("Armenia", "Yerevan", "Gyumri"),
     },
+    "Belarus": {
+        "code": "by", "location": "Belarus", "google_domain": "google.by",
+        "aliases": ("Belarus", "Minsk", "Gomel", "Brest", "Vitebsk", "Беларусь", "Минск", "+375", ".by"),
+    },
+    "South Africa": {
+        "code": "za", "location": "South Africa", "google_domain": "google.co.za",
+        "aliases": ("South Africa", "RSA", "Johannesburg", "Pretoria", "Cape Town", "Durban", "Gauteng", "+27", ".za"),
+    },
     "Bahrain": {
         "code": "bh",
         "location": "Bahrain",
@@ -5422,6 +5447,26 @@ COUNTRY_SEARCH_META = {
         "location": "Colombia",
         "google_domain": "google.com.co",
         "aliases": ("Colombia", "Bogotá", "Medellín", "Cali", "Barranquilla"),
+    },
+    "Argentina": {
+        "code": "ar", "location": "Argentina", "google_domain": "google.com.ar",
+        "aliases": ("Argentina", "Buenos Aires", "Córdoba", "Rosario", "Mendoza", "+54", ".ar"),
+    },
+    "Peru": {
+        "code": "pe", "location": "Peru", "google_domain": "google.com.pe",
+        "aliases": ("Peru", "Perú", "Lima", "Arequipa", "Trujillo", "Callao", "+51", ".pe"),
+    },
+    "Ecuador": {
+        "code": "ec", "location": "Ecuador", "google_domain": "google.com.ec",
+        "aliases": ("Ecuador", "Quito", "Guayaquil", "Cuenca", "Ambato", "+593", ".ec"),
+    },
+    "Uruguay": {
+        "code": "uy", "location": "Uruguay", "google_domain": "google.com.uy",
+        "aliases": ("Uruguay", "Montevideo", "Canelones", "Maldonado", "+598", ".uy"),
+    },
+    "Paraguay": {
+        "code": "py", "location": "Paraguay", "google_domain": "google.com.py",
+        "aliases": ("Paraguay", "Asunción", "Ciudad del Este", "San Lorenzo", "Luque", "+595", ".py"),
     },
     "Morocco": {
         "code": "ma",
@@ -5594,6 +5639,13 @@ LOCAL_DISCOVERY_SOURCES = {
         ("MyAuto Armenia", "myauto.am"),
         ("Autopapa Caucasus", "autopapa.com"),
     ),
+    "Belarus": (
+        ("AV.BY", "av.by"), ("ABW.BY", "abw.by"), ("Onliner Auto", "onliner.by"),
+    ),
+    "South Africa": (
+        ("AutoTrader South Africa", "autotrader.co.za"), ("Cars.co.za", "cars.co.za"),
+        ("WeBuyCars", "webuycars.co.za"), ("Carfind", "carfind.co.za"),
+    ),
     "Bahrain": (
         ("Bahrain Auto Trader Dealers", "bahrainautotrader.com"),
         ("Click Bahrain Car Dealers", "clickbahrain.com"),
@@ -5653,6 +5705,26 @@ LOCAL_DISCOVERY_SOURCES = {
         ("Autocosmos Colombia", "autocosmos.com.co"),
         ("Mercado Libre Colombia", "mercadolibre.com.co"),
     ),
+    "Argentina": (
+        ("Autocosmos Argentina", "autocosmos.com.ar"), ("Mercado Libre Argentina", "mercadolibre.com.ar"),
+        ("DeAutos", "deautos.com"),
+    ),
+    "Peru": (
+        ("NeoAuto", "neoauto.com"), ("Autocosmos Peru", "autocosmos.com.pe"),
+        ("Mercado Libre Peru", "mercadolibre.com.pe"),
+    ),
+    "Ecuador": (
+        ("Patiotuerca", "patiotuerca.com"), ("Autocosmos Ecuador", "autocosmos.com.ec"),
+        ("Mercado Libre Ecuador", "mercadolibre.com.ec"),
+    ),
+    "Uruguay": (
+        ("Autocosmos Uruguay", "autocosmos.com.uy"), ("Gallito", "gallito.com.uy"),
+        ("Mercado Libre Uruguay", "mercadolibre.com.uy"),
+    ),
+    "Paraguay": (
+        ("Clasipar", "clasipar.com"), ("Hendyla", "hendyla.com"),
+        ("Mercado Libre Paraguay", "mercadolibre.com.py"),
+    ),
     "Morocco": (
         ("O'Voiture Dealer Directory", "ovoiture.ma"),
         ("Wandaloo Dealers", "wandaloo.com"),
@@ -5681,6 +5753,8 @@ LOCAL_AUTOMOTIVE_INTENT_TERMS = {
     "et": ("car dealer Addis Ababa", "vehicle importer", "automotive trading company"),
     "om": ("car dealer showroom", "معرض سيارات", "تجارة السيارات"),
     "am": ("ավտոսրահ", "ավտոմեքենաների վաճառք", "автосалон"),
+    "by": ("автосалон", "автодилер", "продажа автомобилей", "авто из Китая"),
+    "za": ("car dealer showroom", "used car dealership", "vehicle importer", "fleet vehicle supplier"),
     "bh": ("car dealer showroom", "معرض سيارات", "بيع السيارات"),
     "jo": ("car dealer showroom", "معرض سيارات", "تجارة السيارات"),
     "ge": ("ავტოსალონი", "ავტომობილების გაყიდვა", "car dealer Tbilisi"),
@@ -5690,6 +5764,11 @@ LOCAL_AUTOMOTIVE_INTENT_TERMS = {
     "br": ("concessionária de veículos", "loja de carros", "revenda de seminovos"),
     "cl": ("automotora", "concesionario de autos", "venta de autos usados"),
     "co": ("concesionario de carros", "compraventa de vehículos", "venta de carros usados"),
+    "ar": ("concesionario de autos", "agencia de autos", "venta de autos usados", "importador de vehículos"),
+    "pe": ("concesionario de autos", "venta de autos usados", "importador de vehículos"),
+    "ec": ("concesionario de vehículos", "patio de autos", "venta de autos usados"),
+    "uy": ("automotora", "concesionario de autos", "venta de autos usados"),
+    "py": ("playa de autos", "concesionario de vehículos", "venta de autos usados"),
     "ma": ("concessionnaire automobile", "vente voiture occasion", "معرض سيارات"),
 }
 
@@ -6106,7 +6185,8 @@ COUNTRY_CALLING_CODES = {
     "uz": "998", "az": "994", "ng": "234", "gh": "233", "dz": "213", "ci": "225",
     "eg": "20", "kg": "996", "et": "251", "om": "968", "am": "374", "bh": "973",
     "jo": "962", "ge": "995", "vn": "84", "ph": "63", "mx": "52", "br": "55",
-    "cl": "56", "co": "57", "ma": "212", "cn": "86",
+    "cl": "56", "co": "57", "by": "375", "za": "27", "ar": "54", "pe": "51",
+    "ec": "593", "uy": "598", "py": "595", "ma": "212", "cn": "86",
 }
 
 
