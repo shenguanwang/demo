@@ -8144,7 +8144,6 @@ function bindForms() {
   $("#refreshApifyUsage")?.addEventListener("click", () => loadApifyUsage());
   $("#refreshApiConsumption")?.addEventListener("click", () => loadApiConsumption());
   $("#reloadAdminOperations")?.addEventListener("click", () => loadAdminOperations({ feedback: true }));
-  $("#saveAdminSettingsTop")?.addEventListener("click", () => $("#adminSettingsForm")?.requestSubmit());
   $("#restartAdminServerButton")?.addEventListener("click", async () => {
     if (!confirm("确定重启工作台服务吗？页面会短暂断开。")) return;
     try { await restartAdminServer(); } catch (error) { setAdminSettingsStatus(error.message || "重启失败。", "error"); }
@@ -9170,12 +9169,16 @@ async function saveAdminSettings(event) {
     loadDiscoverySourceStatus();
     loadAdminOperations();
     if (result.restartRequiredChanged) {
-      setAdminSettingsStatus("设置已保存。网络超时已变更，需要重启服务器后生效；获客并发数已立即生效。", "success");
+      const successMessage = "设置保存成功。网络超时已变更，需要重启服务器后生效；获客并发数已立即生效。";
+      setAdminSettingsStatus(successMessage, "success");
+      window.alert(successMessage);
       if (confirm("设置已保存，但网络超时需要重启服务器后生效。现在重启服务器吗？")) {
         await restartAdminServer();
       }
     } else {
-      setAdminSettingsStatus("设置已保存。API Key 已进入后台配置池；获客并发数已立即生效。", "success");
+      const successMessage = "设置保存成功。API Key 已进入后台配置池；获客并发数已立即生效。";
+      setAdminSettingsStatus(successMessage, "success");
+      window.alert(successMessage);
     }
   } catch (error) {
     setAdminSettingsStatus(error.message || "设置保存失败。", "error");

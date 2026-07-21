@@ -694,10 +694,6 @@
           <h2>系统设置</h2>
           <p>统一管理数据源、获客质量、AI、业务数据和服务器运行状态。</p>
         </div>
-        <div class="result-actions admin-head-actions">
-          <button class="ghost" id="reloadAdminOperations" type="button">刷新状态</button>
-          <button class="primary" id="saveAdminSettingsTop" type="button">保存设置</button>
-        </div>
       </div>
       <div class="admin-overview-grid" id="adminOverviewGrid"></div>
       <nav class="admin-settings-tabs" id="adminSettingsTabs" aria-label="系统设置分类">
@@ -866,6 +862,7 @@
         <p class="form-status" id="adminSettingsStatus" role="status"></p>
         <div class="result-actions admin-save-bar">
           <button class="ghost" type="button" id="clearAdminSettingsForm">清空输入</button>
+          <button class="ghost" id="reloadAdminOperations" type="button">刷新状态</button>
           <button class="primary" type="submit">保存设置</button>
         </div>
       </form>
@@ -1428,6 +1425,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260721-admin-only-discovery"></script>
+  <script src="./script.js?v=20260721-settings-save-feedback"></script>
 </body>
 </html>
