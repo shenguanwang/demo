@@ -1062,6 +1062,67 @@ function exportCustomersCsv() {
   );
 }
 
+function currentReviewRecordsForExport() {
+  const mode = reviewStatusMode();
+  return reviewSourceLeads()
+    .map((lead, index) => ({ lead, index, mode }))
+    .filter(({ lead }) => reviewLeadMatchesFilters(lead));
+}
+
+function exportReviewLeadsCsv() {
+  const button = $("#exportReviewLeads");
+  const records = currentReviewRecordsForExport();
+  if (!records.length) {
+    if (button) {
+      button.textContent = "当前没有线索";
+      setTimeout(() => { button.textContent = "导出线索 CSV"; }, 1500);
+    }
+    return;
+  }
+  const columns = [
+    ["状态", ({ mode }) => reviewModeLabel(mode)],
+    ["公司名称", ({ lead }) => lead.company],
+    ["国家", ({ lead }) => lead.country],
+    ["城市", ({ lead }) => lead.city],
+    ["客户类型", ({ lead }) => lead.type],
+    ["联系人", ({ lead }) => lead.contactName],
+    ["职位", ({ lead }) => lead.contactRole],
+    ["邮箱", ({ lead }) => lead.email],
+    ["电话", ({ lead }) => lead.phone],
+    ["WhatsApp", ({ lead }) => lead.whatsapp],
+    ["客户官网", ({ lead }) => lead.customerWebsite],
+    ["来源", ({ lead }) => lead.source],
+    ["原始线索来源", ({ lead }) => lead.sourceUrl],
+    ["主推车型", ({ lead }) => lead.model],
+    ["评分", ({ lead }) => lead.score],
+    ["等级", ({ lead }) => lead.scoreTier],
+    ["信息可信度", ({ lead }) => `${lead.confidenceLabel || ""} ${lead.confidence || 0}%`.trim()],
+    ["推荐理由", ({ lead }) => lead.reason],
+    ["AI复核", ({ lead }) => lead.aiReview?.reason || ""],
+    ["客户画像", ({ lead }) => leadCustomerProfile(lead).summary],
+    ["备注", ({ lead }) => lead.website]
+  ];
+  const rows = [
+    columns.map(([label]) => csvCell(label)).join(","),
+    ...records.map((record) => columns.map(([, getter]) => csvCell(getter(record))).join(","))
+  ];
+  const date = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date());
+  downloadFile(
+    `\uFEFF${rows.join("\r\n")}`,
+    `线索审核-${reviewModeLabel()}-${date}.csv`,
+    "text/csv;charset=utf-8"
+  );
+  if (button) {
+    button.textContent = "已导出";
+    setTimeout(() => { button.textContent = "导出线索 CSV"; }, 1500);
+  }
+}
+
 const customerImportTemplateColumns = [
   "公司名称",
   "国家",
@@ -1122,6 +1183,32 @@ function downloadCustomerImportTemplate() {
   downloadFile(
     `\uFEFF${customerImportTemplateColumns.map(csvCell).join(",")}\r\n${example.map(csvCell).join(",")}`,
     "客户池导入模板.csv",
+    "text/csv;charset=utf-8"
+  );
+}
+
+function downloadReviewImportTemplate() {
+  const example = [
+    "示例-请删除此行",
+    "UAE",
+    "Dubai",
+    "Auto importer",
+    "Ahmed",
+    "Purchasing Manager",
+    "buyer@example.com",
+    "+971500000000",
+    "+971500000000",
+    "https://example.com",
+    "手动导入",
+    "问界 M9",
+    "待审核",
+    "审核通过后生成英文开发信",
+    "",
+    "在此填写公开线索、客户背景或采购需求"
+  ];
+  downloadFile(
+    `\uFEFF${customerImportTemplateColumns.map(csvCell).join(",")}\r\n${example.map(csvCell).join(",")}`,
+    "线索审核导入模板.csv",
     "text/csv;charset=utf-8"
   );
 }
@@ -1237,6 +1324,21 @@ function setCustomerImportStatus(message, state = "") {
   status.dataset.state = state;
 }
 
+function setReviewImportStatus(message, state = "") {
+  const status = $("#reviewImportStatus");
+  if (!status) return;
+  status.textContent = message;
+  status.dataset.state = state;
+}
+
+function leadDeletedMemoryKeys(lead) {
+  return [
+    recordIdentity(lead, "reviewLeads"),
+    recordIdentity(lead, "customers"),
+    recordIdentity(lead, "rejectedLeads")
+  ].filter(Boolean);
+}
+
 async function importCustomersCsv(file) {
   if (!file) return;
   if (!/\.csv$/i.test(file.name || "") && !/csv/i.test(file.type || "")) {
@@ -1318,6 +1420,125 @@ async function importCustomersCsv(file) {
   });
   if (imported.length) {
     customers = [...imported, ...customers];
+    refreshAllLeadViews();
+  }
+  return { imported: imported.length, duplicates: duplicateCount, invalid: invalidCount };
+}
+
+async function importReviewLeadsCsv(file) {
+  if (!file) return;
+  if (!/\.csv$/i.test(file.name || "") && !/csv/i.test(file.type || "")) {
+    throw new Error("请选择 CSV 文件。");
+  }
+  const rows = parseCustomerCsv(await decodeCustomerImportFile(file));
+  if (rows.length < 2) throw new Error("模板中没有可导入的线索数据。");
+  const columnMap = customerImportColumnMap(rows[0]);
+  if (columnMap.company < 0 || columnMap.country < 0) {
+    throw new Error("模板必须包含“公司名称”和“国家”两列。");
+  }
+  const duplicateKeys = new Set([...reviewLeads, ...customers, ...rejectedLeads].flatMap(customerDuplicateKeys));
+  const deletedKeys = new Set(deletedRecords.map((record) => record.key));
+  const imported = [];
+  let duplicateCount = 0;
+  let invalidCount = 0;
+  rows.slice(1).forEach((row) => {
+    const company = customerImportValue(row, columnMap, "company");
+    const country = customerImportValue(row, columnMap, "country");
+    if (/^示例(?:-|－)/.test(company)) return;
+    if (!company || !country) {
+      invalidCount += 1;
+      return;
+    }
+    const email = customerImportValue(row, columnMap, "email").split(/\s*[;；]\s*/, 1)[0];
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      invalidCount += 1;
+      return;
+    }
+    const importedAt = new Date().toISOString();
+    const customerWebsite = normalizeUserEnteredUrl(customerImportValue(row, columnMap, "customerWebsite"));
+    const sourceNote = customerImportValue(row, columnMap, "source");
+    const notes = customerImportValue(row, columnMap, "website");
+    const phone = customerImportValue(row, columnMap, "phone");
+    const whatsapp = customerImportValue(row, columnMap, "whatsapp");
+    const model = customerImportValue(row, columnMap, "model") || "问界 M9";
+    const lead = normalizeLead({
+      company,
+      country,
+      city: customerImportValue(row, columnMap, "city"),
+      type: customerImportValue(row, columnMap, "type") || "Auto business",
+      contactName: customerImportValue(row, columnMap, "contactName"),
+      contactRole: customerImportValue(row, columnMap, "contactRole"),
+      email,
+      phone,
+      whatsapp,
+      customerWebsite,
+      source: "手动导入",
+      sourceUrl: customerWebsite,
+      sourceTitle: company,
+      sourceType: "线索审核手动导入",
+      origin: "手动导入",
+      sourceExcerpt: notes || sourceNote || `${company} ${country}`,
+      evidenceSources: [{
+        title: company,
+        url: customerWebsite,
+        excerpt: notes || sourceNote || "CSV 手动导入线索",
+        sourceName: "手动导入",
+        sourceType: "线索审核手动导入"
+      }],
+      model,
+      recommendedModels: [model],
+      stage: "待审核",
+      next: customerImportValue(row, columnMap, "next") || "审核通过后生成英文开发信",
+      nextFollowAt: customerImportValue(row, columnMap, "nextFollowAt"),
+      website: notes,
+      isImportedLead: true,
+      manualImportSource: sourceNote,
+      createdAt: importedAt,
+      confidenceLabel: "手动导入",
+      confidence: email || phone || whatsapp || customerWebsite ? 55 : 35,
+      aiReview: {
+        reason: `${country}${customerImportValue(row, columnMap, "city") ? ` ${customerImportValue(row, columnMap, "city")}` : ""} ${customerImportValue(row, columnMap, "type") || "汽车行业客户"}，来源为手动导入，需人工结合公开信息复核。`,
+        targetCountryMatch: Boolean(country),
+        countryEvidence: "manual",
+        verifiedCountry: country,
+        verifiedCity: customerImportValue(row, columnMap, "city"),
+        businessType: customerImportValue(row, columnMap, "type") || "Auto business",
+        customerProfile: {
+          buyerType: customerImportValue(row, columnMap, "type") || "汽车行业客户",
+          businessPositioning: "汽车经销、进口或车队相关业务",
+          purchaseCapacity: email || phone || whatsapp ? "中" : "待核实",
+          likelyNeeds: [`车型方向：${model}`, "中国新能源车型采购或经销合作"],
+          contactStrategy: email || phone || whatsapp
+            ? "先使用导入联系方式确认采购负责人，再发送车型资料与报价"
+            : "先补充有效邮箱、电话或 WhatsApp，再判断是否进入开发流程",
+          riskNotes: ["来源为手动导入，仍需人工核实公开页面和采购意向"],
+          summary: `${company} 位于 ${country}，来源为手动导入；可先按${model}方向判断潜在合作价值，并在审核中补充公开证据。`
+        }
+      },
+      sourceCoverage: {
+        total: customerWebsite ? 1 : 0,
+        official: customerWebsite ? 1 : 0,
+        independentDomains: customerWebsite ? 1 : 0,
+        contactable: Boolean(email || phone || whatsapp),
+        missingFields: [
+          customerWebsite ? "" : "官网",
+          email || phone || whatsapp ? "" : "联系方式"
+        ].filter(Boolean),
+        decision: "手动导入，进入线索审核"
+      }
+    });
+    const keys = customerDuplicateKeys(lead);
+    if (keys.some((key) => duplicateKeys.has(key)) || leadDeletedMemoryKeys(lead).some((key) => deletedKeys.has(key))) {
+      duplicateCount += 1;
+      return;
+    }
+    keys.forEach((key) => duplicateKeys.add(key));
+    imported.push(lead);
+  });
+  if (imported.length) {
+    reviewLeads = [...imported, ...reviewLeads];
+    selectedReviewLeadId = `pending:${imported[0].id || 0}`;
+    $("#reviewStatusFilter") && ($("#reviewStatusFilter").value = "pending");
     refreshAllLeadViews();
   }
   return { imported: imported.length, duplicates: duplicateCount, invalid: invalidCount };
@@ -2128,7 +2349,7 @@ function leadSkipsAiAndVerification(lead) {
 
 function leadSourceBadgeHtml(lead) {
   if (lead?.isWebsiteLead) return '<span class="website-source-badge">独立站来源</span>';
-  if (lead?.isImportedLead) return '<span class="imported-lead-badge">批量导入</span>';
+  if (lead?.isImportedLead) return `<span class="imported-lead-badge">${/手动导入/.test(`${lead.origin || ""} ${lead.source || ""} ${lead.sourceType || ""}`) ? "手动导入" : "批量导入"}</span>`;
   if (lead?.isManualLead) return '<span class="manual-lead-badge">手动添加</span>';
   return "";
 }
@@ -8545,6 +8766,38 @@ function bindForms() {
     renderQuoteHistory();
     renderAfterSales();
     renderKpis();
+  });
+
+  $("#exportReviewLeads")?.addEventListener("click", exportReviewLeadsCsv);
+  $("#downloadReviewImportTemplate")?.addEventListener("click", downloadReviewImportTemplate);
+  $("#importReviewLeadsButton")?.addEventListener("click", () => {
+    const input = $("#reviewLeadImportFile");
+    if (!input) return;
+    input.value = "";
+    input.click();
+  });
+  $("#reviewLeadImportFile")?.addEventListener("change", async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    const button = $("#importReviewLeadsButton");
+    if (button) {
+      button.disabled = true;
+      button.textContent = "正在导入...";
+    }
+    setReviewImportStatus("正在读取并校验线索数据...", "loading");
+    try {
+      const result = await importReviewLeadsCsv(file);
+      const message = `导入完成：新增 ${result.imported} 条，跳过重复 ${result.duplicates} 条，无效 ${result.invalid} 条。`;
+      setReviewImportStatus(message, result.imported ? "success" : "warning");
+    } catch (error) {
+      setReviewImportStatus(error.message || "导入失败，请使用线索审核模板重试。", "error");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "导入线索 CSV";
+      }
+      event.target.value = "";
+    }
   });
 
   $("#exportCustomerTable").addEventListener("click", exportCustomersCsv);

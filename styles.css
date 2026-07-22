@@ -678,7 +678,8 @@ button {
   flex-wrap: wrap;
 }
 
-.crm-import-status {
+.crm-import-status,
+.review-import-status {
   display: inline-flex;
   min-height: 40px;
   align-items: center;
@@ -686,19 +687,23 @@ button {
   font-size: 12px;
 }
 
-.crm-import-status:empty {
+.crm-import-status:empty,
+.review-import-status:empty {
   display: none;
 }
 
-.crm-import-status[data-state="success"] {
+.crm-import-status[data-state="success"],
+.review-import-status[data-state="success"] {
   color: #157347;
 }
 
-.crm-import-status[data-state="warning"] {
+.crm-import-status[data-state="warning"],
+.review-import-status[data-state="warning"] {
   color: #8a6420;
 }
 
-.crm-import-status[data-state="error"] {
+.crm-import-status[data-state="error"],
+.review-import-status[data-state="error"] {
   color: #b33a2f;
 }
 
