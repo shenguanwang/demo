@@ -99,6 +99,7 @@ ACTIVE_DISCOVERY_WORKERS: set[str] = set()
 ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
 DISCOVERY_MAX_CONCURRENCY = max(1, int(bootstrap_setting("DISCOVERY_MAX_CONCURRENCY", "2")))
 MAX_ACTIVE_DISCOVERY_JOBS_PER_USER = 3
+SCHEDULE_CAPACITY_RETRY_MINUTES = 30
 DISCOVERY_QUALIFIED_TARGET_MIN = 20
 DISCOVERY_QUALIFIED_TARGET_MAX = 30
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
@@ -3708,6 +3709,11 @@ def run_due_discovery_schedules() -> int:
                     if all_sales_schedule
                     else (now + timedelta(minutes=int(schedule["intervalMinutes"]))).isoformat(timespec="seconds")
                 )
+                schedule["updatedAt"] = now.isoformat(timespec="seconds")
+                save_discovery_schedule(schedule)
+                continue
+            if count_active_discovery_jobs(target_username) >= MAX_ACTIVE_DISCOVERY_JOBS_PER_USER:
+                schedule["nextRunAt"] = (now + timedelta(minutes=SCHEDULE_CAPACITY_RETRY_MINUTES)).isoformat(timespec="seconds")
                 schedule["updatedAt"] = now.isoformat(timespec="seconds")
                 save_discovery_schedule(schedule)
                 continue
