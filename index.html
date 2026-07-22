@@ -1129,6 +1129,23 @@
           <label>从客户池选择
             <select id="leadSelect"></select>
           </label>
+          <div class="email-lead-tools">
+            <label>搜索客户
+              <input id="emailLeadSearch" type="search" placeholder="公司、国家、城市、邮箱、电话">
+            </label>
+            <label>开发信状态
+              <select id="emailLeadStatusFilter">
+                <option value="all">全部客户</option>
+                <option value="notGenerated">未生成</option>
+                <option value="generated">已生成未发送</option>
+                <option value="opened">已打开未确认</option>
+                <option value="sent">已发送</option>
+                <option value="due">今天需跟进</option>
+                <option value="contactable">有联系方式</option>
+              </select>
+            </label>
+          </div>
+          <p class="form-status" id="emailLeadSelectHint"></p>
           <button class="ghost inline-action" id="fillLeadFromCrm" type="button">带入这个客户</button>
           <label>客户公司名
             <input name="company" required placeholder="审核通过后可从客户池带入">
@@ -1172,6 +1189,7 @@
             <div class="result-actions">
               <button class="ghost" id="openOutlookDraft" type="button">用 Outlook 编辑</button>
               <button class="ghost" id="copyEmail" type="button">复制开发信</button>
+              <button class="ghost" id="markLetterSent" type="button">标记已发送</button>
             </div>
           </div>
           <p class="form-status" id="outlookDraftStatus" role="status"></p>
@@ -1453,6 +1471,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260722-letter-language"></script>
+  <script src="./script.js?v=20260722-letter-workflow"></script>
 </body>
 </html>

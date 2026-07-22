@@ -1411,6 +1411,57 @@ textarea {
   margin-top: 10px;
 }
 
+.email-lead-tools {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(150px, 0.55fr);
+  gap: 10px;
+}
+
+.email-lead-tools label {
+  margin-top: 10px;
+}
+
+.crm-letter-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.crm-letter-line small {
+  color: #667085;
+  font-size: 11px;
+}
+
+.letter-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.letter-status.generated {
+  background: #fff7e6;
+  color: #9a6b10;
+}
+
+.letter-status.opened {
+  background: #eef6ff;
+  color: #1d5f99;
+}
+
+.letter-status.sent {
+  background: #ecfdf3;
+  color: #147a4b;
+}
+
 .keyword-list {
   display: flex;
   flex-wrap: wrap;

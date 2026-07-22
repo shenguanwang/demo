@@ -743,6 +743,8 @@ let crmSearchQuery = "";
 let crmTierFilter = "all";
 let crmStageFilter = "all";
 let crmSortBy = "priority";
+let emailLeadSearchQuery = "";
+let emailLeadStatusFilter = "all";
 let navigationBound = false;
 let salesOverviewBound = false;
 let salesMap = null;
@@ -1205,7 +1207,7 @@ function downloadReviewImportTemplate() {
     "手动导入",
     "问界 M9",
     "待审核",
-    "审核通过后生成英文开发信",
+    "审核通过后生成开发信",
     "",
     "在此填写公开线索、客户背景或采购需求"
   ];
@@ -1651,7 +1653,7 @@ async function importReviewLeadsCsv(file) {
       model,
       recommendedModels: [model],
       stage: "待审核",
-      next: customerImportValue(row, columnMap, "next") || "审核通过后生成英文开发信",
+      next: customerImportValue(row, columnMap, "next") || "审核通过后生成开发信",
       nextFollowAt: customerImportValue(row, columnMap, "nextFollowAt"),
       website: notes,
       isImportedLead: true,
@@ -4529,6 +4531,7 @@ function renderCrm() {
           ${leadSourceBadgeHtml(lead)}
         </div>
         <div class="crm-contact-line">${escapeHtml(lead.contactName || primaryEmailForLead(lead) || lead.phone || "暂无联系人")}</div>
+        <div class="crm-letter-line">${renderCustomerLetterBadge(lead)}${lead.lastLetterChannel ? `<small>${escapeHtml(lead.lastLetterChannel)} · ${escapeHtml(lead.lastLetterLanguage || "未记录语言")}</small>` : ""}</div>
         <div class="crm-contact-chips">${crmLeadContactSummary(lead)}</div>
       </td>
       <td>
@@ -4570,10 +4573,64 @@ function renderCrmFollowStatus(lead, today) {
   return `<span class="crm-follow-status planned">${escapeHtml(lead.nextFollowAt)}</span>`;
 }
 
+function customerLetterStatus(lead) {
+  if (lead.outreachStatus === "sent") return "sent";
+  if (lead.letterOpenedAt) return "opened";
+  if (lead.outreachStatus === "generated" || lead.letterGeneratedAt) return "generated";
+  return "notGenerated";
+}
+
+function customerLetterStatusLabel(lead) {
+  const status = customerLetterStatus(lead);
+  if (status === "sent") return `已发送${lead.letterSentAt ? ` ${formatJobTime(lead.letterSentAt)}` : ""}`;
+  if (status === "opened") return `已打开草稿${lead.letterOpenedAt ? ` ${formatJobTime(lead.letterOpenedAt)}` : ""}`;
+  if (status === "generated") return `已生成${lead.letterGeneratedAt ? ` ${formatJobTime(lead.letterGeneratedAt)}` : ""}`;
+  return "未生成";
+}
+
+function renderCustomerLetterBadge(lead) {
+  const status = customerLetterStatus(lead);
+  return `<span class="letter-status ${status}">${escapeHtml(customerLetterStatusLabel(lead))}</span>`;
+}
+
+function emailLeadMatchesFilter(lead) {
+  const today = new Date().toISOString().slice(0, 10);
+  const status = customerLetterStatus(lead);
+  if (emailLeadStatusFilter === "notGenerated" && status !== "notGenerated") return false;
+  if (emailLeadStatusFilter === "generated" && status !== "generated") return false;
+  if (emailLeadStatusFilter === "opened" && status !== "opened") return false;
+  if (emailLeadStatusFilter === "sent" && status !== "sent") return false;
+  if (emailLeadStatusFilter === "due" && (["已成交", "已流失"].includes(lead.stage) || (lead.nextFollowAt && lead.nextFollowAt > today))) return false;
+  if (emailLeadStatusFilter === "contactable" && !(primaryEmailForLead(lead) || lead.phone || lead.whatsapp)) return false;
+  const query = emailLeadSearchQuery.trim().toLowerCase();
+  if (query && !crmLeadSearchText(lead).includes(query)) return false;
+  return true;
+}
+
+function selectedEmailLeadIndex() {
+  return Number($("#leadSelect")?.value || -1);
+}
+
 function renderLeadSelect() {
   const select = $("#leadSelect");
   if (!select) return;
-  select.innerHTML = customers.length ? customers.map((lead, index) => `<option value="${index}">${lead.company} · ${lead.country} · ${lead.model}</option>`).join("") : `<option value="">客户池暂无客户</option>`;
+  const previous = select.value;
+  const rows = customers
+    .map((lead, index) => ({ lead, index }))
+    .filter(({ lead }) => emailLeadMatchesFilter(lead));
+  select.innerHTML = rows.length ? rows.map(({ lead, index }) => {
+    const contact = primaryEmailForLead(lead) || lead.whatsapp || lead.phone ? "有联系方式" : "缺联系方式";
+    return `<option value="${index}">${escapeHtml(lead.company)} · ${escapeHtml(lead.country || "未知国家")} · ${escapeHtml(lead.model || "未设车型")} · ${escapeHtml(customerLetterStatusLabel(lead))} · ${contact}</option>`;
+  }).join("") : `<option value="">没有符合条件的客户</option>`;
+  if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+  const hint = $("#emailLeadSelectHint");
+  if (hint) {
+    const total = customers.length;
+    const generated = customers.filter((lead) => customerLetterStatus(lead) === "generated").length;
+    const opened = customers.filter((lead) => customerLetterStatus(lead) === "opened").length;
+    const sent = customers.filter((lead) => customerLetterStatus(lead) === "sent").length;
+    hint.textContent = `当前显示 ${rows.length}/${total} 个客户，已生成 ${generated} 个，已打开未确认 ${opened} 个，已发送 ${sent} 个。`;
+  }
 }
 
 function renderQuoteCustomerSelect() {
@@ -4639,8 +4696,56 @@ function openCustomerInEmail(index) {
     (lead.evidenceSources || []).slice(0, 4).map((item) => item.excerpt).join(" ")
   ].filter(Boolean).join(" ").slice(0, 2400);
   form.model.value = String(lead.model || "问界 M9").split("/")[0].trim();
-  form.channel.value = "Email";
+  form.channel.value = lead.preferredChannel || "Email";
   showSection("email");
+}
+
+function updateSelectedCustomerLetterStatus(status, result = {}, explicitIndex = null) {
+  const index = Number.isInteger(explicitIndex) ? explicitIndex : selectedEmailLeadIndex();
+  const lead = customers[index];
+  if (!lead) return null;
+  const now = new Date().toISOString();
+  const formData = $("#emailForm") ? Object.fromEntries(new FormData($("#emailForm")).entries()) : {};
+  if (status === "generated") {
+    lead.outreachStatus = "generated";
+    lead.letterGeneratedAt = now;
+    lead.lastLetterChannel = formData.channel || lead.preferredChannel || "";
+    lead.lastLetterLanguage = result.language || formData.letterLanguage || "";
+    lead.lastLetterSubject = emailDraftFromGeneratedText(result.english || $("#englishLetter")?.textContent || "", formData).subject || "";
+    lead.next = "检查开发信内容并发送给客户";
+    if (!lead.nextFollowAt) lead.nextFollowAt = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  }
+  if (status === "opened") {
+    lead.letterOpenedAt = now;
+    lead.outreachStatus = lead.outreachStatus === "sent" ? "sent" : "opened";
+    lead.lastLetterChannel = formData.channel || lead.lastLetterChannel || "";
+    lead.lastLetterLanguage = result.language || lead.lastLetterLanguage || formData.letterLanguage || "";
+    lead.next = "确认开发信是否已发送，未回复则按节奏跟进";
+    if (!lead.nextFollowAt || lead.nextFollowAt <= new Date().toISOString().slice(0, 10)) {
+      lead.nextFollowAt = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+    }
+  }
+  if (status === "sent") {
+    lead.outreachStatus = "sent";
+    lead.letterSentAt = now;
+    lead.lastContactAt = new Date().toISOString().slice(0, 10);
+    lead.lastLetterChannel = formData.channel || lead.lastLetterChannel || "";
+    lead.lastLetterLanguage = result.language || lead.lastLetterLanguage || formData.letterLanguage || "";
+    lead.stage = lead.stage === "准备联系" ? "已联系" : lead.stage;
+    lead.next = "等待客户回复，3 天后再次跟进";
+    lead.nextFollowAt = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+    lead.nextFollowTime = lead.nextFollowTime || "10:00";
+    lead.followUpHistory = Array.isArray(lead.followUpHistory) ? lead.followUpHistory : [];
+    lead.followUpHistory.unshift({
+      at: lead.lastContactAt,
+      channel: lead.lastLetterChannel || "开发信",
+      outcome: "开发信已发送",
+      note: lead.lastLetterSubject || "已人工确认发送开发信",
+      nextFollowAt: lead.nextFollowAt
+    });
+  }
+  refreshAllLeadViews();
+  return lead;
 }
 
 function applyCustomerToQuote(index) {
@@ -4891,7 +4996,7 @@ function normalizeLead(raw) {
     createdAt: raw.createdAt || raw.importedAt || raw.discoveredAt || new Date().toISOString(),
     score,
     stage: raw.stage || "待审核",
-    next: raw.next || "审核通过后生成英文开发信",
+    next: raw.next || "审核通过后生成开发信",
     nextFollowAt: raw.nextFollowAt || "",
     nextFollowTime: raw.nextFollowTime || "10:00",
     assignedTo: raw.assignedTo || "管理员",
@@ -4900,6 +5005,13 @@ function normalizeLead(raw) {
     manualApproval: Boolean(raw.manualApproval),
     manualApprovalAt: raw.manualApprovalAt || "",
     lastContactAt: raw.lastContactAt || "",
+    outreachStatus: raw.outreachStatus || "",
+    letterGeneratedAt: raw.letterGeneratedAt || "",
+    letterOpenedAt: raw.letterOpenedAt || "",
+    letterSentAt: raw.letterSentAt || "",
+    lastLetterChannel: raw.lastLetterChannel || "",
+    lastLetterLanguage: raw.lastLetterLanguage || "",
+    lastLetterSubject: raw.lastLetterSubject || "",
     followUpHistory: Array.isArray(raw.followUpHistory) ? raw.followUpHistory : [],
     website,
     reason: raw.reason || `${raw.city || raw.country} 的${raw.type || "汽车相关客户"}，建议人工审核后再联系。`
@@ -4914,7 +5026,7 @@ function approveLead(index) {
     manualApproval: true,
     manualApprovalAt: new Date().toISOString(),
     stage: "准备联系",
-    next: "生成英文开发信并人工确认",
+    next: "生成开发信并人工确认",
     nextFollowAt: ""
   });
   refreshAllLeadViews();
@@ -5830,7 +5942,7 @@ function outlookMailtoUrl(draft) {
   return `mailto:${encodeURIComponent(draft.to || "")}?${params.toString()}`;
 }
 
-function openOutlookDraft(data = Object.fromEntries(new FormData($("#emailForm")).entries())) {
+function openOutlookDraft(data = Object.fromEntries(new FormData($("#emailForm")).entries()), result = {}, customerIndex = null) {
   const text = $("#englishLetter")?.textContent.trim() || "";
   const status = $("#outlookDraftStatus");
   if (!text) {
@@ -5850,8 +5962,9 @@ function openOutlookDraft(data = Object.fromEntries(new FormData($("#emailForm")
   }
   const draft = emailDraftFromGeneratedText(text, data);
   window.location.href = outlookMailtoUrl(draft);
+  const lead = updateSelectedCustomerLetterStatus("opened", result, customerIndex);
   if (status) {
-    status.textContent = `已请求打开 Outlook 编辑窗口${draft.to ? `，收件人：${draft.to}` : "，客户邮箱未发现，收件人请手动填写"}。`;
+    status.textContent = `已请求打开 Outlook 编辑窗口${draft.to ? `，收件人：${draft.to}` : "，客户邮箱未发现，收件人请手动填写"}。${lead ? "已记录为“已打开草稿”，发送后请点“标记已发送”。" : ""}`;
   }
 }
 
@@ -5999,7 +6112,7 @@ function renderFollowTasks() {
     <article class="${lead.nextFollowAt && lead.nextFollowAt < today ? "follow-overdue" : ""}">
       <span>${escapeHtml(lead.stage || "待跟进")}${lead.score >= 80 ? " · A 级优先" : ""}</span>
       <h3>${escapeHtml(lead.company)}</h3>
-      <p>建议动作：${escapeHtml(lead.next || `根据客户官网信息生成英文开发信，推荐${lead.model}。`)}</p>
+      <p>建议动作：${escapeHtml(lead.next || `根据客户官网信息生成开发信，推荐${lead.model}。`)}</p>
       <small>计划跟进：${escapeHtml(lead.nextFollowAt || "今天")}${lead.lastContactAt ? ` · 最近联系：${escapeHtml(lead.lastContactAt)}` : ""}</small>
       <div class="follow-context">
         <label>负责人 <input data-follow-owner="${index}" value="${escapeHtml(lead.assignedTo || "管理员")}"></label>
@@ -8280,6 +8393,7 @@ function bindForms() {
     const button = form.querySelector('button[type="submit"]');
     const status = $("#outlookDraftStatus");
     const data = Object.fromEntries(new FormData(form).entries());
+    const customerIndex = selectedEmailLeadIndex();
     if (button) {
       button.disabled = true;
       button.textContent = "DeepSeek 正在生成...";
@@ -8288,14 +8402,15 @@ function bindForms() {
     try {
       const result = await generateLetterSmart(data);
       renderLetterResult(result);
+      updateSelectedCustomerLetterStatus("generated", result, customerIndex);
       if (status) status.textContent = result.warning || (result.provider === "deepseek" ? "DeepSeek 已生成开发信。" : "已使用本地模板生成开发信。");
+      openOutlookDraft(data, result, customerIndex);
     } finally {
       if (button) {
         button.disabled = false;
         button.textContent = "自动生成开发信";
       }
     }
-    openOutlookDraft(data);
   });
 
   $("#fillLeadFromCrm").addEventListener("click", async () => {
@@ -8305,11 +8420,13 @@ function bindForms() {
     const form = $("#emailForm");
     const status = $("#outlookDraftStatus");
     const data = Object.fromEntries(new FormData(form).entries());
+    const customerIndex = selectedEmailLeadIndex();
     if (status) status.textContent = "正在用 DeepSeek 生成客户专属开发信...";
     const result = await generateLetterSmart(data);
     renderLetterResult(result);
+    updateSelectedCustomerLetterStatus("generated", result, customerIndex);
     if (status) status.textContent = result.warning || (result.provider === "deepseek" ? "DeepSeek 已生成开发信。" : "已使用本地模板生成开发信。");
-    openOutlookDraft(data);
+    openOutlookDraft(data, result, customerIndex);
   });
 
   $("#leadForm").addEventListener("submit", (event) => {
@@ -8895,7 +9012,23 @@ function bindForms() {
     });
   });
 
+  $("#emailLeadSearch")?.addEventListener("input", (event) => {
+    emailLeadSearchQuery = event.target.value || "";
+    renderLeadSelect();
+  });
+
+  $("#emailLeadStatusFilter")?.addEventListener("change", (event) => {
+    emailLeadStatusFilter = event.target.value || "all";
+    renderLeadSelect();
+  });
+
   $("#openOutlookDraft")?.addEventListener("click", () => openOutlookDraft());
+
+  $("#markLetterSent")?.addEventListener("click", () => {
+    const lead = updateSelectedCustomerLetterStatus("sent");
+    const status = $("#outlookDraftStatus");
+    if (status) status.textContent = lead ? `已标记 ${lead.company} 的开发信为已发送，3 天后跟进。` : "请先从客户池选择客户。";
+  });
 
   $("#quoteForm").addEventListener("submit", (event) => {
     event.preventDefault();
