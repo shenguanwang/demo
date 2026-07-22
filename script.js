@@ -705,6 +705,8 @@ const reviewDetailScrollPositions = new Map();
 let reviewSearchRenderTimer = 0;
 let reviewDetailHydrationId = 0;
 const manualImportAutoResearchIds = new Set();
+const manualImportBackfillKeys = new Set();
+let manualImportBackfillRunning = false;
 const rejectReasonOptions = [
   "不是汽车经销/进口/分销客户",
   "地区不符合目标市场",
@@ -3356,7 +3358,10 @@ function renderReview(options = {}) {
     selectedReviewLeadId = `${reviewMode}:${rankedLeadRows[0].lead.id || rankedLeadRows[0].index}`;
   }
   const selectedRecord = rankedLeadRows.find(({ lead, index }) => `${reviewMode}:${lead.id || index}` === selectedReviewLeadId) || rankedLeadRows[0];
-  if (reviewMode === "pending") scheduleSelectedManualImportAutoResearch(selectedRecord);
+  if (reviewMode === "pending") {
+    scheduleVisibleManualImportBackfill(rankedLeadRows);
+    scheduleSelectedManualImportAutoResearch(selectedRecord);
+  }
   const reviewListHtml = detailOnly ? "" : rankedLeadRows.map(({ lead, index, rankIndex }) => {
     const rowId = `${reviewMode}:${lead.id || index}`;
     const phoneCount = evidenceValues(lead.phoneSources, lead.phone).length + evidenceValues(lead.whatsappSources, lead.whatsapp).length;
@@ -5064,6 +5069,40 @@ function scheduleSelectedManualImportAutoResearch(record) {
       manualImportAutoResearchIds.delete(id);
     }
   }, 400);
+}
+
+function scheduleVisibleManualImportBackfill(records = []) {
+  if (manualImportBackfillRunning) return;
+  const ids = (Array.isArray(records) ? records : [])
+    .map(({ lead }) => lead)
+    .filter((lead) => (
+      isManualImportReviewLead(lead)
+      && !lead.researchAt
+      && !lead.researching
+      && !lead.autoResearchAttemptedAt
+      && !leadSkipsAiAndVerification(lead)
+    ))
+    .map((lead) => lead.id)
+    .filter(Boolean)
+    .slice(0, 20);
+  if (!ids.length) return;
+  const discoveryFilter = $("#reviewDiscoveryFilter")?.value || "all";
+  const countryFilter = $("#reviewCountryFilter")?.value || "all";
+  const key = `${discoveryFilter}|${countryFilter}|${ids.join("|")}`;
+  if (manualImportBackfillKeys.has(key)) return;
+  manualImportBackfillKeys.add(key);
+  manualImportBackfillRunning = true;
+  window.setTimeout(async () => {
+    setReviewImportStatus(`正在联网复核已导入线索 ${ids.length} 条...`, "loading");
+    try {
+      const result = await autoResearchManualImportIds(ids, { limit: 20, batchSize: 3 });
+      setReviewImportStatus(`已联网复核旧导入线索 ${result.verified} 条。`, result.verified ? "success" : "warning");
+    } catch (error) {
+      setReviewImportStatus(error.message || "旧导入线索联网复核失败。", "error");
+    } finally {
+      manualImportBackfillRunning = false;
+    }
+  }, 800);
 }
 
 async function researchAllLeads() {
