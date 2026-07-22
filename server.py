@@ -101,6 +101,7 @@ DISCOVERY_MAX_CONCURRENCY = max(1, int(bootstrap_setting("DISCOVERY_MAX_CONCURRE
 MAX_ACTIVE_DISCOVERY_JOBS_PER_USER = 3
 MAX_ACTIVE_SCHEDULED_JOBS_PER_SALES = 9
 SCHEDULE_CAPACITY_RETRY_MINUTES = 30
+SCHEDULE_FAILED_RETRY_SLOTS = ((8, 0), (8, 30), (9, 0))
 DISCOVERY_QUALIFIED_TARGET_MIN = 20
 DISCOVERY_QUALIFIED_TARGET_MAX = 30
 DISCOVERY_JOB_TTL = 60 * 60 * 24 * 7
@@ -3348,6 +3349,18 @@ def next_all_sales_schedule_time(
     return next_run.astimezone(timezone.utc)
 
 
+def next_failed_schedule_retry_time(now: datetime | None = None) -> datetime:
+    beijing_tz = timezone(timedelta(hours=8))
+    reference = now or datetime.now(timezone.utc)
+    now_local = reference.astimezone(beijing_tz)
+    for hour, minute in SCHEDULE_FAILED_RETRY_SLOTS:
+        candidate = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if candidate > now_local:
+            return candidate.astimezone(timezone.utc)
+    next_day = now_local + timedelta(days=1)
+    return next_day.replace(hour=8, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+
+
 def row_to_discovery_schedule(row) -> dict:
     payload = row[2] if isinstance(row[2], dict) else json.loads(row[2] or "{}")
     next_run_at = row[5].isoformat() if hasattr(row[5], "isoformat") else str(row[5])
@@ -3686,12 +3699,24 @@ def run_due_discovery_schedules() -> int:
         owner = get_user(schedule.get("ownerUsername", ""))
         if not owner or owner.get("status") == "disabled":
             continue
+        schedule_payload = dict(schedule.get("payload") or {})
+        all_sales_schedule = schedule_payload.get("scheduleMode") == "all_sales"
+        last_job_id = str(schedule.get("lastJobId") or "")
+        last_job = get_discovery_job(last_job_id) if last_job_id else None
+        if all_sales_schedule and last_job and last_job.get("status") == "failed":
+            retry_at = next_failed_schedule_retry_time(now)
+            retry_date = retry_at.astimezone(timezone(timedelta(hours=8))).date().isoformat()
+            if schedule_payload.get("failedRetryDate") != retry_date:
+                schedule_payload["failedRetryDate"] = retry_date
+                schedule_payload["failedRetryJobId"] = last_job_id
+                schedule["payload"] = schedule_payload
+                schedule["nextRunAt"] = retry_at.isoformat(timespec="seconds")
+                schedule["updatedAt"] = now.isoformat(timespec="seconds")
+                save_discovery_schedule(schedule)
         next_run = parse_iso_datetime(schedule.get("nextRunAt"))
         if not next_run or next_run > now:
             continue
         try:
-            schedule_payload = dict(schedule.get("payload") or {})
-            all_sales_schedule = schedule_payload.get("scheduleMode") == "all_sales"
             if all_sales_schedule:
                 if owner.get("role") != "admin":
                     raise PermissionError("全员定时获客计划必须由管理员创建")
@@ -3699,8 +3724,6 @@ def run_due_discovery_schedules() -> int:
             else:
                 ensure_user_can_use_discovery_payload(owner, schedule_payload)
                 target_username = owner["username"]
-            last_job_id = str(schedule.get("lastJobId") or "")
-            last_job = get_discovery_job(last_job_id) if last_job_id else None
             if last_job and last_job.get("status") in {"queued", "running"}:
                 schedule["nextRunAt"] = (
                     next_all_sales_schedule_time(
