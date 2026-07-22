@@ -1371,6 +1371,87 @@ function isManualImportReviewLead(lead) {
   );
 }
 
+function manualImportBusinessTypeLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "汽车行业客户";
+  if (/business account/i.test(text)) return "公开商业账号";
+  if (/dealer|showroom|经销|展厅/i.test(text)) return "汽车经销商";
+  if (/import|export|进口|出口|外贸/i.test(text)) return "汽车进口/外贸客户";
+  if (/fleet|rental|租赁|车队/i.test(text)) return "车队或租赁客户";
+  if (/parts|service|维修|售后|配件/i.test(text)) return "汽车售后或配套客户";
+  return text;
+}
+
+function manualImportContactSummary(lead) {
+  return [
+    lead.email ? "邮箱" : "",
+    lead.phone ? "电话" : "",
+    lead.whatsapp ? "WhatsApp" : "",
+    lead.customerWebsite ? "官网" : ""
+  ].filter(Boolean);
+}
+
+function manualImportModelLabel(lead) {
+  return (Array.isArray(lead.recommendedModels) && lead.recommendedModels.length
+    ? lead.recommendedModels
+    : [lead.model || "华为系新能源车型"]
+  ).filter(Boolean).slice(0, 3).join("、");
+}
+
+function buildManualImportAiReview(lead) {
+  const city = String(lead.city || "").trim();
+  const country = String(lead.country || "").trim();
+  const region = [country, city].filter(Boolean).join(" · ") || "未填写地区";
+  const businessType = manualImportBusinessTypeLabel(lead.type || lead.accountType || lead.aiReview?.businessType);
+  const modelLabel = manualImportModelLabel(lead);
+  const contacts = manualImportContactSummary(lead);
+  const hasWebsite = Boolean(lead.customerWebsite);
+  const hasContact = contacts.some((item) => item !== "官网");
+  const sourceNote = String(lead.manualImportSource || lead.sourceExcerpt || lead.website || "").trim();
+  const contactText = contacts.length ? `已提供${contacts.join("、")}` : "未提供明确联系方式";
+  const evidenceGaps = [
+    hasWebsite ? "" : "官网或主页真实性",
+    hasContact ? "" : "有效联系人/电话/邮箱/WhatsApp",
+    "是否真实经营汽车销售、进口或车队采购业务",
+    "是否存在近期采购计划"
+  ].filter(Boolean);
+  const reasonParts = [
+    `${lead.company || "该线索"}位于${region}`,
+    `导入信息显示为${businessType}`,
+    `${contactText}`,
+    `可先按${modelLabel}方向判断合作价值`
+  ];
+  if (sourceNote && sourceNote !== lead.company) reasonParts.push(`备注：${sourceNote}`);
+  return {
+    reason: `${reasonParts.join("；")}。来源为手动导入，建议审核时补充公开页面、地图地址或社媒主页证据后再联系。`,
+    confidence: hasWebsite && hasContact ? 65 : hasWebsite || hasContact ? 55 : 40,
+    targetCountryMatch: Boolean(country),
+    countryEvidence: "manual",
+    verifiedCountry: country,
+    verifiedCity: city,
+    businessType,
+    customerProfile: {
+      buyerType: businessType,
+      businessPositioning: /进口|外贸|import|export/i.test(businessType)
+        ? "汽车进口、分销或跨境采购业务"
+        : /车队|租赁|fleet|rental/i.test(businessType)
+          ? "车队采购、租赁运营或批量用车业务"
+          : "汽车经销、展示或本地销售相关业务",
+      purchaseCapacity: hasContact && hasWebsite ? "中" : hasContact ? "中低" : "待核实",
+      likelyNeeds: [
+        `${modelLabel}车型资料、配置和价格`,
+        "中国新能源车型供货与经销合作",
+        hasContact ? "确认采购负责人和采购周期" : "先补齐可联系负责人"
+      ],
+      contactStrategy: hasContact
+        ? "先用导入联系方式确认采购负责人，发送车型资料、现车颜色和CIF参考报价"
+        : "先补充有效邮箱、电话或WhatsApp，再进入开发信和报价流程",
+      riskNotes: evidenceGaps,
+      summary: `${lead.company || "该客户"}位于${region}，当前按${businessType}处理；适合先围绕${modelLabel}做初步开发，但需要补充公开证据确认真实业务和采购意向。`
+    }
+  };
+}
+
 function ensureManualImportDiscoveryMetadata() {
   let changed = false;
   [reviewLeads, customers, rejectedLeads].forEach((bucket) => {
@@ -1385,6 +1466,25 @@ function ensureManualImportDiscoveryMetadata() {
       }
       if (lead.discoveryJobLabel !== batchLabel) {
         lead.discoveryJobLabel = batchLabel;
+        changed = true;
+      }
+      const nextAiReview = buildManualImportAiReview(lead);
+      const currentReason = String(lead.aiReview?.reason || "");
+      const currentProfileSummary = String(lead.aiReview?.customerProfile?.summary || "");
+      if (
+        !currentReason
+        || /来源为手动导入|需人工结合公开信息复核|Business account/i.test(currentReason)
+        || /来源为手动导入|可先按.*方向判断潜在合作价值/i.test(currentProfileSummary)
+      ) {
+        lead.aiReview = {
+          ...(lead.aiReview && typeof lead.aiReview === "object" ? lead.aiReview : {}),
+          ...nextAiReview,
+          customerProfile: {
+            ...(lead.aiReview?.customerProfile && typeof lead.aiReview.customerProfile === "object" ? lead.aiReview.customerProfile : {}),
+            ...nextAiReview.customerProfile
+          }
+        };
+        lead.confidence = Math.max(Number(lead.confidence || 0), Number(nextAiReview.confidence || 0));
         changed = true;
       }
     });
@@ -1556,25 +1656,6 @@ async function importReviewLeadsCsv(file) {
       createdAt: importedAt,
       confidenceLabel: "手动导入",
       confidence: email || phone || whatsapp || customerWebsite ? 55 : 35,
-      aiReview: {
-        reason: `${country}${customerImportValue(row, columnMap, "city") ? ` ${customerImportValue(row, columnMap, "city")}` : ""} ${customerImportValue(row, columnMap, "type") || "汽车行业客户"}，来源为手动导入，需人工结合公开信息复核。`,
-        targetCountryMatch: Boolean(country),
-        countryEvidence: "manual",
-        verifiedCountry: country,
-        verifiedCity: customerImportValue(row, columnMap, "city"),
-        businessType: customerImportValue(row, columnMap, "type") || "Auto business",
-        customerProfile: {
-          buyerType: customerImportValue(row, columnMap, "type") || "汽车行业客户",
-          businessPositioning: "汽车经销、进口或车队相关业务",
-          purchaseCapacity: email || phone || whatsapp ? "中" : "待核实",
-          likelyNeeds: [`车型方向：${model}`, "中国新能源车型采购或经销合作"],
-          contactStrategy: email || phone || whatsapp
-            ? "先使用导入联系方式确认采购负责人，再发送车型资料与报价"
-            : "先补充有效邮箱、电话或 WhatsApp，再判断是否进入开发流程",
-          riskNotes: ["来源为手动导入，仍需人工核实公开页面和采购意向"],
-          summary: `${company} 位于 ${country}，来源为手动导入；可先按${model}方向判断潜在合作价值，并在审核中补充公开证据。`
-        }
-      },
       sourceCoverage: {
         total: customerWebsite ? 1 : 0,
         official: customerWebsite ? 1 : 0,
@@ -1587,6 +1668,8 @@ async function importReviewLeadsCsv(file) {
         decision: "手动导入，进入线索审核"
       }
     });
+    lead.aiReview = buildManualImportAiReview(lead);
+    lead.confidence = Math.max(Number(lead.confidence || 0), Number(lead.aiReview.confidence || 0));
     const keys = customerDuplicateKeys(lead);
     if (keys.some((key) => duplicateKeys.has(key)) || leadDeletedMemoryKeys(lead).some((key) => deletedKeys.has(key))) {
       duplicateCount += 1;
