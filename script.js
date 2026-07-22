@@ -5767,6 +5767,9 @@ function renderLetterResult(result) {
   $("#leadInsight").textContent = result.insight || "";
   $("#englishLetter").textContent = result.english || "";
   $("#chineseMeaning").textContent = result.chinese || "";
+  if ($("#letterLanguageLabel")) {
+    $("#letterLanguageLabel").textContent = result.language ? `${result.language}开发信` : "开发信";
+  }
   $("#followUpSequence").innerHTML = (result.followUps || []).map((item) =>
     `<p><strong>${escapeHtml(item.day || "")}</strong>${escapeHtml(item.text || "")}</p>`
   ).join("");
@@ -5790,6 +5793,7 @@ async function generateLetterSmart(data) {
       english: result.english || fallback.english,
       chinese: result.chinese || fallback.chinese,
       followUps: Array.isArray(result.followUps) && result.followUps.length ? result.followUps : fallback.followUps,
+      language: result.language || (data.letterLanguage === "Local" ? "对应区域语言" : "英文"),
       provider: result.provider || "deepseek"
     };
   } catch (error) {
@@ -5830,7 +5834,7 @@ function openOutlookDraft(data = Object.fromEntries(new FormData($("#emailForm")
   const text = $("#englishLetter")?.textContent.trim() || "";
   const status = $("#outlookDraftStatus");
   if (!text) {
-    if (status) status.textContent = "请先生成英文开发信。";
+    if (status) status.textContent = "请先生成开发信。";
     return;
   }
   if (market.isDomestic) {
@@ -8859,7 +8863,7 @@ function bindForms() {
     await navigator.clipboard.writeText(text);
     $("#copyEmail").textContent = "已复制";
     setTimeout(() => {
-      $("#copyEmail").textContent = "复制英文";
+      $("#copyEmail").textContent = "复制开发信";
     }, 1200);
   });
 

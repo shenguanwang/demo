@@ -741,6 +741,30 @@ def generate_sales_letter(payload: dict) -> dict:
         raise ValueError("请求格式无效")
     if not ai_lead_review_enabled():
         raise RuntimeError("DeepSeek 未启用或未配置 API Key")
+    local_language_by_country = {
+        "uae": "Arabic",
+        "united arab emirates": "Arabic",
+        "saudi arabia": "Arabic",
+        "qatar": "Arabic",
+        "kuwait": "Arabic",
+        "oman": "Arabic",
+        "bahrain": "Arabic",
+        "egypt": "Arabic",
+        "algeria": "French",
+        "cote d'ivoire": "French",
+        "côte d'ivoire": "French",
+        "ivory coast": "French",
+        "russia": "Russian",
+        "kazakhstan": "Russian",
+        "kyrgyzstan": "Russian",
+        "uzbekistan": "Russian",
+        "azerbaijan": "Russian",
+        "armenia": "Russian",
+        "nigeria": "English",
+        "ghana": "English",
+        "ethiopia": "English",
+        "china": "Chinese",
+    }
     product_profiles = {
         "问界 M9": {
             "english": "AITO M9",
@@ -771,6 +795,18 @@ def generate_sales_letter(payload: dict) -> dict:
     profile = product_profiles.get(model) or product_profiles["问界 M9"]
     public_text = clean_text(str(payload.get("websiteText") or ""))[:3500]
     context = payload.get("leadContext") if isinstance(payload.get("leadContext"), dict) else {}
+    country_text = " ".join([
+        clean_text(str(context.get("country") or "")),
+        clean_text(str(payload.get("country") or "")),
+        clean_text(str(payload.get("websiteText") or ""))[:300],
+    ]).lower()
+    language_mode = clean_text(str(payload.get("letterLanguage") or payload.get("language") or "English"))[:40]
+    target_language = "English"
+    if language_mode.lower() in {"local", "对应区域语言", "local language", "region"}:
+        for country_key, language in local_language_by_country.items():
+            if country_key in country_text:
+                target_language = language
+                break
     system = """
 You write practical first-touch B2B outreach for a Chinese HIMA/Huawei ecosystem vehicle export team.
 The user sells AITO, Maextro, Stelato and Luxeed vehicles from China to overseas dealers, importers,
@@ -784,11 +820,16 @@ Rules:
 4. Main offer: available colors/specification sheet/export support/dealer CIF reference quotation.
 5. Do not say "Huawei car" as the brand owner; use HIMA smart EVs / AITO / Maextro / Stelato / Luxeed.
 6. If contact data is incomplete, write softly and ask for the right procurement or sales contact.
-7. Channel style:
-   - WhatsApp / Instagram DM: 45-80 English words, direct and conversational, no subject line.
-   - LinkedIn: 70-110 English words, professional, no subject line.
-   - Email: include "Subject:" and 120-170 English words.
-8. Return valid JSON only.
+7. Write the outreach message and follow-ups in targetLanguage. If targetLanguage is not English,
+   use natural local business language, but keep model names and brand terms such as AITO, HIMA,
+   Maextro, Stelato and Luxeed in English.
+8. Channel style:
+   - WhatsApp / Instagram DM: 45-80 words, direct and conversational, no subject line.
+   - LinkedIn: 70-110 words, professional, no subject line.
+   - Email: include "Subject:" and 120-170 words.
+9. The "chinese" field must be a faithful Chinese translation/meaning of the generated outreach text,
+   not only a summary or judgment.
+10. Return valid JSON only.
 """.strip()
     user = {
         "task": "Generate an outreach message for this lead using prior project rules.",
@@ -801,6 +842,8 @@ Rules:
         "modelEnglish": profile["english"],
         "modelPitch": profile["pitch"],
         "channel": channel,
+        "targetLanguage": target_language,
+        "languageMode": language_mode,
         "leadContext": {
             "country": clean_text(str(context.get("country") or ""))[:80],
             "city": clean_text(str(context.get("city") or ""))[:80],
@@ -813,12 +856,13 @@ Rules:
         },
         "requiredJson": {
             "insight": "Chinese one-sentence business judgment, evidence-based",
-            "english": "final English outreach text",
-            "chinese": "Chinese explanation of the English text, not a literal word-by-word translation",
+            "language": "target language name used for the message",
+            "english": "final outreach text in targetLanguage",
+            "chinese": "faithful Chinese translation/meaning of the final outreach text",
             "followUps": [
-                {"day": "第1天", "text": "English follow-up"},
-                {"day": "第3天", "text": "English follow-up"},
-                {"day": "第7天", "text": "English follow-up"},
+                {"day": "第1天", "text": "follow-up in targetLanguage"},
+                {"day": "第3天", "text": "follow-up in targetLanguage"},
+                {"day": "第7天", "text": "follow-up in targetLanguage"},
             ],
         },
     }
@@ -853,9 +897,10 @@ Rules:
         "ok": True,
         "provider": "deepseek",
         "model": get_ai_model("default"),
+        "language": clean_text(str(result.get("language") or target_language))[:40] or target_language,
         "insight": insight or f"根据公开信息，{company} 适合先按 {profile['english']} 方向做轻量开发。",
         "english": english[:3000],
-        "chinese": chinese or "已根据客户公开信息、渠道和主推车型生成英文开发信。",
+        "chinese": chinese or "已根据客户公开信息、渠道和主推车型生成开发信，并需人工确认措辞。",
         "followUps": normalized_followups,
     }
 

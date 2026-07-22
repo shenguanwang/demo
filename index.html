@@ -1120,7 +1120,7 @@
         <div>
           <p class="eyebrow">Step 5</p>
           <h2>智能开发信</h2>
-          <p>作用：根据线索信息和客户官网内容，自动融合你们的产品优势，生成英文开发信和中文解释。</p>
+          <p>作用：根据线索信息和客户官网内容，自动融合你们的产品优势，生成英文或客户地区语言开发信和中文翻译。</p>
         </div>
       </div>
       <div class="email-builder">
@@ -1158,6 +1158,12 @@
               <option>LinkedIn</option>
             </select>
           </label>
+          <label>开发信语言
+            <select name="letterLanguage">
+              <option value="English">英文</option>
+              <option value="Local">对应区域语言</option>
+            </select>
+          </label>
           <button class="primary" type="submit">自动生成开发信</button>
         </form>
         <div class="panel result-panel">
@@ -1165,7 +1171,7 @@
             <h3>生成结果</h3>
             <div class="result-actions">
               <button class="ghost" id="openOutlookDraft" type="button">用 Outlook 编辑</button>
-              <button class="ghost" id="copyEmail" type="button">复制英文</button>
+              <button class="ghost" id="copyEmail" type="button">复制开发信</button>
             </div>
           </div>
           <p class="form-status" id="outlookDraftStatus" role="status"></p>
@@ -1174,7 +1180,7 @@
             <p id="leadInsight">这家公司是迪拜豪华车展厅，适合推荐问界 M9 或尊界 S800。</p>
           </div>
           <div class="letter-block">
-            <span>英文开发信</span>
+            <span id="letterLanguageLabel">开发信</span>
             <pre id="englishLetter"></pre>
           </div>
           <div class="letter-block muted">
@@ -1447,6 +1453,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260722-deepseek-letter"></script>
+  <script src="./script.js?v=20260722-letter-language"></script>
 </body>
 </html>
