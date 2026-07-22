@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -118,7 +119,7 @@ def restore_call_limit(settings: dict, original_limit: int) -> None:
     server.save_admin_settings_file(settings)
 
 
-def run(limit: int = 0) -> dict:
+def run(limit: int = 0, workers: int = 4) -> dict:
     if not server.get_deepseek_api_key():
         raise RuntimeError("DeepSeek API key is unavailable in the server runtime configuration")
     missing = count_missing()
@@ -135,15 +136,24 @@ def run(limit: int = 0) -> dict:
             state = workspace.get("state") or server.empty_workspace_state()
             user_stats = {"reviewed": 0, "failed": 0, "skipped": 0}
             pending_since_save = 0
+            pending = []
             for bucket in ("reviewLeads", "customers"):
                 for lead in state.get(bucket) or []:
-                    if remaining <= 0:
+                    if len(pending) >= remaining:
                         break
                     if not isinstance(lead, dict) or review_is_complete(lead):
                         user_stats["skipped"] += 1
                         continue
-                    review = evaluate_lead(lead)
-                    remaining -= 1
+                    pending.append(lead)
+            remaining -= len(pending)
+            with ThreadPoolExecutor(max_workers=max(1, min(8, workers))) as executor:
+                futures = {executor.submit(evaluate_lead, lead): lead for lead in pending}
+                for future in as_completed(futures):
+                    lead = futures[future]
+                    try:
+                        review = future.result()
+                    except Exception:
+                        review = {}
                     if review and review.get("reason") and isinstance(review.get("customerProfile"), dict):
                         lead["aiReview"] = review
                         lead["aiReevaluatedAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -171,5 +181,6 @@ def run(limit: int = 0) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--workers", type=int, default=4)
     args = parser.parse_args()
-    print(json.dumps(run(max(0, args.limit)), ensure_ascii=False), flush=True)
+    print(json.dumps(run(max(0, args.limit), max(1, args.workers)), ensure_ascii=False), flush=True)
