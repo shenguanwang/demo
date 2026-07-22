@@ -1339,6 +1339,60 @@ function leadDeletedMemoryKeys(lead) {
   ].filter(Boolean);
 }
 
+function manualImportBatchDate(value = new Date()) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  }).format(new Date(value));
+}
+
+function manualImportBatchLabel(value = new Date()) {
+  const date = new Date(value);
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "numeric",
+    day: "numeric"
+  }).formatToParts(date);
+  const month = parts.find((part) => part.type === "month")?.value || String(date.getMonth() + 1);
+  const day = parts.find((part) => part.type === "day")?.value || String(date.getDate());
+  return `${month}月${day}日手动导入`;
+}
+
+function manualImportBatchId(value = new Date()) {
+  return `manual-import-${manualImportBatchDate(value)}`;
+}
+
+function isManualImportReviewLead(lead) {
+  return Boolean(
+    lead?.isImportedLead
+    && /手动导入/.test(`${lead.origin || ""} ${lead.source || ""} ${lead.sourceType || ""} ${lead.discoveryJobLabel || ""}`)
+  );
+}
+
+function ensureManualImportDiscoveryMetadata() {
+  let changed = false;
+  [reviewLeads, customers, rejectedLeads].forEach((bucket) => {
+    (Array.isArray(bucket) ? bucket : []).forEach((lead) => {
+      if (!isManualImportReviewLead(lead)) return;
+      const dateValue = lead.createdAt || lead.manualApprovalAt || new Date().toISOString();
+      const batchId = manualImportBatchId(dateValue);
+      const batchLabel = manualImportBatchLabel(dateValue);
+      if (lead.discoveryJobId !== batchId) {
+        lead.discoveryJobId = batchId;
+        changed = true;
+      }
+      if (lead.discoveryJobLabel !== batchLabel) {
+        lead.discoveryJobLabel = batchLabel;
+        changed = true;
+      }
+    });
+  });
+  if (changed) saveState();
+  return changed;
+}
+
 async function importCustomersCsv(file) {
   if (!file) return;
   if (!/\.csv$/i.test(file.name || "") && !/csv/i.test(file.type || "")) {
@@ -1438,6 +1492,9 @@ async function importReviewLeadsCsv(file) {
   }
   const duplicateKeys = new Set([...reviewLeads, ...customers, ...rejectedLeads].flatMap(customerDuplicateKeys));
   const deletedKeys = new Set(deletedRecords.map((record) => record.key));
+  const batchImportedAt = new Date().toISOString();
+  const batchId = manualImportBatchId(batchImportedAt);
+  const batchLabel = manualImportBatchLabel(batchImportedAt);
   const imported = [];
   let duplicateCount = 0;
   let invalidCount = 0;
@@ -1454,7 +1511,7 @@ async function importReviewLeadsCsv(file) {
       invalidCount += 1;
       return;
     }
-    const importedAt = new Date().toISOString();
+    const importedAt = batchImportedAt;
     const customerWebsite = normalizeUserEnteredUrl(customerImportValue(row, columnMap, "customerWebsite"));
     const sourceNote = customerImportValue(row, columnMap, "source");
     const notes = customerImportValue(row, columnMap, "website");
@@ -1477,6 +1534,9 @@ async function importReviewLeadsCsv(file) {
       sourceTitle: company,
       sourceType: "线索审核手动导入",
       origin: "手动导入",
+      discoveryJobId: batchId,
+      discoveryJobLabel: batchLabel,
+      discoveryJobImportedAt: importedAt,
       sourceExcerpt: notes || sourceNote || `${company} ${country}`,
       evidenceSources: [{
         title: company,
@@ -3170,6 +3230,7 @@ function renderReview(options = {}) {
   }
   const previousWindowScrollY = window.scrollY;
   const reviewMode = reviewStatusMode();
+  ensureManualImportDiscoveryMetadata();
   if (reviewMode === "pending") purgeIrrelevantReviewLeads();
   renderScheduledLeadMorningNotice();
   renderReviewFilterOptions();
