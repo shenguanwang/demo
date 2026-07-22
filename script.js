@@ -704,6 +704,7 @@ let openReviewDetailKey = "";
 const reviewDetailScrollPositions = new Map();
 let reviewSearchRenderTimer = 0;
 let reviewDetailHydrationId = 0;
+const manualImportAutoResearchIds = new Set();
 const rejectReasonOptions = [
   "不是汽车经销/进口/分销客户",
   "地区不符合目标市场",
@@ -1684,7 +1685,7 @@ async function importReviewLeadsCsv(file) {
     $("#reviewStatusFilter") && ($("#reviewStatusFilter").value = "pending");
     refreshAllLeadViews();
   }
-  return { imported: imported.length, duplicates: duplicateCount, invalid: invalidCount };
+  return { imported: imported.length, duplicates: duplicateCount, invalid: invalidCount, ids: imported.map((lead) => lead.id).filter(Boolean) };
 }
 
 function loadUiSettings() {
@@ -3355,6 +3356,7 @@ function renderReview(options = {}) {
     selectedReviewLeadId = `${reviewMode}:${rankedLeadRows[0].lead.id || rankedLeadRows[0].index}`;
   }
   const selectedRecord = rankedLeadRows.find(({ lead, index }) => `${reviewMode}:${lead.id || index}` === selectedReviewLeadId) || rankedLeadRows[0];
+  if (reviewMode === "pending") scheduleSelectedManualImportAutoResearch(selectedRecord);
   const reviewListHtml = detailOnly ? "" : rankedLeadRows.map(({ lead, index, rankIndex }) => {
     const rowId = `${reviewMode}:${lead.id || index}`;
     const phoneCount = evidenceValues(lead.phoneSources, lead.phone).length + evidenceValues(lead.whatsappSources, lead.whatsapp).length;
@@ -5023,6 +5025,45 @@ async function researchLead(index, options = {}) {
     lead.researchSummary = `全网补全失败：${error.message}。请稍后重试；若持续失败，请检查云端服务状态。`;
     renderReview();
   }
+}
+
+async function autoResearchManualImportIds(ids = [], options = {}) {
+  const uniqueIds = [...new Set((Array.isArray(ids) ? ids : []).filter(Boolean))].slice(0, options.limit || 20);
+  if (!uniqueIds.length) return { verified: 0, failed: 0 };
+  const batchSize = Math.max(1, Math.min(3, Number(options.batchSize || 3)));
+  let verified = 0;
+  let failed = 0;
+  for (let offset = 0; offset < uniqueIds.length; offset += batchSize) {
+    const batch = uniqueIds.slice(offset, offset + batchSize);
+    await Promise.all(batch.map(async (id) => {
+      const index = reviewLeads.findIndex((lead) => String(lead.id || "") === String(id));
+      const lead = reviewLeads[index];
+      if (index < 0 || !lead || lead.researchAt || lead.researching || leadSkipsAiAndVerification(lead)) return;
+      lead.autoResearchAttemptedAt = new Date().toISOString();
+      try {
+        await researchLead(index, { mode: "fast" });
+        if (reviewLeads.find((item) => String(item.id || "") === String(id))?.researchAt) verified += 1;
+      } catch {
+        failed += 1;
+      }
+    }));
+  }
+  return { verified, failed };
+}
+
+function scheduleSelectedManualImportAutoResearch(record) {
+  const lead = record?.lead;
+  if (!lead || !isManualImportReviewLead(lead) || lead.researchAt || lead.researching || lead.autoResearchAttemptedAt) return;
+  const id = String(lead.id || "");
+  if (!id || manualImportAutoResearchIds.has(id)) return;
+  manualImportAutoResearchIds.add(id);
+  window.setTimeout(async () => {
+    try {
+      await autoResearchManualImportIds([id], { limit: 1, batchSize: 1 });
+    } finally {
+      manualImportAutoResearchIds.delete(id);
+    }
+  }, 400);
 }
 
 async function researchAllLeads() {
@@ -8931,7 +8972,13 @@ function bindForms() {
     setReviewImportStatus("正在读取并校验线索数据...", "loading");
     try {
       const result = await importReviewLeadsCsv(file);
-      const message = `导入完成：新增 ${result.imported} 条，跳过重复 ${result.duplicates} 条，无效 ${result.invalid} 条。`;
+      let message = `导入完成：新增 ${result.imported} 条，跳过重复 ${result.duplicates} 条，无效 ${result.invalid} 条。`;
+      if (result.imported) {
+        const researchCount = Math.min((result.ids || []).length, 20);
+        setReviewImportStatus(`${message} 正在联网复核前 ${researchCount} 条...`, "loading");
+        const research = await autoResearchManualImportIds(result.ids || [], { limit: 20, batchSize: 3 });
+        message = `${message} 已联网复核 ${research.verified} 条。`;
+      }
       setReviewImportStatus(message, result.imported ? "success" : "warning");
     } catch (error) {
       setReviewImportStatus(error.message || "导入失败，请使用线索审核模板重试。", "error");
