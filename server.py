@@ -3228,6 +3228,8 @@ def discovery_job_public(job: dict) -> dict:
         "sourceOwnerUsername": str(payload.get("sourceOwnerUsername", "")),
         "sourceJobId": str(payload.get("sourceJobId", "")),
         "scheduleId": str(payload.get("scheduleId", "")),
+        "scheduleRunTime": str(payload.get("scheduleRunTime", "")),
+        "scheduleRunTimeSource": "saved" if payload.get("scheduleRunTime") else "",
         "planName": str(payload.get("planName", "")),
         "targetUsername": str(payload.get("targetUsername") or payload.get("scheduledForUsername") or ""),
     }
@@ -3937,7 +3939,22 @@ def list_all_discovery_jobs(limit: int = 200) -> list[dict]:
 
 def list_scheduled_delivery_jobs(limit: int = 500) -> list[dict]:
     initialize_state_store()
-    limit = max(1, min(1000, int(limit or 500)))
+    limit = max(1, min(5000, int(limit or 500)))
+    schedules = list_discovery_schedules(None, limit=5000)
+    schedule_run_times = {
+        str(schedule.get("id") or ""): str((schedule.get("payload") or {}).get("scheduleRunTime") or "")
+        for schedule in schedules
+    }
+    schedule_run_times_by_target = {}
+    for schedule in schedules:
+        payload = schedule.get("payload") or {}
+        key = (
+            normalize_username(payload.get("targetUsername") or payload.get("scheduledForUsername")),
+            normalize_country_match_text(payload.get("country") or ""),
+            str(payload.get("sourceMode") or "").strip().lower(),
+        )
+        if all(key):
+            schedule_run_times_by_target[key] = str(payload.get("scheduleRunTime") or "")
     columns = (
         "SELECT job_id, payload, status, stage, progress, message, result, error, "
         "imported, created_at, updated_at, owner_username FROM discovery_jobs "
@@ -3962,6 +3979,19 @@ def list_scheduled_delivery_jobs(limit: int = 500) -> list[dict]:
     for row in rows:
         job = discovery_job_public(row_to_discovery_job(row))
         job["ownerUsername"] = row[11] if len(row) > 11 else ""
+        if not job.get("scheduleRunTime"):
+            job["scheduleRunTime"] = schedule_run_times.get(str(job.get("scheduleId") or ""), "")
+            if job["scheduleRunTime"]:
+                job["scheduleRunTimeSource"] = "current_plan"
+        if not job.get("scheduleRunTime"):
+            target_key = (
+                normalize_username(job.get("targetUsername") or job.get("ownerUsername")),
+                normalize_country_match_text(job.get("country") or ""),
+                str(job.get("sourceMode") or "").strip().lower(),
+            )
+            job["scheduleRunTime"] = schedule_run_times_by_target.get(target_key, "")
+            if job["scheduleRunTime"]:
+                job["scheduleRunTimeSource"] = "current_plan"
         jobs.append(job)
     return jobs
 
@@ -4817,6 +4847,7 @@ def discovery_params(payload: dict) -> dict[str, list[str]]:
     allowed_fields = {
         "planName",
         "scheduleId",
+        "scheduleRunTime",
         "targetUsername",
         "scheduledForUsername",
         "distributionType",

@@ -691,7 +691,6 @@ let discoverySchedulePage = 1;
 const DISCOVERY_SCHEDULE_GROUPS_PAGE_SIZE = 1;
 let scheduledDiscoveryJobs = [];
 let scheduledRunPage = 1;
-const SCHEDULED_RUNS_PAGE_SIZE = 12;
 let scheduledRunPollTick = 0;
 let adminUsers = [];
 let finderHistoryPage = 1;
@@ -6619,13 +6618,28 @@ function renderDiscoverySchedules() {
 function scheduledRunMatchesStatus(job, filter) {
   if (filter === "all") return true;
   if (filter === "running") return ["queued", "running"].includes(job.status);
+  if (filter === "failed") return ["failed", "canceled"].includes(job.status);
   return job.status === filter;
+}
+
+function scheduledRunMatchesDateRange(job, dateFrom, dateTo) {
+  if (!dateFrom && !dateTo) return true;
+  const timestamp = new Date(job.createdAt || job.updatedAt || "");
+  if (Number.isNaN(timestamp.getTime())) return false;
+  const localDate = [
+    timestamp.getFullYear(),
+    String(timestamp.getMonth() + 1).padStart(2, "0"),
+    String(timestamp.getDate()).padStart(2, "0")
+  ].join("-");
+  return (!dateFrom || localDate >= dateFrom) && (!dateTo || localDate <= dateTo);
 }
 
 function renderScheduledDiscoveryRuns() {
   const box = $("#scheduledRunList");
   if (!box) return;
   const statusFilter = $("#scheduledRunStatusFilter")?.value || "all";
+  const dateFrom = $("#scheduledRunDateFrom")?.value || "";
+  const dateTo = $("#scheduledRunDateTo")?.value || "";
   const salesFilter = $("#scheduledRunSalesFilter");
   const currentSales = salesFilter?.value || "all";
   const salesNames = Array.from(new Set(
@@ -6643,12 +6657,15 @@ function renderScheduledDiscoveryRuns() {
   const filtered = scheduledDiscoveryJobs.filter((job) => {
     const username = job.targetUsername || job.ownerUsername || "";
     return scheduledRunMatchesStatus(job, statusFilter)
+      && scheduledRunMatchesDateRange(job, dateFrom, dateTo)
       && (selectedSales === "all" || username === selectedSales);
   });
-  const pageCount = Math.max(1, Math.ceil(filtered.length / SCHEDULED_RUNS_PAGE_SIZE));
+  const pageSizeValue = $("#scheduledRunPageSize")?.value || "20";
+  const pageSize = pageSizeValue === "all" ? Math.max(1, filtered.length) : Number(pageSizeValue || 20);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
   scheduledRunPage = Math.max(1, Math.min(scheduledRunPage, pageCount));
-  const start = (scheduledRunPage - 1) * SCHEDULED_RUNS_PAGE_SIZE;
-  const visible = filtered.slice(start, start + SCHEDULED_RUNS_PAGE_SIZE);
+  const start = (scheduledRunPage - 1) * pageSize;
+  const visible = filtered.slice(start, start + pageSize);
   const stateLabels = discoveryJobStateLabels();
   const count = $("#scheduledRunCount");
   if (count) count.textContent = `${filtered.length} 条`;
@@ -6662,16 +6679,20 @@ function renderScheduledDiscoveryRuns() {
     const username = job.targetUsername || job.ownerUsername || "未指定销售";
     const importedCount = Number(job.result?.importedCount || 0);
     const rawCount = discoveryJobRawCount(job);
+    const plannedTime = job.scheduleRunTime
+      ? `${job.scheduleRunTime}${job.scheduleRunTimeSource === "current_plan" ? "（按当前计划）" : ""}`
+      : "未记录";
+    const actualTime = formatJobTime(job.createdAt || job.updatedAt);
     const resultText = ["queued", "running"].includes(job.status)
       ? `${Number(job.progress || 0)}% · ${job.message || "后台执行中"}`
-      : job.status === "failed"
+      : ["failed", "canceled"].includes(job.status)
         ? job.error || job.message || "执行失败"
         : `发现 ${rawCount} 条 · 导入 ${importedCount} 条`;
     return `
       <article class="scheduled-run-item ${escapeHtml(job.status || "")}">
         <div class="scheduled-run-state">
           <span>${escapeHtml(stateLabels[job.status] || job.status || "未知")}</span>
-          <small>${escapeHtml(formatJobTime(job.updatedAt || job.createdAt))}</small>
+          <small>计划 ${escapeHtml(plannedTime)} · 实际 ${escapeHtml(actualTime)}</small>
         </div>
         <div class="scheduled-run-main">
           <strong>${escapeHtml(job.country || "未指定国家")} · ${escapeHtml(discoverySourceLabel(job.sourceMode))}</strong>
@@ -7392,6 +7413,22 @@ function bindForms() {
   });
 
   $("#scheduledRunSalesFilter")?.addEventListener("change", () => {
+    scheduledRunPage = 1;
+    renderScheduledDiscoveryRuns();
+  });
+
+  ["scheduledRunDateFrom", "scheduledRunDateTo", "scheduledRunPageSize"].forEach((id) => {
+    document.getElementById(id)?.addEventListener("change", () => {
+      scheduledRunPage = 1;
+      renderScheduledDiscoveryRuns();
+    });
+  });
+
+  $("#scheduledRunClearDates")?.addEventListener("click", () => {
+    const dateFrom = $("#scheduledRunDateFrom");
+    const dateTo = $("#scheduledRunDateTo");
+    if (dateFrom) dateFrom.value = "";
+    if (dateTo) dateTo.value = "";
     scheduledRunPage = 1;
     renderScheduledDiscoveryRuns();
   });

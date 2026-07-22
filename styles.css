@@ -2322,9 +2322,19 @@ textarea {
   font-size: 11px;
 }
 
-.finder-v2-run-toolbar select {
+.finder-v2-run-toolbar select,
+.finder-v2-run-toolbar input {
   min-height: 36px;
   padding: 6px 30px 6px 10px;
+}
+
+.finder-v2-run-toolbar input {
+  min-width: 138px;
+  padding-right: 10px;
+}
+
+.finder-v2-run-toolbar > button {
+  min-height: 36px;
 }
 
 .finder-v2-run-toolbar > span {

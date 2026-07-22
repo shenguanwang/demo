@@ -8,7 +8,7 @@
   <link rel="icon" type="image/png" href="./favicon.png?v=20260713-hima-round">
   <link rel="apple-touch-icon" href="./favicon.png?v=20260713-hima-round">
   <link rel="stylesheet" href="./vendor/leaflet/leaflet.css?v=1.9.4">
-  <link rel="stylesheet" href="./styles.css?v=20260721-admin-v2-visibility">
+  <link rel="stylesheet" href="./styles.css?v=20260722-v2-run-filters">
 </head>
 <body>
   <aside class="sidebar" id="appSidebar">
@@ -544,12 +544,18 @@
             <p>集中显示系统为销售执行的定时获客任务，不再占用管理员“自动找客户”的搜索记录。</p>
           </div>
           <div class="finder-v2-run-toolbar">
+            <label>开始日期
+              <input id="scheduledRunDateFrom" type="date">
+            </label>
+            <label>结束日期
+              <input id="scheduledRunDateTo" type="date">
+            </label>
             <label>状态
               <select id="scheduledRunStatusFilter">
                 <option value="all">全部状态</option>
                 <option value="running">运行中</option>
                 <option value="completed">已完成</option>
-                <option value="failed">失败</option>
+                <option value="failed">失败/已终止</option>
               </select>
             </label>
             <label>销售
@@ -557,6 +563,15 @@
                 <option value="all">全部销售</option>
               </select>
             </label>
+            <label>每页显示
+              <select id="scheduledRunPageSize">
+                <option value="20">20 条</option>
+                <option value="50">50 条</option>
+                <option value="100">100 条</option>
+                <option value="all">全部</option>
+              </select>
+            </label>
+            <button class="ghost compact" id="scheduledRunClearDates" type="button">清除日期</button>
             <span id="scheduledRunCount">0 条</span>
           </div>
         </div>
@@ -1425,6 +1440,6 @@
   </main>
 
   <script src="./vendor/leaflet/leaflet.js?v=1.9.4"></script>
-  <script src="./script.js?v=20260721-fixed-schedule-time"></script>
+  <script src="./script.js?v=20260722-v2-run-filters"></script>
 </body>
 </html>
