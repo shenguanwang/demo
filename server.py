@@ -99,6 +99,7 @@ ACTIVE_DISCOVERY_WORKERS: set[str] = set()
 ACTIVE_DISCOVERY_WORKERS_LOCK = threading.Lock()
 DISCOVERY_MAX_CONCURRENCY = max(1, int(bootstrap_setting("DISCOVERY_MAX_CONCURRENCY", "2")))
 MAX_ACTIVE_DISCOVERY_JOBS_PER_USER = 3
+MAX_ACTIVE_SCHEDULED_JOBS_PER_SALES = 9
 SCHEDULE_CAPACITY_RETRY_MINUTES = 30
 DISCOVERY_QUALIFIED_TARGET_MIN = 20
 DISCOVERY_QUALIFIED_TARGET_MAX = 30
@@ -3712,7 +3713,8 @@ def run_due_discovery_schedules() -> int:
                 schedule["updatedAt"] = now.isoformat(timespec="seconds")
                 save_discovery_schedule(schedule)
                 continue
-            if count_active_discovery_jobs(target_username) >= MAX_ACTIVE_DISCOVERY_JOBS_PER_USER:
+            active_limit = MAX_ACTIVE_SCHEDULED_JOBS_PER_SALES if all_sales_schedule else MAX_ACTIVE_DISCOVERY_JOBS_PER_USER
+            if count_active_discovery_jobs(target_username) >= active_limit:
                 schedule["nextRunAt"] = (now + timedelta(minutes=SCHEDULE_CAPACITY_RETRY_MINUTES)).isoformat(timespec="seconds")
                 schedule["updatedAt"] = now.isoformat(timespec="seconds")
                 save_discovery_schedule(schedule)
@@ -4945,8 +4947,9 @@ def create_discovery_job(
                 existing["reused"] = True
                 return discovery_job_public(existing)
         active_count = count_active_discovery_jobs(owner_username)
-        if active_count >= MAX_ACTIVE_DISCOVERY_JOBS_PER_USER:
-            raise ValueError(f"当前已有 {active_count} 个获客任务正在运行或排队，最多同时运行 {MAX_ACTIVE_DISCOVERY_JOBS_PER_USER} 个。请等待任务完成后再启动新的任务。")
+        active_limit = MAX_ACTIVE_SCHEDULED_JOBS_PER_SALES if assigned_by_admin else MAX_ACTIVE_DISCOVERY_JOBS_PER_USER
+        if active_count >= active_limit:
+            raise ValueError(f"当前已有 {active_count} 个获客任务正在运行或排队，最多同时运行 {active_limit} 个。请等待任务完成后再启动新的任务。")
         job_id = uuid.uuid4().hex
         now = datetime.now(timezone.utc)
         job = {
