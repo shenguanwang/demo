@@ -736,6 +736,130 @@ Return one valid JSON object only. Do not add markdown or commentary.
     }
 
 
+def generate_sales_letter(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        raise ValueError("请求格式无效")
+    if not ai_lead_review_enabled():
+        raise RuntimeError("DeepSeek 未启用或未配置 API Key")
+    product_profiles = {
+        "问界 M9": {
+            "english": "AITO M9",
+            "pitch": "flagship luxury smart SUV with HarmonyOS cockpit, Huawei ADS intelligent driving, premium space and EV/EREV options",
+        },
+        "问界 M8": {
+            "english": "AITO M8",
+            "pitch": "large premium smart SUV with a more accessible positioning than AITO M9",
+        },
+        "尊界 S800": {
+            "english": "Maextro S800",
+            "pitch": "ultra-luxury executive EV/EREV sedan for VIP reception, business travel and top-tier showrooms",
+        },
+        "享界 S9": {
+            "english": "Stelato S9",
+            "pitch": "premium smart executive sedan for business and high-end sedan buyers",
+        },
+        "智界 R7": {
+            "english": "Luxeed R7",
+            "pitch": "smart electric coupe SUV for younger premium EV buyers and technology-focused showrooms",
+        },
+    }
+    company = clean_text(str(payload.get("company") or ""))[:120]
+    if not company:
+        raise ValueError("客户公司名不能为空")
+    model = clean_text(str(payload.get("model") or "问界 M9"))[:60]
+    channel = clean_text(str(payload.get("channel") or "WhatsApp"))[:40]
+    profile = product_profiles.get(model) or product_profiles["问界 M9"]
+    public_text = clean_text(str(payload.get("websiteText") or ""))[:3500]
+    context = payload.get("leadContext") if isinstance(payload.get("leadContext"), dict) else {}
+    system = """
+You write practical first-touch B2B outreach for a Chinese HIMA/Huawei ecosystem vehicle export team.
+The user sells AITO, Maextro, Stelato and Luxeed vehicles from China to overseas dealers, importers,
+showrooms, fleet buyers and auto-trading companies.
+
+Rules:
+1. Use only the supplied customer data and public evidence. Do not invent purchase intent, budget,
+   decision authority, showroom scale, stock, partnership history or verified contacts.
+2. The message must be short, specific and human. No hype, no generic mass-email wording.
+3. Mention one concrete reason for fit based on evidence, then introduce the selected model.
+4. Main offer: available colors/specification sheet/export support/dealer CIF reference quotation.
+5. Do not say "Huawei car" as the brand owner; use HIMA smart EVs / AITO / Maextro / Stelato / Luxeed.
+6. If contact data is incomplete, write softly and ask for the right procurement or sales contact.
+7. Channel style:
+   - WhatsApp / Instagram DM: 45-80 English words, direct and conversational, no subject line.
+   - LinkedIn: 70-110 English words, professional, no subject line.
+   - Email: include "Subject:" and 120-170 English words.
+8. Return valid JSON only.
+""".strip()
+    user = {
+        "task": "Generate an outreach message for this lead using prior project rules.",
+        "company": company,
+        "contactName": clean_text(str(payload.get("contactName") or ""))[:80],
+        "recipientEmail": clean_text(str(payload.get("recipientEmail") or ""))[:120],
+        "websiteOrProfile": clean_text(str(payload.get("website") or ""))[:300],
+        "publicEvidenceText": public_text,
+        "model": model,
+        "modelEnglish": profile["english"],
+        "modelPitch": profile["pitch"],
+        "channel": channel,
+        "leadContext": {
+            "country": clean_text(str(context.get("country") or ""))[:80],
+            "city": clean_text(str(context.get("city") or ""))[:80],
+            "type": clean_text(str(context.get("type") or ""))[:120],
+            "score": context.get("score"),
+            "tier": clean_text(str(context.get("scoreTier") or ""))[:20],
+            "aiReview": clean_text(str(context.get("aiReview") or ""))[:500],
+            "customerProfile": clean_text(str(context.get("customerProfile") or ""))[:800],
+            "sourceCoverage": context.get("sourceCoverage") if isinstance(context.get("sourceCoverage"), dict) else {},
+        },
+        "requiredJson": {
+            "insight": "Chinese one-sentence business judgment, evidence-based",
+            "english": "final English outreach text",
+            "chinese": "Chinese explanation of the English text, not a literal word-by-word translation",
+            "followUps": [
+                {"day": "第1天", "text": "English follow-up"},
+                {"day": "第3天", "text": "English follow-up"},
+                {"day": "第7天", "text": "English follow-up"},
+            ],
+        },
+    }
+    result = deepseek_chat_json(
+        [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+        ],
+        model=get_ai_model("default"),
+    )
+    if not isinstance(result, dict):
+        raise RuntimeError("DeepSeek 未返回有效内容")
+    followups = result.get("followUps") if isinstance(result.get("followUps"), list) else result.get("follow_ups")
+    if not isinstance(followups, list):
+        followups = []
+    normalized_followups = []
+    for item in followups[:3]:
+        if isinstance(item, dict):
+            day = clean_text(str(item.get("day") or ""))[:20]
+            text = clean_text(str(item.get("text") or ""))[:500]
+        else:
+            day = ""
+            text = clean_text(str(item))[:500]
+        if text:
+            normalized_followups.append({"day": day or f"第{len(normalized_followups) + 1}次", "text": text})
+    english = str(result.get("english") or "").strip()
+    insight = clean_text(str(result.get("insight") or ""))[:500]
+    chinese = clean_text(str(result.get("chinese") or ""))[:800]
+    if not english:
+        raise RuntimeError("DeepSeek 未生成英文开发信")
+    return {
+        "ok": True,
+        "provider": "deepseek",
+        "model": get_ai_model("default"),
+        "insight": insight or f"根据公开信息，{company} 适合先按 {profile['english']} 方向做轻量开发。",
+        "english": english[:3000],
+        "chinese": chinese or "已根据客户公开信息、渠道和主推车型生成英文开发信。",
+        "followUps": normalized_followups,
+    }
+
+
 def apply_ai_confidence_threshold(ai_review: dict, minimum_confidence: int) -> dict:
     if not ai_review or ai_review.get("decision") == "reject":
         return ai_review
@@ -14980,6 +15104,19 @@ class Handler(SimpleHTTPRequestHandler):
                 self.send_json(200, {"ok": True, **result})
             except (ValueError, json.JSONDecodeError, OSError, urllib.error.URLError, RuntimeError, sqlite3.Error) as exc:
                 self.send_json(400, {"ok": False, "error": str(exc)})
+            return
+        if parsed.path == "/api/generate-letter":
+            if not self.require_auth(api=True):
+                return
+            try:
+                content_length = min(int(self.headers.get("Content-Length", "0")), 65_536)
+                payload = json.loads(self.rfile.read(content_length).decode("utf-8")) if content_length else {}
+                result = generate_sales_letter(payload)
+                self.send_json(200, result)
+            except (ValueError, json.JSONDecodeError) as exc:
+                self.send_json(400, {"ok": False, "error": str(exc)})
+            except (OSError, RuntimeError, TimeoutError, urllib.error.URLError, http.client.HTTPException) as exc:
+                self.send_json(502, {"ok": False, "error": str(exc)})
             return
         if parsed.path == "/api/workspace-state":
             try:

@@ -5747,6 +5747,61 @@ function generateLetter(data) {
   return { insight, english, chinese, followUps };
 }
 
+function selectedEmailLeadContext() {
+  const index = Number($("#leadSelect")?.value || -1);
+  const lead = customers[index];
+  if (!lead) return {};
+  return {
+    country: lead.country || "",
+    city: lead.city || "",
+    type: lead.type || "",
+    score: lead.score || 0,
+    scoreTier: lead.scoreTier || "",
+    aiReview: lead.aiReview?.reason || "",
+    customerProfile: leadCustomerProfile(lead).summary || "",
+    sourceCoverage: lead.sourceCoverage || {}
+  };
+}
+
+function renderLetterResult(result) {
+  $("#leadInsight").textContent = result.insight || "";
+  $("#englishLetter").textContent = result.english || "";
+  $("#chineseMeaning").textContent = result.chinese || "";
+  $("#followUpSequence").innerHTML = (result.followUps || []).map((item) =>
+    `<p><strong>${escapeHtml(item.day || "")}</strong>${escapeHtml(item.text || "")}</p>`
+  ).join("");
+}
+
+async function generateLetterSmart(data) {
+  const fallback = generateLetter(data);
+  try {
+    const response = await apiFetch("/api/generate-letter", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...data,
+        leadContext: selectedEmailLeadContext()
+      })
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok || !result.ok) throw new Error(result.error || `HTTP ${response.status}`);
+    return {
+      insight: result.insight || fallback.insight,
+      english: result.english || fallback.english,
+      chinese: result.chinese || fallback.chinese,
+      followUps: Array.isArray(result.followUps) && result.followUps.length ? result.followUps : fallback.followUps,
+      provider: result.provider || "deepseek"
+    };
+  } catch (error) {
+    if (error instanceof AuthenticationExpiredError) throw error;
+    return {
+      ...fallback,
+      provider: "fallback",
+      warning: error.message || "DeepSeek 生成失败，已使用本地模板。"
+    };
+  }
+}
+
 function emailDraftFromGeneratedText(text, data = {}) {
   const lines = String(text || "").replace(/\r\n/g, "\n").split("\n");
   const subjectIndex = lines.findIndex((line) => /^subject\s*:/i.test(line.trim()));
@@ -8215,32 +8270,42 @@ function bindForms() {
     status.textContent = `已保存 ${data.company}，请到线索审核执行全网补全。`;
   });
 
-  $("#emailForm").addEventListener("submit", (event) => {
+  $("#emailForm").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
-    const result = generateLetter(data);
-    $("#leadInsight").textContent = result.insight;
-    $("#englishLetter").textContent = result.english;
-    $("#chineseMeaning").textContent = result.chinese;
-    $("#followUpSequence").innerHTML = result.followUps.map((item) =>
-      `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
-    ).join("");
+    const form = event.currentTarget;
+    const button = form.querySelector('button[type="submit"]');
+    const status = $("#outlookDraftStatus");
+    const data = Object.fromEntries(new FormData(form).entries());
+    if (button) {
+      button.disabled = true;
+      button.textContent = "DeepSeek 正在生成...";
+    }
+    if (status) status.textContent = "正在根据客户画像、公开线索和车型规则生成开发信...";
+    try {
+      const result = await generateLetterSmart(data);
+      renderLetterResult(result);
+      if (status) status.textContent = result.warning || (result.provider === "deepseek" ? "DeepSeek 已生成开发信。" : "已使用本地模板生成开发信。");
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.textContent = "自动生成开发信";
+      }
+    }
     openOutlookDraft(data);
   });
 
-  $("#fillLeadFromCrm").addEventListener("click", () => {
+  $("#fillLeadFromCrm").addEventListener("click", async () => {
     const index = Number($("#leadSelect").value || 0);
     if (!customers[index]) return;
     openCustomerInEmail(index);
     const form = $("#emailForm");
-    const result = generateLetter(Object.fromEntries(new FormData(form).entries()));
-    $("#leadInsight").textContent = result.insight;
-    $("#englishLetter").textContent = result.english;
-    $("#chineseMeaning").textContent = result.chinese;
-    $("#followUpSequence").innerHTML = result.followUps.map((item) =>
-      `<p><strong>${escapeHtml(item.day)}</strong>${escapeHtml(item.text)}</p>`
-    ).join("");
-    openOutlookDraft(Object.fromEntries(new FormData(form).entries()));
+    const status = $("#outlookDraftStatus");
+    const data = Object.fromEntries(new FormData(form).entries());
+    if (status) status.textContent = "正在用 DeepSeek 生成客户专属开发信...";
+    const result = await generateLetterSmart(data);
+    renderLetterResult(result);
+    if (status) status.textContent = result.warning || (result.provider === "deepseek" ? "DeepSeek 已生成开发信。" : "已使用本地模板生成开发信。");
+    openOutlookDraft(data);
   });
 
   $("#leadForm").addEventListener("submit", (event) => {
