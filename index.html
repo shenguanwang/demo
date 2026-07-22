@@ -593,6 +593,13 @@
           <h2>线索审核</h2>
           <p>使用统一100分机会模型评估进出口资质、客户匹配、采购意向、经营能力、车型匹配和可触达性；进出口资质占20分，评分只用于排序，不替代人工决定。</p>
         </div>
+        <div class="review-head-actions" aria-label="线索审核导入导出">
+          <button class="ghost compact" id="downloadReviewImportTemplate" type="button">下载导入模板</button>
+          <button class="ghost compact" id="importReviewLeadsButton" type="button">导入线索 CSV</button>
+          <input id="reviewLeadImportFile" type="file" accept=".csv,text/csv" hidden>
+          <button class="ghost compact" id="exportReviewLeads" type="button">导出线索 CSV</button>
+          <span class="review-import-status" id="reviewImportStatus" aria-live="polite"></span>
+        </div>
       </div>
       <div class="scheduled-lead-notice" id="scheduledLeadMorningNotice" hidden aria-live="polite">
         <div>
@@ -642,13 +649,8 @@
         </div>
         <div class="review-bulk-actions">
           <span id="reviewFilterSummary" aria-live="polite">显示 0 条</span>
-          <button class="ghost compact" id="downloadReviewImportTemplate" type="button">下载导入模板</button>
-          <button class="ghost compact" id="importReviewLeadsButton" type="button">导入线索 CSV</button>
-          <input id="reviewLeadImportFile" type="file" accept=".csv,text/csv" hidden>
-          <button class="ghost compact" id="exportReviewLeads" type="button">导出线索 CSV</button>
           <button class="ghost compact" id="selectVisibleReviewLeads" type="button">全选当前结果</button>
           <button class="danger-button compact" id="deleteSelectedReviewLeads" type="button" disabled>删除已选（0）</button>
-          <span class="review-import-status" id="reviewImportStatus" aria-live="polite"></span>
         </div>
         <label class="review-search-box">
           <span>搜索线索</span>

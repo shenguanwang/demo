@@ -1235,6 +1235,22 @@ td {
   margin-bottom: 8px;
 }
 
+.review-head-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+  max-width: 520px;
+  margin-bottom: 8px;
+}
+
+.review-head-actions .review-import-status {
+  min-height: 30px;
+  flex-basis: 100%;
+  justify-content: flex-end;
+}
+
 .section-head h2 {
   margin: 6px 0 8px;
   font-size: clamp(24px, 3vw, 34px);
@@ -6882,6 +6898,16 @@ tbody tr:last-child td {
   .section-head {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .review-head-actions {
+    justify-content: flex-start;
+    max-width: none;
+    margin-bottom: 0;
+  }
+
+  .review-head-actions .review-import-status {
+    justify-content: flex-start;
   }
 
   .review-title-side {
