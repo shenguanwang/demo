@@ -63,11 +63,11 @@ def stable_lead_key(lead: dict, bucket: str, index: int) -> str:
     for field in ("id", "leadId"):
         value = str(lead.get(field) or "").strip()
         if value:
-            return f"{field}:{value}"
+            return f"{bucket}:{index}:{field}:{value}"
     for field in ("sourceUrl", "profileUrl", "customerWebsite", "website"):
         value = server.normalize_public_url(str(lead.get(field) or ""))
         if value:
-            return f"url:{value.lower().rstrip('/')}"
+            return f"{bucket}:{index}:url:{value.lower().rstrip('/')}"
     return "|".join(
         (
             bucket,
