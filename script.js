@@ -4176,20 +4176,27 @@ function renderReviewFilterOptions() {
 
   if (countrySelect) {
     const currentCountry = countrySelect.value || "all";
-    const countryOptions = new Map();
+    const countryLabels = new Map();
     countries.forEach((country) => {
       const value = reviewCountryKey(country.name);
-      if (value) countryOptions.set(value, country.name);
+      if (value) countryLabels.set(value, country.name);
     });
+    const countryOptions = new Map();
     sourceLeads.forEach((lead) => {
       const value = reviewLeadCountryKey(lead);
-      if (value && !countryOptions.has(value)) countryOptions.set(value, lead.country);
+      if (!value) return;
+      const item = countryOptions.get(value) || {
+        label: countryLabels.get(value) || lead.country,
+        count: 0
+      };
+      item.count += 1;
+      countryOptions.set(value, item);
     });
     const countryOptionHtml = [...countryOptions.entries()]
-      .sort((a, b) => String(a[1]).localeCompare(String(b[1]), "zh-CN"))
-      .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+      .sort((a, b) => String(a[1].label).localeCompare(String(b[1].label), "zh-CN"))
+      .map(([value, item]) => `<option value="${escapeHtml(value)}">${escapeHtml(item.label)}（${item.count}条）</option>`)
       .join("");
-    countrySelect.innerHTML = `<option value="all">\u5168\u90e8\u56fd\u5bb6</option>${countryOptionHtml}`;
+    countrySelect.innerHTML = `<option value="all">\u5168\u90e8\u56fd\u5bb6（${sourceLeads.length}条）</option>${countryOptionHtml}`;
     countrySelect.value = currentCountry === "all" || countryOptions.has(currentCountry) ? currentCountry : "all";
   }
 
