@@ -6845,11 +6845,24 @@ function discoveryJobRawCount(job) {
 }
 
 function discoveryJobLinkedLeadCount(jobId) {
+  const counts = discoveryJobLinkedLeadCounts(jobId);
+  return counts.pending + counts.approved + counts.rejected;
+}
+
+function discoveryJobLinkedLeadCounts(jobId) {
   const normalizedJobId = String(jobId || "");
-  if (!normalizedJobId) return 0;
-  return [...reviewLeads, ...customers, ...rejectedLeads]
-    .filter((lead) => String(lead?.discoveryJobId || "") === normalizedJobId)
-    .length;
+  const counts = { pending: 0, approved: 0, rejected: 0 };
+  if (!normalizedJobId) return counts;
+  [
+    ["pending", reviewLeads],
+    ["approved", customers],
+    ["rejected", rejectedLeads]
+  ].forEach(([status, leads]) => {
+    counts[status] = leads.filter(
+      (lead) => String(lead?.discoveryJobId || "") === normalizedJobId
+    ).length;
+  });
+  return counts;
 }
 
 function discoveryJobImportedCount(job) {
@@ -6887,14 +6900,14 @@ function discoveryJobResultText(job) {
   const count = discoveryJobRawCount(job);
   if (job.imported) {
     const importedCount = discoveryJobImportedCount(job);
-    const skippedCount = discoveryJobSkippedCount(job);
-    if (importedCount) {
-      return skippedCount
-        ? `发现 ${count} 条 · 导入 ${importedCount} 条 · 跳过 ${skippedCount} 条`
-        : `已导入 ${importedCount} 条`;
-    }
-    if (count) return `发现 ${count} 条`;
-    return "已导入 0 条";
+    const linked = discoveryJobLinkedLeadCounts(job.id);
+    const linkedTotal = linked.pending + linked.approved + linked.rejected;
+    const removed = Math.max(0, importedCount - linkedTotal);
+    const statusParts = [`待审核 ${linked.pending} 条`];
+    if (linked.approved) statusParts.push(`已通过 ${linked.approved} 条`);
+    if (linked.rejected) statusParts.push(`已拒绝 ${linked.rejected} 条`);
+    if (removed) statusParts.push(`已移出 ${removed} 条`);
+    return statusParts.join(" · ");
   }
   if (job.status === "completed") return count ? `发现 ${count} 条` : "无可导入线索";
   if (job.status === "failed") return "执行失败";
