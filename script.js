@@ -3944,7 +3944,17 @@ function hydrateReviewDetail(details, restoreScrollTop = 0) {
 }
 
 function reviewLeadTimestamp(lead) {
-  const value = lead.createdAt || lead.importedAt || lead.discoveredAt || lead.researchAt || lead.publishedAt || "";
+  const discoveryJob = lead?.discoveryJobId
+    ? discoveryJobs.find((job) => String(job?.id || "") === String(lead.discoveryJobId))
+    : null;
+  const value = lead.discoveryJobImportedAt
+    || discoveryJob?.createdAt
+    || lead.importedAt
+    || lead.createdAt
+    || lead.discoveredAt
+    || lead.researchAt
+    || lead.publishedAt
+    || "";
   const date = value ? new Date(value) : null;
   return date && !Number.isNaN(date.getTime()) ? date : null;
 }
@@ -4263,7 +4273,7 @@ function renderReviewFilterOptions() {
         </optgroup>
       `)
       .join("");
-    discoverySelect.innerHTML = `<option value="all">\u5168\u90e8\u641c\u7d22\u8bb0\u5f55（${options.length}条）</option>${optionGroups}`;
+    discoverySelect.innerHTML = `<option value="all">\u5168\u90e8\u641c\u7d22\u8bb0\u5f55（${options.length}个任务）</option>${optionGroups}`;
     discoverySelect.value = currentDiscovery === "all" || options.some((option) => option.value === currentDiscovery) ? currentDiscovery : "all";
   }
 }
