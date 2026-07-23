@@ -4142,19 +4142,72 @@ function reviewLeadConcreteSourceKeys(lead) {
 }
 
 function discoveryJobFilterOptions(leads) {
-  const options = new Map();
+  const records = new Map();
   leads.forEach((lead) => {
     const id = String(lead.discoveryJobId || "");
     if (!id) return;
-    const job = discoveryJobs.find((item) => String(item.id) === id);
-    options.set(id, lead.discoveryJobLabel || discoveryJobLabel(job) || `搜索记录 ${id.slice(0, 8)}`);
+    const record = records.get(id) || { id, count: 0, lead };
+    record.count += 1;
+    records.set(id, record);
   });
-  discoveryJobs.forEach((job) => {
-    const id = String(job.id || "");
-    if (!id || options.has(id)) return;
-    options.set(id, discoveryJobLabel(job));
+  const today = new Date();
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const yesterdayStart = new Date(todayStart);
+  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+  return [...records.values()].map((record) => {
+    const job = discoveryJobs.find((item) => String(item.id || "") === record.id);
+    const timestampValue = job?.createdAt
+      || job?.updatedAt
+      || record.lead?.discoveryJobImportedAt
+      || reviewLeadTimestamp(record.lead);
+    const timestamp = new Date(timestampValue || "");
+    const hasTimestamp = Number.isFinite(timestamp.getTime());
+    const dateStart = hasTimestamp
+      ? new Date(timestamp.getFullYear(), timestamp.getMonth(), timestamp.getDate())
+      : null;
+    const dateKey = hasTimestamp
+      ? [
+          timestamp.getFullYear(),
+          String(timestamp.getMonth() + 1).padStart(2, "0"),
+          String(timestamp.getDate()).padStart(2, "0")
+        ].join("-")
+      : "unknown";
+    const dateLabel = !dateStart
+      ? "日期未知"
+      : dateStart.getTime() === todayStart.getTime()
+        ? `今天（${String(timestamp.getMonth() + 1).padStart(2, "0")}-${String(timestamp.getDate()).padStart(2, "0")}）`
+        : dateStart.getTime() === yesterdayStart.getTime()
+          ? `昨天（${String(timestamp.getMonth() + 1).padStart(2, "0")}-${String(timestamp.getDate()).padStart(2, "0")}）`
+          : dateKey;
+    const prefix = job?.distributionType === "admin_search_copy"
+      ? "管理员导入 · "
+      : job?.distributionType === "scheduled_sales_delivery"
+        ? "系统定时 · "
+        : "";
+    const country = job?.country || record.lead?.country || "未指定国家";
+    const source = discoverySourceLabel(job?.sourceMode || record.lead?.sourceMode || record.lead?.discoverySource);
+    const timeLabel = hasTimestamp
+      ? timestamp.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })
+      : "--:--";
+    return {
+      value: record.id,
+      dateKey,
+      dateLabel,
+      timestamp: hasTimestamp ? timestamp.getTime() : 0,
+      label: `${timeLabel} · ${prefix}${country} · ${source}（${record.count}条）`
+    };
+  }).sort((a, b) => b.timestamp - a.timestamp);
+}
+
+function discoveryJobFilterOptionGroups(options) {
+  const groups = new Map();
+  options.forEach((option) => {
+    if (!groups.has(option.dateKey)) {
+      groups.set(option.dateKey, { label: option.dateLabel, options: [] });
+    }
+    groups.get(option.dateKey).options.push(option);
   });
-  return [...options.entries()];
+  return [...groups.values()];
 }
 
 function renderReviewFilterOptions() {
@@ -4203,8 +4256,15 @@ function renderReviewFilterOptions() {
   if (discoverySelect) {
     const currentDiscovery = discoverySelect.value || "all";
     const options = discoveryJobFilterOptions(sourceLeads);
-    discoverySelect.innerHTML = `<option value="all">\u5168\u90e8\u641c\u7d22\u8bb0\u5f55</option>${options.map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join("")}`;
-    discoverySelect.value = currentDiscovery === "all" || options.some(([value]) => value === currentDiscovery) ? currentDiscovery : "all";
+    const optionGroups = discoveryJobFilterOptionGroups(options)
+      .map((group) => `
+        <optgroup label="${escapeHtml(group.label)}">
+          ${group.options.map((option) => `<option value="${escapeHtml(option.value)}">${escapeHtml(option.label)}</option>`).join("")}
+        </optgroup>
+      `)
+      .join("");
+    discoverySelect.innerHTML = `<option value="all">\u5168\u90e8\u641c\u7d22\u8bb0\u5f55（${options.length}条）</option>${optionGroups}`;
+    discoverySelect.value = currentDiscovery === "all" || options.some((option) => option.value === currentDiscovery) ? currentDiscovery : "all";
   }
 }
 
