@@ -3281,8 +3281,8 @@ function reviewModeLabel(mode = reviewStatusMode()) {
 function scheduledLeadsImportedToday() {
   const today = new Date();
   return reviewLeads.filter((lead) => {
-    if (!String(lead.discoveryJobLabel || "").includes("系统定时获客")) return false;
-    const importedAt = new Date(lead.discoveryJobImportedAt || "");
+    const importedAt = reviewLeadTimestamp(lead);
+    if (!importedAt) return false;
     return Number.isFinite(importedAt.getTime())
       && importedAt.getFullYear() === today.getFullYear()
       && importedAt.getMonth() === today.getMonth()
