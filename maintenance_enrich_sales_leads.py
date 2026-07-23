@@ -48,7 +48,9 @@ def value_present(lead: dict, field: str) -> bool:
     return bool(str(lead.get(field) or "").strip())
 
 
-def needs_contact_enrichment(lead: dict, scope: str) -> bool:
+def needs_contact_enrichment(lead: dict, scope: str, retry_researched: bool = False) -> bool:
+    if lead.get("researchAt") and not retry_researched:
+        return False
     present = sum(value_present(lead, field) for field in CONTACT_FIELDS)
     if scope == "none":
         return False
@@ -230,7 +232,7 @@ def apply_patch_to_current_lead(username: str, target_key: str, patch: dict) -> 
     return False
 
 
-def collect_targets(contact_scope: str, include_profile: bool) -> list[dict]:
+def collect_targets(contact_scope: str, include_profile: bool, retry_researched: bool = False) -> list[dict]:
     targets = []
     for user in eligible_sales_users():
         username = user["username"]
@@ -239,7 +241,7 @@ def collect_targets(contact_scope: str, include_profile: bool) -> list[dict]:
             for index, lead in enumerate(state.get(bucket) or []):
                 if not isinstance(lead, dict):
                     continue
-                contact_needed = needs_contact_enrichment(lead, contact_scope)
+                contact_needed = needs_contact_enrichment(lead, contact_scope, retry_researched)
                 profile_needed = include_profile and not review_is_complete(lead)
                 if contact_needed or profile_needed:
                     targets.append(
@@ -304,8 +306,15 @@ def scan_summary(targets: list[dict]) -> dict:
     }
 
 
-def run(contact_scope: str, include_profile: bool, limit: int, workers: int, execute: bool) -> dict:
-    targets = collect_targets(contact_scope, include_profile)
+def run(
+    contact_scope: str,
+    include_profile: bool,
+    limit: int,
+    workers: int,
+    execute: bool,
+    retry_researched: bool,
+) -> dict:
+    targets = collect_targets(contact_scope, include_profile, retry_researched)
     if limit > 0:
         targets = targets[:limit]
     summary = scan_summary(targets)
@@ -333,7 +342,7 @@ def run(contact_scope: str, include_profile: bool, limit: int, workers: int, exe
             if result["error"]:
                 totals["failed"] += 1
             print(json.dumps(result, ensure_ascii=False), flush=True)
-    totals["remaining"] = scan_summary(collect_targets(contact_scope, include_profile))
+    totals["remaining"] = scan_summary(collect_targets(contact_scope, include_profile, retry_researched))
     return totals
 
 
@@ -344,6 +353,7 @@ if __name__ == "__main__":
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--workers", type=int, default=3)
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument("--retry-researched", action="store_true")
     args = parser.parse_args()
     print(
         json.dumps(
@@ -353,6 +363,7 @@ if __name__ == "__main__":
                 max(0, args.limit),
                 max(1, args.workers),
                 args.execute,
+                args.retry_researched,
             ),
             ensure_ascii=False,
         ),
